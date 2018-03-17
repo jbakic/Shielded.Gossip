@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Version>5.0.0</Version>
+    <Authors>Josip Bakić</Authors>
+    <Description>A strict, fast and mostly lock-free Software Transactional Memory implementation for the .NET Framework, targetting .NET Standard.</Description>
+    <Copyright>Josip Bakić</Copyright>
+  </PropertyGroup>
+
+</Project>
