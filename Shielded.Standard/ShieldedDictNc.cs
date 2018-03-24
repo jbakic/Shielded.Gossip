@@ -398,6 +398,7 @@ namespace Shielded.Standard
         /// </summary>
         public void Clear()
         {
+            Shield.AssertInTransaction();
             foreach (var key in Keys)
                 Remove(key);
         }
