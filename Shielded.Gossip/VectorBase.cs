@@ -21,6 +21,8 @@ namespace Shielded.Gossip
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
     {
+        public VectorBase() { }
+
         public VectorBase(params VectorItem<T>[] items)
         {
             Items = items;
@@ -61,7 +63,7 @@ namespace Shielded.Gossip
 
         public override string ToString()
         {
-            if (Items == null)
+            if (Items == null || Items.Length == 0)
                 return "{}";
             return "{ " + string.Join(", ", Items.Select(i => i.ServerId + ": " + i.Value)) + " }";
         }
@@ -104,6 +106,11 @@ namespace Shielded.Gossip
 
                 yield return resultSelector(serverId, left.Value, right.Value);
             }
+        }
+
+        public TVec Modify(string ownServerId, T value)
+        {
+            return Modify(ownServerId, _ => value);
         }
 
         public TVec Modify(string ownServerId, Func<T, T> modifier)

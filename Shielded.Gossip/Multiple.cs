@@ -6,27 +6,27 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
-    public class MultiVersion<T> : IMergeable<T, MultiVersion<T>>, IMergeable<MultiVersion<T>, MultiVersion<T>>
+    public class Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>, Multiple<T>>
         where T : IHasVectorClock<T>
     {
         public T[] Versions { get; set; }
 
-        public VectorClock MergedClock => Versions?.Aggregate((VectorClock)null, (acc, n) => acc | n.Clock);
+        public VectorClock MergedClock => Versions?.Aggregate((VectorClock)null, (acc, n) => acc | n.Clock) ?? new VectorClock();
 
-        public MultiVersion<T> MergeWith(MultiVersion<T> other) =>
-            new MultiVersion<T>
+        public Multiple<T> MergeWith(Multiple<T> other) =>
+            new Multiple<T>
             {
                 Versions = Filter(SafeConcat(other?.Versions, Versions))?.ToArray()
             };
 
-        public MultiVersion<T> MergeWith(T other) =>
-            new MultiVersion<T>
+        public Multiple<T> MergeWith(T other) =>
+            new Multiple<T>
             {
                 Versions = Filter(SafeConcat(new[] { other }, Versions)).ToArray()
             };
 
-        public static MultiVersion<T> operator |(MultiVersion<T> left, MultiVersion<T> right) =>
-            left?.MergeWith(right) ?? right ?? new MultiVersion<T>();
+        public static Multiple<T> operator |(Multiple<T> left, Multiple<T> right) =>
+            left?.MergeWith(right) ?? right ?? new Multiple<T>();
 
         private static IEnumerable<T> SafeConcat(IEnumerable<T> first, IEnumerable<T> second)
         {
@@ -65,9 +65,9 @@ namespace Shielded.Gossip
             return res;
         }
 
-        public static implicit operator MultiVersion<T>(T val)
+        public static implicit operator Multiple<T>(T val)
         {
-            return new MultiVersion<T> { Versions = new[] { val } };
+            return new Multiple<T> { Versions = new[] { val } };
         }
     }
 }

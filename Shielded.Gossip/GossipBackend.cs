@@ -14,7 +14,7 @@ namespace Shielded.Gossip
 
         public Task Commit()
         {
-            throw new NotImplementedException();
+            return Task.FromResult<object>(null);
         }
 
         public void Rollback() { }
@@ -31,9 +31,9 @@ namespace Shielded.Gossip
         public void Set<TItem>(string key, TItem item)
         {
             if (_cache.TryGetValue(key, out object oldVal))
-                _cache[key] = ((IMergeable<TItem>)oldVal).MergeWith(item);
+                _cache[key] = ((IMergeable<TItem, object>)oldVal).MergeWith(item);
             else
-                _cache[key] = (IMergeable<TItem>)item;
+                _cache[key] = (IMergeable<TItem, object>)item;
         }
 
         public void Del<TItem>(string key, TItem item)

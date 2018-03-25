@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Linq;
 
 namespace Shielded.Gossip.Tests
@@ -122,6 +123,41 @@ namespace Shielded.Gossip.Tests
             var cLast = (a | b) | c;
 
             Assert.AreEqual(VectorRelationship.Equal, aLast.CompareWith(cLast));
+        }
+
+        [TestMethod]
+        public void VectorClock_EqualityAndHashCode()
+        {
+            var a = new VectorClock(A, 1);
+            var b = new VectorClock(B, 2);
+
+            Assert.AreNotEqual(a, b);
+            Assert.AreNotEqual(a.GetHashCode(), b.GetHashCode());
+
+            var merge = a | b;
+            var manual = new VectorClock(
+                new VectorItem<int>(A, 1),
+                new VectorItem<int>(B, 2));
+
+            Assert.AreEqual(manual, merge);
+            Assert.AreEqual(manual.GetHashCode(), merge.GetHashCode());
+        }
+
+        [TestMethod]
+        public void VectorClock_Modify()
+        {
+            Assert.ThrowsException<ArgumentNullException>(() => new VectorClock(null, 1));
+
+            var a = new VectorClock(A, 1);
+
+            a = a.Modify(B, 2);
+
+            Assert.AreEqual(new VectorClock(A, 1) | new VectorClock(B, 2), a);
+
+            Assert.ThrowsException<ArgumentNullException>(() =>
+                a.Modify(null, 3));
+            Assert.ThrowsException<ArgumentNullException>(() =>
+                a.Modify(" ", 3));
         }
     }
 }

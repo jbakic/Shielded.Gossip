@@ -4,8 +4,4 @@
     {
         TOut MergeWith(TIn other);
     }
-
-    public interface IMergeable<in TIn> : IMergeable<TIn, object>
-    {
-    }
 }
