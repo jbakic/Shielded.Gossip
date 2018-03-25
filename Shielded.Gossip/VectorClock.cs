@@ -16,10 +16,7 @@ namespace Shielded.Gossip
         {
             if (string.IsNullOrWhiteSpace(ownServerId))
                 throw new ArgumentNullException();
-            checked
-            {
-                return Modify(ownServerId, n => n + 1);
-            }
+            return Modify(ownServerId, n => checked(n + 1));
         }
 
         public new VectorRelationship CompareWith(VectorClock other) => base.CompareWith(other);
