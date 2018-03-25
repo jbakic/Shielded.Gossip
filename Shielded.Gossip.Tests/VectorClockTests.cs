@@ -138,6 +138,12 @@ namespace Shielded.Gossip.Tests
 
             Assert.AreEqual(manual, merge);
             Assert.AreEqual(manual.GetHashCode(), merge.GetHashCode());
+
+            var lower = (VectorClock)("name", 1);
+            var upper = (VectorClock)("NAME", 1);
+
+            Assert.AreEqual(lower, upper);
+            Assert.AreEqual(lower.GetHashCode(), upper.GetHashCode());
         }
 
         [TestMethod]

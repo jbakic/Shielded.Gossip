@@ -46,7 +46,8 @@ namespace Shielded.Gossip
         {
             if (Items == null || Items.Length == 0)
                 return 0;
-            var eqComparer = EqualityComparer;
+            var idComparer = StringComparer.OrdinalIgnoreCase;
+            var valueComparer = EqualityComparer;
             unchecked
             {
                 int hash = 17;
@@ -54,8 +55,8 @@ namespace Shielded.Gossip
                 for (int i = 0; i < Items.Length; i++)
                 {
                     var item = Items[i];
-                    hash = hash * 486187739 + item.ServerId.GetHashCode();
-                    hash = hash * 486187739 + eqComparer.GetHashCode(item.Value);
+                    hash = hash * 486187739 + idComparer.GetHashCode(item.ServerId);
+                    hash = hash * 486187739 + valueComparer.GetHashCode(item.Value);
                 }
                 return hash;
             }
