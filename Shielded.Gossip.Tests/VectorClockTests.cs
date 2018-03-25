@@ -146,7 +146,7 @@ namespace Shielded.Gossip.Tests
             Assert.ThrowsException<ArgumentNullException>(() => new VectorClock(null, 1));
             Assert.ThrowsException<ArgumentNullException>(() => (VectorClock)(null, 1));
 
-            var a = new VectorClock(A, 1);
+            var a = (VectorClock)(A, 1);
 
             a = a.Modify(B, 2);
 
@@ -154,6 +154,14 @@ namespace Shielded.Gossip.Tests
 
             Assert.ThrowsException<ArgumentNullException>(() => a.Modify(null, 3));
             Assert.ThrowsException<ArgumentNullException>(() => a.Modify(" ", 3));
+        }
+
+        [TestMethod]
+        public void VectorClock_Overflow()
+        {
+            var a = (VectorClock)(A, int.MaxValue);
+
+            Assert.ThrowsException<OverflowException>(() => a.Next(A));
         }
     }
 }
