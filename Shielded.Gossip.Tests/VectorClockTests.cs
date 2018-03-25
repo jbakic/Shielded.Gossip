@@ -79,7 +79,8 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual(VectorRelationship.Equal,
                 ((VectorClock)null | null).CompareWith(null));
 
-            var a = new VectorClock(A, 3);
+            var a = (VectorClock)(A, 3);
+
             Assert.AreEqual(VectorRelationship.Equal, (new VectorClock() | a).CompareWith(a));
             Assert.AreEqual(VectorRelationship.Equal, (null | a).CompareWith(a));
             Assert.AreEqual(VectorRelationship.Equal, (a | new VectorClock()).CompareWith(a));
@@ -89,8 +90,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void VectorClock_MergeWith_Idempotent()
         {
-            var a = new VectorClock(A, 4);
-            var b = new VectorClock(A, 4);
+            var a = (VectorClock)(A, 4);
+            var b = (VectorClock)(A, 4);
 
             var id = a | b;
 
@@ -101,8 +102,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void VectorClock_MergeWith_Commutative()
         {
-            var a = new VectorClock(A, 4);
-            var b = new VectorClock(B, 6);
+            var a = (VectorClock)(A, 4);
+            var b = (VectorClock)(B, 6);
 
             var ab = a | b;
             var ba = b | a;
@@ -113,11 +114,9 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void VectorClock_MergeWith_Associative()
         {
-            var a = new VectorClock(A, 4);
-            var b = new VectorClock(B, 6);
-            var c = new VectorClock(
-                new VectorItem<int>(A, 2),
-                new VectorItem<int>(C, 3));
+            var a = (VectorClock)(A, 4);
+            var b = (VectorClock)(B, 6);
+            var c = (VectorClock)(A, 2) | (C, 3);
 
             var aLast = a | (b | c);
             var cLast = (a | b) | c;
@@ -128,16 +127,14 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void VectorClock_EqualityAndHashCode()
         {
-            var a = new VectorClock(A, 1);
-            var b = new VectorClock(B, 2);
+            var a = (VectorClock)(A, 1);
+            var b = (VectorClock)(B, 2);
 
             Assert.AreNotEqual(a, b);
             Assert.AreNotEqual(a.GetHashCode(), b.GetHashCode());
 
             var merge = a | b;
-            var manual = new VectorClock(
-                new VectorItem<int>(A, 1),
-                new VectorItem<int>(B, 2));
+            var manual = (VectorClock)(A, 1) | (B, 2);
 
             Assert.AreEqual(manual, merge);
             Assert.AreEqual(manual.GetHashCode(), merge.GetHashCode());
@@ -147,17 +144,16 @@ namespace Shielded.Gossip.Tests
         public void VectorClock_Modify()
         {
             Assert.ThrowsException<ArgumentNullException>(() => new VectorClock(null, 1));
+            Assert.ThrowsException<ArgumentNullException>(() => (VectorClock)(null, 1));
 
             var a = new VectorClock(A, 1);
 
             a = a.Modify(B, 2);
 
-            Assert.AreEqual(new VectorClock(A, 1) | new VectorClock(B, 2), a);
+            Assert.AreEqual((VectorClock)(A, 1) | (B, 2), a);
 
-            Assert.ThrowsException<ArgumentNullException>(() =>
-                a.Modify(null, 3));
-            Assert.ThrowsException<ArgumentNullException>(() =>
-                a.Modify(" ", 3));
+            Assert.ThrowsException<ArgumentNullException>(() => a.Modify(null, 3));
+            Assert.ThrowsException<ArgumentNullException>(() => a.Modify(" ", 3));
         }
     }
 }

@@ -33,7 +33,7 @@ namespace Shielded.Gossip
             if (_cache.TryGetValue(key, out object oldVal))
                 _cache[key] = ((IMergeable<TItem, object>)oldVal).MergeWith(item);
             else
-                _cache[key] = (IMergeable<TItem, object>)item;
+                _cache[key] = ((IMergeable<TItem, object>)item).Wrap();
         }
 
         public void Del<TItem>(string key, TItem item)

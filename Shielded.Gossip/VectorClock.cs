@@ -21,5 +21,7 @@ namespace Shielded.Gossip
         }
 
         public new VectorRelationship CompareWith(VectorClock other) => base.CompareWith(other);
+
+        public static implicit operator VectorClock((string, int) t) => new VectorClock(t.Item1, t.Item2);
     }
 }
