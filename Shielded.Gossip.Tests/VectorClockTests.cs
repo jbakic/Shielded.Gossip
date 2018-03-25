@@ -7,14 +7,14 @@ namespace Shielded.Gossip.Tests
     /// This basically tests <see cref="VectorBase{TVec, T}"/>.
     /// </summary>
     [TestClass]
-    public class VersionVectorTests
+    public class VectorClockTests
     {
         private const string A = "server A";
         private const string B = "server B";
         private const string C = "server C";
 
         [TestMethod]
-        public void VersionVector_Constructor()
+        public void VectorClock_ConstructorAndEquality()
         {
             var items = new []
             {
@@ -22,19 +22,25 @@ namespace Shielded.Gossip.Tests
                 new VectorItem<int>(B, 6),
             };
 
-            var a = new VersionVector(items);
+            var a = new VectorClock(items);
 
             Assert.IsTrue(a.Items.SequenceEqual(items));
+
+            var b = new VectorClock(
+                new VectorItem<int>(A, 4),
+                new VectorItem<int>(B, 6));
+
+            Assert.AreEqual(a, b);
         }
 
         [TestMethod]
-        public void VersionVector_CompareWithAndNext()
+        public void VectorClock_CompareWithAndNext()
         {
-            var a = new VersionVector(A, 4);
+            var a = new VectorClock(A, 4);
 
             Assert.AreEqual(VectorRelationship.Equal, a.CompareWith(a));
 
-            var b = new VersionVector(B, 6);
+            var b = new VectorClock(B, 6);
 
             Assert.AreEqual(VectorRelationship.Conflict, a.CompareWith(b));
             Assert.AreEqual(VectorRelationship.Conflict, b.CompareWith(a));
@@ -64,26 +70,26 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VersionVector_MergeWith_DefaultIsZero()
+        public void VectorClock_MergeWith_DefaultIsZero()
         {
             Assert.AreEqual(VectorRelationship.Equal,
-                (new VersionVector() | new VersionVector()).CompareWith(new VersionVector()));
+                (new VectorClock() | new VectorClock()).CompareWith(new VectorClock()));
 
             Assert.AreEqual(VectorRelationship.Equal,
-                ((VersionVector)null | null).CompareWith(null));
+                ((VectorClock)null | null).CompareWith(null));
 
-            var a = new VersionVector(A, 3);
-            Assert.AreEqual(VectorRelationship.Equal, (new VersionVector() | a).CompareWith(a));
+            var a = new VectorClock(A, 3);
+            Assert.AreEqual(VectorRelationship.Equal, (new VectorClock() | a).CompareWith(a));
             Assert.AreEqual(VectorRelationship.Equal, (null | a).CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Equal, (a | new VersionVector()).CompareWith(a));
+            Assert.AreEqual(VectorRelationship.Equal, (a | new VectorClock()).CompareWith(a));
             Assert.AreEqual(VectorRelationship.Equal, (a | null).CompareWith(a));
         }
 
         [TestMethod]
-        public void VersionVector_MergeWith_Idempotent()
+        public void VectorClock_MergeWith_Idempotent()
         {
-            var a = new VersionVector(A, 4);
-            var b = new VersionVector(A, 4);
+            var a = new VectorClock(A, 4);
+            var b = new VectorClock(A, 4);
 
             var id = a | b;
 
@@ -92,10 +98,10 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VersionVector_MergeWith_Commutative()
+        public void VectorClock_MergeWith_Commutative()
         {
-            var a = new VersionVector(A, 4);
-            var b = new VersionVector(B, 6);
+            var a = new VectorClock(A, 4);
+            var b = new VectorClock(B, 6);
 
             var ab = a | b;
             var ba = b | a;
@@ -104,11 +110,11 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VersionVector_MergeWith_Associative()
+        public void VectorClock_MergeWith_Associative()
         {
-            var a = new VersionVector(A, 4);
-            var b = new VersionVector(B, 6);
-            var c = new VersionVector(
+            var a = new VectorClock(A, 4);
+            var b = new VectorClock(B, 6);
+            var c = new VectorClock(
                 new VectorItem<int>(A, 2),
                 new VectorItem<int>(C, 3));
 

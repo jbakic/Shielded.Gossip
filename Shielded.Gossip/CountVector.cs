@@ -20,7 +20,6 @@ namespace Shielded.Gossip
         }
 
         public CountVector() : base() { }
-        public CountVector(params VectorItem<Item>[] items) : base(items) { }
         public CountVector(string ownServerId, long init) : base(ownServerId, new Item { Increments = init }) { }
 
         protected override Item Merge(Item left, Item right) =>
@@ -39,7 +38,7 @@ namespace Shielded.Gossip
         public CountVector Increment(string ownServerId, int by = 1)
         {
             if (by < 0)
-                throw new ArgumentOutOfRangeException("Argument must be non-negative.");
+                throw new ArgumentOutOfRangeException();
             if (by == 0)
                 return this;
             return Modify(ownServerId, i => new Item(i.Increments + by, i.Decrements));
@@ -48,7 +47,7 @@ namespace Shielded.Gossip
         public CountVector Decrement(string ownServerId, int by = 1)
         {
             if (by < 0)
-                throw new ArgumentOutOfRangeException("Argument must be non-negative.");
+                throw new ArgumentOutOfRangeException();
             if (by == 0)
                 return this;
             return Modify(ownServerId, i => new Item(i.Increments, i.Decrements + by));

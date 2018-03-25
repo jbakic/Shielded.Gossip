@@ -11,12 +11,14 @@ namespace Shielded.Gossip
 
         public VectorItem(string serverId, T value)
         {
+            if (string.IsNullOrWhiteSpace(serverId))
+                throw new ArgumentNullException(nameof(serverId));
             ServerId = serverId;
             Value = value;
         }
     }
 
-    public abstract class VectorBase<TVec, T> : IEquatable<TVec>
+    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
     {
         public VectorBase(params VectorItem<T>[] items)
@@ -46,6 +48,7 @@ namespace Shielded.Gossip
             unchecked
             {
                 int hash = 17;
+                hash = hash * 486187739 + typeof(TVec).GetHashCode();
                 for (int i = 0; i < Items.Length; i++)
                 {
                     var item = Items[i];
@@ -54,6 +57,13 @@ namespace Shielded.Gossip
                 }
                 return hash;
             }
+        }
+
+        public override string ToString()
+        {
+            if (Items == null)
+                return "{}";
+            return "{ " + string.Join(", ", Items.Select(i => i.ServerId + ": " + i.Value)) + " }";
         }
 
         protected virtual IComparer<T> Comparer => Comparer<T>.Default;
@@ -110,11 +120,11 @@ namespace Shielded.Gossip
             foreach (var item in (Items ?? Enumerable.Empty<VectorItem<T>>()))
             {
                 if (string.IsNullOrWhiteSpace(item.ServerId))
-                    throw new InvalidOperationException("VersionVector server IDs may not be empty.");
+                    throw new InvalidOperationException("Vector server IDs may not be empty.");
                 if (item.ServerId.Equals(ownServerId, StringComparison.OrdinalIgnoreCase))
                 {
                     if (foundIt)
-                        throw new InvalidOperationException("VersionVector may not mention the same server multiple times.");
+                        throw new InvalidOperationException("Vector may not mention the same server multiple times.");
                     foundIt = true;
                     yield return new VectorItem<T>(ownServerId, modifier(item.Value));
                 }

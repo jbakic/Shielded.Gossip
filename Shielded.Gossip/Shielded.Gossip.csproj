@@ -4,7 +4,16 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
   <ItemGroup>
+    <ProjectReference Include="..\Shielded.Cluster\Shielded.Cluster.csproj" />
     <ProjectReference Include="..\Shielded.Standard\Shielded.Standard.csproj" />
   </ItemGroup>
 
