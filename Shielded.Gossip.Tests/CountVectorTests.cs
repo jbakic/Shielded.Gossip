@@ -24,8 +24,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void CountVector_MergeWithAndOps()
         {
-            var a = new CountVector(A, 10);
-            var b = new CountVector(B, 20);
+            var a = (CountVector)(A, 10);
+            var b = (CountVector)(B, 20);
 
             var res = a | b;
 

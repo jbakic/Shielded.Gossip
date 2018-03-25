@@ -22,6 +22,8 @@ namespace Shielded.Gossip
         public CountVector() : base() { }
         public CountVector(string ownServerId, long init) : base(ownServerId, new Item { Increments = init }) { }
 
+        public static implicit operator CountVector((string, long) t) => new CountVector(t.Item1, t.Item2);
+
         protected override Item Merge(Item left, Item right) =>
             new Item
             {
