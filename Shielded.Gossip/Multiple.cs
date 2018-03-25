@@ -5,6 +5,7 @@ using System.Linq;
 
 namespace Shielded.Gossip
 {
+    [Serializable]
     public class Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>, Multiple<T>>, IEnumerable<T>
         where T : IHasVectorClock<T>
     {

@@ -3,13 +3,15 @@ using Shielded.Cluster;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text;
 
 namespace Shielded.Gossip.Tests
 {
     [TestClass]
-    public class GossipBackendTests
+    public class GossipBackendOneNodeTests
     {
+        [Serializable]
         public class TestClass : IHasVectorClock<TestClass>
         {
             public int Id { get; set; }
@@ -25,16 +27,32 @@ namespace Shielded.Gossip.Tests
         private const string A = "A";
         private const string B = "B";
 
+        private GossipProtocol _protocol;
+        private Node _node;
+
+        [TestInitialize]
+        public void Init()
+        {
+            _protocol = new GossipProtocol("Node", new Dictionary<string, IPEndPoint>(), new IPEndPoint(IPAddress.Loopback, 2001));
+            _node = new Node("Node", new GossipBackend(_protocol));
+        }
+
+        [TestCleanup]
+        public void Cleanup()
+        {
+            _protocol.Dispose();
+            _protocol = null;
+            _node = null;
+        }
+
         [TestMethod]
         public void GossipBackend_Basics()
         {
-            var backend = new GossipBackend();
-            var node = new Node("Node", backend);
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            node.Run(() => node.Set("key", testEntity)).Wait();
+            _node.Run(() => _node.Set("key", testEntity)).Wait();
 
-            var read = node.Run(() => node.TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> res) ? res : null)
                 .Result.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);
@@ -45,16 +63,14 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackend_Merge()
         {
-            var backend = new GossipBackend();
-            var node = new Node("Node", backend);
             var testEntity1 = new TestClass { Id = 1, Name = "One", Clock = (A, 2) };
-            node.Run(() => node.Set("key", testEntity1)).Wait();
+            _node.Run(() => _node.Set("key", testEntity1)).Wait();
 
             {
                 var testEntity2Fail = new TestClass { Id = 2, Name = "Two", Clock = (A, 1) };
-                node.Run(() => node.Set("key", testEntity2Fail)).Wait();
+                _node.Run(() => _node.Set("key", testEntity2Fail)).Wait();
 
-                var read = node.Run(() => node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 Assert.AreEqual(testEntity1.Id, read.Id);
@@ -63,10 +79,10 @@ namespace Shielded.Gossip.Tests
             }
 
             var testEntity2Succeed = new TestClass { Id = 2, Name = "Two", Clock = (VectorClock)(A, 2) | (B, 1) };
-            node.Run(() => node.Set("key", testEntity2Succeed)).Wait();
+            _node.Run(() => _node.Set("key", testEntity2Succeed)).Wait();
 
             {
-                var read = node.Run(() => node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 Assert.AreEqual(testEntity2Succeed.Id, read.Id);
@@ -78,9 +94,9 @@ namespace Shielded.Gossip.Tests
 
             {
                 var testEntity3Conflict = new TestClass { Id = 3, Name = "Three", Clock = (A, 3) };
-                node.Run(() => node.Set("key", testEntity3Conflict)).Wait();
+                _node.Run(() => _node.Set("key", testEntity3Conflict)).Wait();
 
-                var read = node.Run(() => node.TryGet("key", out Multiple<TestClass> t) ? t : null).Result;
+                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null).Result;
                 mergedClock = read.MergedClock;
 
                 var read2 = read.Single(t => t.Id == 2);
@@ -98,9 +114,9 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity4Resolve = new TestClass { Id = 4, Name = "Four", Clock = mergedClock.Next(B) };
                 Assert.AreEqual((VectorClock)(A, 3) | (B, 2), testEntity4Resolve.Clock);
-                node.Run(() => node.Set("key", testEntity4Resolve)).Wait();
+                _node.Run(() => _node.Set("key", testEntity4Resolve)).Wait();
 
-                var read = node.Run(() => node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 Assert.AreEqual(testEntity4Resolve.Id, read.Id);
@@ -112,20 +128,18 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackend_SetMultiple()
         {
-            var backend = new GossipBackend();
-            var node = new Node("Node", backend);
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
             var toSet = (Multiple<TestClass>)
                 new TestClass { Id = 2, Name = "Two", Clock = (A, 2) } |
                 new TestClass { Id = 3, Name = "Three", Clock = (VectorClock)(A, 1) | (B, 1) };
 
-            node.Run(() =>
+            _node.Run(() =>
             {
-                node.Set("key", testEntity);
-                node.Set("key", toSet);
+                _node.Set("key", testEntity);
+                _node.Set("key", toSet);
             }).Wait();
 
-            var read = node.Run(() => node.TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> res) ? res : null)
                 .Result;
 
             var read2 = read.Single(t => t.Id == 2);

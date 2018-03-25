@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using Shielded.Standard;
+using System.Threading.Tasks;
 
 namespace Shielded.Cluster
 {
@@ -7,7 +8,7 @@ namespace Shielded.Cluster
         bool TryGet<TItem>(string key, out TItem item);
         void Set<TItem>(string key, TItem item);
         void Del<TItem>(string key, TItem item);
-        Task Commit();
+        Task Commit(CommitContinuation cont);
         void Rollback();
     }
 }

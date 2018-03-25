@@ -11,7 +11,7 @@ namespace Shielded.Cluster.Tests
     {
         private int _commitCounter;
 
-        public Task Commit()
+        public Task Commit(CommitContinuation cont)
         {
             TaskCompletionSource<object> tcs = new TaskCompletionSource<object>();
             ThreadPool.QueueUserWorkItem(_ =>

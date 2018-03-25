@@ -46,7 +46,7 @@ namespace Shielded.Cluster
                 using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
                 {
                     _current = null;
-                    await Commit();
+                    await Commit(cont);
                     cont.Commit();
                 }
             }
@@ -88,9 +88,9 @@ namespace Shielded.Cluster
             Backend.Del(key, item);
         }
 
-        private Task Commit()
+        private Task Commit(CommitContinuation cont)
         {
-            return Backend.Commit();
+            return Backend.Commit(cont);
         }
 
         private void Rollback()

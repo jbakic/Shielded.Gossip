@@ -5,6 +5,7 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
+    [Serializable]
     public class CountVector : VectorBase<CountVector, CountVector.Item>
     {
         public struct Item

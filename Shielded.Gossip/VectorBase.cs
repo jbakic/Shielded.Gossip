@@ -4,6 +4,7 @@ using System.Linq;
 
 namespace Shielded.Gossip
 {
+    [Serializable]
     public struct VectorItem<T>
     {
         public string ServerId { get; set; }
@@ -18,6 +19,7 @@ namespace Shielded.Gossip
         }
     }
 
+    [Serializable]
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
     {
