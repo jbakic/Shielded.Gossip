@@ -67,8 +67,9 @@ namespace Shielded.Gossip
         public override string ToString()
         {
             if (Items == null || Items.Length == 0)
-                return "{}";
-            return "{ " + string.Join(", ", Items.Select(i => i.ServerId + ": " + i.Value)) + " }";
+                return "";
+            return string.Join(" | ", Items.Select(i =>
+                string.Format("({0}, {1})", i.ServerId, i.Value)));
         }
 
         protected virtual IComparer<T> Comparer => Comparer<T>.Default;
