@@ -44,9 +44,8 @@ namespace Shielded.Gossip.Tests
         {
             var tuples = _addresses.Select(kvp =>
             {
-                var proto = new GossipProtocol(kvp.Key,
-                    new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase),
-                    kvp.Value);
+                var proto = new GossipProtocol(kvp.Key, kvp.Value,
+                    new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase));
                 return (proto, node: new Node(kvp.Key, new GossipBackend(proto)));
             }).ToArray();
 
@@ -63,17 +62,21 @@ namespace Shielded.Gossip.Tests
             _nodes = null;
         }
 
+        private void CheckProtocols()
+        {
+            foreach (var proto in _protocols)
+                Assert.IsNull(proto.ListenerException);
+        }
+
         [TestMethod]
         public void GossipBackendMultiple_Basics()
         {
-            var testEntity = new TestClass { Id = 1, Name = "One" };
+            var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 
             _nodes[0].Run(() => _nodes[0].Set("key", testEntity)).Wait();
 
             Thread.Sleep(100);
-
-            foreach (var proto in _protocols)
-                Assert.IsNull(proto.ListenerException);
+            CheckProtocols();
 
             var read = _nodes[1].Run(() => _nodes[1].TryGet("key", out Multiple<TestClass> res) ? res : null)
                 .Result.Single();

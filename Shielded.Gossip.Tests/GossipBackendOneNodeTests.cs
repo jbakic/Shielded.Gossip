@@ -33,7 +33,7 @@ namespace Shielded.Gossip.Tests
         [TestInitialize]
         public void Init()
         {
-            _protocol = new GossipProtocol("Node", new Dictionary<string, IPEndPoint>(), new IPEndPoint(IPAddress.Loopback, 2001));
+            _protocol = new GossipProtocol("Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>());
             _node = new Node("Node", new GossipBackend(_protocol));
         }
 
@@ -85,6 +85,19 @@ namespace Shielded.Gossip.Tests
                 var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
+                Assert.AreEqual(testEntity2Succeed.Id, read.Id);
+                Assert.AreEqual(testEntity2Succeed.Name, read.Name);
+                Assert.AreEqual(testEntity2Succeed.Clock, read.Clock);
+            }
+
+            {
+                var testEntity2SameClock = new TestClass { Id = 1002, Name = "Another Two", Clock = testEntity2Succeed.Clock };
+                _node.Run(() => _node.Set("key", testEntity2SameClock)).Wait();
+
+                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                    .Result.Single();
+
+                // we keep the first entity we see...
                 Assert.AreEqual(testEntity2Succeed.Id, read.Id);
                 Assert.AreEqual(testEntity2Succeed.Name, read.Name);
                 Assert.AreEqual(testEntity2Succeed.Clock, read.Clock);

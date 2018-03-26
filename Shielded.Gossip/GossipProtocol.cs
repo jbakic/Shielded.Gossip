@@ -10,37 +10,34 @@ namespace Shielded.Gossip
 {
     public class GossipProtocol : IDisposable
     {
-        private readonly UdpClient _listener;
-
-        public GossipProtocol(string ownId, IDictionary<string, IPEndPoint> servers, IPEndPoint localEndpoint)
+        public GossipProtocol(string ownId, IPEndPoint localEndpoint, IDictionary<string, IPEndPoint> servers)
         {
             OwnId = ownId;
             Servers = servers;
-            _listener = new UdpClient(localEndpoint);
+            LocalEndpoint = localEndpoint;
+
             StartListening();
         }
 
         public readonly string OwnId;
+        public readonly IPEndPoint LocalEndpoint;
         public readonly IDictionary<string, IPEndPoint> Servers;
 
         private volatile bool _disposed;
 
         public void Dispose()
         {
-            if (!_disposed)
-            {
-                _listener.Dispose();
-                _disposed = true;
-            }
+            _disposed = true;
         }
 
         private async void StartListening()
         {
+            using (var listener = new UdpClient(LocalEndpoint))
             try
             {
                 while (!_disposed)
                 {
-                    var res = await _listener.ReceiveAsync();
+                    var res = await listener.ReceiveAsync();
                     MessageReceived?.Invoke(this, Serializer.Deserialize<Message>(res.Buffer));
                 }
             }
