@@ -8,12 +8,9 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class MultipleTests
     {
-        public class TestClass : IHasVectorClock<TestClass>
+        public class TestClass : IHasVectorClock
         {
             public VectorClock Clock { get; set; }
-
-            public Multiple<TestClass> Wrap() => (Multiple<TestClass>)this;
-            public Multiple<TestClass> MergeWith(TestClass other) => this.DefaultMerge(other);
         }
 
         private const string A = "A";
@@ -49,7 +46,7 @@ namespace Shielded.Gossip.Tests
         {
             var nullCast = (Multiple<TestClass>)null;
 
-            Assert.IsNull(nullCast);
+            Assert.IsNull(nullCast.Versions);
 
             var empty = new Multiple<TestClass>();
 

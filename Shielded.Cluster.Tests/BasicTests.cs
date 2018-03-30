@@ -8,30 +8,27 @@ namespace Shielded.Cluster.Tests
     [TestClass]
     public class BasicTests
     {
-        private (Node[], MockStrongBackend) CreateCluster(int n)
+        private MockStrongBackend[] CreateCluster(int n)
         {
-            var backend = new MockStrongBackend();
-            return (
-                Enumerable.Repeat(0, n)
-                    .Select(i => new Node(i.ToString(), backend))
-                    .ToArray(),
-                backend);
+            return Enumerable.Repeat(0, n)
+                .Select(i => new MockStrongBackend())
+                .ToArray();
         }
 
         [TestMethod]
         public void TwoNodes_BasicSync()
         {
-            var (nodes, backend) = CreateCluster(2);
+            var backends = CreateCluster(2);
 
-            nodes[0].Run(() =>
+            Distributed.Run(() =>
             {
-                nodes[0].Set("key1", "one");
+                backends[0].Set("key1", "one");
             }).Wait();
 
-            var read = nodes[1].Run(() => nodes[1].TryGet("key1", out string val) ? val : null).Result;
+            var read = Distributed.Run(() => backends[1].TryGet("key1", out string val) ? val : null).Result;
 
             Assert.AreEqual("one", read);
-            Assert.IsTrue(backend.ConfirmCommits(2));
+            Assert.IsTrue(MockStrongBackend.ConfirmCommits(1));
         }
     }
 }

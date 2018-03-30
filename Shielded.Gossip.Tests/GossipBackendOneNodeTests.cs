@@ -12,37 +12,30 @@ namespace Shielded.Gossip.Tests
     public class GossipBackendOneNodeTests
     {
         [Serializable]
-        public class TestClass : IHasVectorClock<TestClass>
+        public class TestClass : IHasVectorClock
         {
             public int Id { get; set; }
-
             public string Name { get; set; }
-
             public VectorClock Clock { get; set; }
-
-            public Multiple<TestClass> Wrap() => (Multiple<TestClass>)this;
-            public Multiple<TestClass> MergeWith(TestClass other) => this.DefaultMerge(other);
         }
 
         private const string A = "A";
         private const string B = "B";
 
-        private GossipProtocol _protocol;
-        private Node _node;
+        private GossipBackend _backend;
 
         [TestInitialize]
         public void Init()
         {
-            _protocol = new GossipProtocol("Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>());
-            _node = new Node("Node", new GossipBackend(_protocol));
+            _backend = new GossipBackend(new GossipProtocol(
+                "Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>()));
         }
 
         [TestCleanup]
         public void Cleanup()
         {
-            _protocol.Dispose();
-            _protocol = null;
-            _node = null;
+            _backend.Protocol.Dispose();
+            _backend = null;
         }
 
         [TestMethod]
@@ -50,9 +43,9 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            _node.Run(() => _node.Set("key", testEntity)).Wait();
+            Distributed.Run(() => _backend.SetVersion("key", testEntity)).Wait();
 
-            var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> res) ? res : null)
                 .Result.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);
@@ -64,13 +57,13 @@ namespace Shielded.Gossip.Tests
         public void GossipBackend_Merge()
         {
             var testEntity1 = new TestClass { Id = 1, Name = "One", Clock = (A, 2) };
-            _node.Run(() => _node.Set("key", testEntity1)).Wait();
+            Distributed.Run(() => _backend.SetVersion("key", testEntity1)).Wait();
 
             {
                 var testEntity2Fail = new TestClass { Id = 2, Name = "Two", Clock = (A, 1) };
-                _node.Run(() => _node.Set("key", testEntity2Fail)).Wait();
+                Distributed.Run(() => _backend.SetVersion("key", testEntity2Fail)).Wait();
 
-                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 Assert.AreEqual(testEntity1.Id, read.Id);
@@ -79,10 +72,10 @@ namespace Shielded.Gossip.Tests
             }
 
             var testEntity2Succeed = new TestClass { Id = 2, Name = "Two", Clock = (VectorClock)(A, 2) | (B, 1) };
-            _node.Run(() => _node.Set("key", testEntity2Succeed)).Wait();
+            Distributed.Run(() => _backend.SetVersion("key", testEntity2Succeed)).Wait();
 
             {
-                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 Assert.AreEqual(testEntity2Succeed.Id, read.Id);
@@ -92,9 +85,9 @@ namespace Shielded.Gossip.Tests
 
             {
                 var testEntity2SameClock = new TestClass { Id = 1002, Name = "Another Two", Clock = testEntity2Succeed.Clock };
-                _node.Run(() => _node.Set("key", testEntity2SameClock)).Wait();
+                Distributed.Run(() => _backend.SetVersion("key", testEntity2SameClock)).Wait();
 
-                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 // we keep the first entity we see...
@@ -107,9 +100,9 @@ namespace Shielded.Gossip.Tests
 
             {
                 var testEntity3Conflict = new TestClass { Id = 3, Name = "Three", Clock = (A, 3) };
-                _node.Run(() => _node.Set("key", testEntity3Conflict)).Wait();
+                Distributed.Run(() => _backend.SetVersion("key", testEntity3Conflict)).Wait();
 
-                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null).Result;
+                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null).Result;
                 mergedClock = read.MergedClock;
 
                 var read2 = read.Single(t => t.Id == 2);
@@ -127,9 +120,9 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity4Resolve = new TestClass { Id = 4, Name = "Four", Clock = mergedClock.Next(B) };
                 Assert.AreEqual((VectorClock)(A, 3) | (B, 2), testEntity4Resolve.Clock);
-                _node.Run(() => _node.Set("key", testEntity4Resolve)).Wait();
+                Distributed.Run(() => _backend.SetVersion("key", testEntity4Resolve)).Wait();
 
-                var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
                     .Result.Single();
 
                 Assert.AreEqual(testEntity4Resolve.Id, read.Id);
@@ -146,13 +139,13 @@ namespace Shielded.Gossip.Tests
                 new TestClass { Id = 2, Name = "Two", Clock = (A, 2) } |
                 new TestClass { Id = 3, Name = "Three", Clock = (VectorClock)(A, 1) | (B, 1) };
 
-            _node.Run(() =>
+            Distributed.Run(() =>
             {
-                _node.Set("key", testEntity);
-                _node.Set("key", toSet);
+                _backend.SetVersion("key", testEntity);
+                _backend.Set("key", toSet);
             }).Wait();
 
-            var read = _node.Run(() => _node.TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> res) ? res : null)
                 .Result;
 
             var read2 = read.Single(t => t.Id == 2);

@@ -9,7 +9,7 @@ namespace Shielded.Cluster.Tests
 {
     class MockStrongBackend : IBackend
     {
-        private int _commitCounter;
+        private static int _commitCounter;
 
         public Task Commit(CommitContinuation cont)
         {
@@ -23,7 +23,7 @@ namespace Shielded.Cluster.Tests
             return tcs.Task;
         }
 
-        public bool ConfirmCommits(int expected = 1)
+        public static bool ConfirmCommits(int expected = 1)
         {
             return Interlocked.Exchange(ref _commitCounter, 0) == expected;
         }
@@ -41,15 +41,10 @@ namespace Shielded.Cluster.Tests
 
         public void Set<TItem>(string key, TItem item)
         {
-            Node.AssertInTransaction();
+            Distributed.EnlistBackend(this);
             _dict[key] = item;
         }
 
         public void Rollback() { }
-
-        public void Del<TItem>(string key, TItem item)
-        {
-            throw new NotImplementedException();
-        }
     }
 }

@@ -146,8 +146,6 @@ namespace Shielded.Gossip
                 yield return new VectorItem<T>(ownServerId, modifier(default(T)));
         }
 
-        TVec IMergeable<TVec, TVec>.Wrap() => (TVec)this;
-
         protected abstract T Merge(T left, T right);
 
         public TVec MergeWith(TVec other)

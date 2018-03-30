@@ -23,24 +23,30 @@ namespace Shielded.Gossip
         public readonly IPEndPoint LocalEndpoint;
         public readonly IDictionary<string, IPEndPoint> Servers;
 
-        private volatile bool _disposed;
+        private UdpClient _listener;
 
         public void Dispose()
         {
-            _disposed = true;
+            var listener = _listener;
+            if (listener != null)
+            {
+                listener.Dispose();
+                _listener = null;
+            }
         }
 
         private async void StartListening()
         {
-            using (var listener = new UdpClient(LocalEndpoint))
+            _listener = new UdpClient(LocalEndpoint);
             try
             {
-                while (!_disposed)
+                while (true)
                 {
-                    var res = await listener.ReceiveAsync();
+                    var res = await _listener.ReceiveAsync();
                     MessageReceived?.Invoke(this, Serializer.Deserialize<Message>(res.Buffer));
                 }
             }
+            catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
                 ListenerException = ex;

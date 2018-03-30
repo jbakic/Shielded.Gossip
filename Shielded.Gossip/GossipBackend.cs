@@ -13,28 +13,28 @@ namespace Shielded.Gossip
     public class GossipBackend : IBackend
     {
         private readonly ShieldedDict<string, object> _local = new ShieldedDict<string, object>();
-        private readonly GossipProtocol _protocol;
+
+        public readonly GossipProtocol Protocol;
 
         public GossipBackend(GossipProtocol protocol)
         {
-            _protocol = protocol;
-            _protocol.MessageReceived += _protocol_MessageReceived;
+            Protocol = protocol;
+            Protocol.MessageReceived += _protocol_MessageReceived;
         }
 
-        private readonly Lazy<MethodInfo> _itemMsgMethod = new Lazy<MethodInfo>(
-            () => typeof(GossipBackend).GetMethod("HandleItemMsg", BindingFlags.Instance | BindingFlags.NonPublic),
-            LazyThreadSafetyMode.PublicationOnly);
+        private static readonly MethodInfo _itemMsgMethod = typeof(GossipBackend)
+            .GetMethod("HandleItemMsg", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private void _protocol_MessageReceived(object sender, Message msg)
         {
             switch (msg)
             {
                 case TransactionMessage trans:
-                    Shield.InTransaction(() =>
+                    Distributed.RunLocal(() =>
                     {
                         foreach (var item in trans.Items)
                         {
-                            _itemMsgMethod.Value.MakeGenericMethod(Type.GetType(item.TypeName))
+                            _itemMsgMethod.MakeGenericMethod(Type.GetType(item.TypeName))
                                 .Invoke(this, new object[] { item });
                         }
                     });
@@ -42,7 +42,7 @@ namespace Shielded.Gossip
             }
         }
 
-        private void HandleItemMsg<TItem>(MessageItem item)
+        private void HandleItemMsg<TItem>(MessageItem item) where TItem : IMergeable<TItem, TItem>
         {
             var value = Serializer.Deserialize<TItem>(item.Data);
             Set(item.Key, value);
@@ -67,12 +67,12 @@ namespace Shielded.Gossip
             if (!changes.Any())
                 return Task.FromResult<object>(null);
 
-            return _protocol.Broadcast(new TransactionMessage { Items = changes });
+            return Protocol.Broadcast(new TransactionMessage { Items = changes });
         }
 
         public void Rollback() { }
 
-        public bool TryGet<TItem>(string key, out TItem item)
+        public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
             item = default;
             if (!_local.TryGetValue(key, out object obj))
@@ -81,16 +81,22 @@ namespace Shielded.Gossip
             return true;
         }
 
-        public void Set<TItem>(string key, TItem item)
+        public void Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
         {
+            Distributed.EnlistBackend(this);
             if (_local.TryGetValue(key, out object oldVal))
-                _local[key] = ((IMergeable<TItem, object>)oldVal).MergeWith(item);
+                _local[key] = ((TItem)oldVal).MergeWith(item);
             else
-                _local[key] = ((IMergeable<TItem, object>)item).Wrap();
+                _local[key] = item;
         }
 
-        public void Del<TItem>(string key, TItem item)
+        public void SetVersion<TItem>(string key, TItem item) where TItem : IHasVectorClock
         {
+            Distributed.EnlistBackend(this);
+            if (_local.TryGetValue(key, out object oldVal))
+                _local[key] = ((Multiple<TItem>)oldVal).MergeWith(item);
+            else
+                _local[key] = (Multiple<TItem>)item;
         }
     }
 }
