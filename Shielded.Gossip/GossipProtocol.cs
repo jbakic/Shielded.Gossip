@@ -10,12 +10,14 @@ namespace Shielded.Gossip
 {
     public class GossipProtocol : IDisposable
     {
-        public GossipProtocol(string ownId, IPEndPoint localEndpoint, IDictionary<string, IPEndPoint> servers)
+        public GossipProtocol(string ownId, IPEndPoint localEndpoint, Action<Exception> onReceiveError, IDictionary<string, IPEndPoint> servers)
         {
             OwnId = ownId;
             Servers = servers;
             LocalEndpoint = localEndpoint;
+            _onReceiveError = onReceiveError;
 
+            _listener = new UdpClient(LocalEndpoint);
             StartListening();
         }
 
@@ -23,37 +25,33 @@ namespace Shielded.Gossip
         public readonly IPEndPoint LocalEndpoint;
         public readonly IDictionary<string, IPEndPoint> Servers;
 
-        private UdpClient _listener;
+        private readonly UdpClient _listener;
+        private readonly Action<Exception> _onReceiveError;
 
         public void Dispose()
         {
-            var listener = _listener;
-            if (listener != null)
-            {
-                listener.Dispose();
-                _listener = null;
-            }
+            _listener.Dispose();
         }
 
         private async void StartListening()
         {
-            _listener = new UdpClient(LocalEndpoint);
-            try
+            while (true)
             {
-                while (true)
+                try
                 {
                     var res = await _listener.ReceiveAsync();
                     MessageReceived?.Invoke(this, Serializer.Deserialize<Message>(res.Buffer));
                 }
-            }
-            catch (ObjectDisposedException) { }
-            catch (Exception ex)
-            {
-                ListenerException = ex;
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _onReceiveError?.Invoke(ex);
+                }
             }
         }
-
-        public Exception ListenerException { get; private set; }
 
         public event EventHandler<Message> MessageReceived;
 

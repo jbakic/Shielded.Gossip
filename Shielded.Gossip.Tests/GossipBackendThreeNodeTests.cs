@@ -1,6 +1,7 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Shielded.Cluster;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -37,7 +38,7 @@ namespace Shielded.Gossip.Tests
         public void Init()
         {
             _backends = _addresses.Select(kvp =>
-                new GossipBackend(new GossipProtocol(kvp.Key, kvp.Value,
+                new GossipBackend(new GossipProtocol(kvp.Key, kvp.Value, OnListenerError,
                     new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase))))
                 .ToArray();
         }
@@ -48,12 +49,19 @@ namespace Shielded.Gossip.Tests
             foreach (var back in _backends)
                 back.Protocol.Dispose();
             _backends = null;
+            _listenerExceptions.Clear();
+        }
+
+        private ConcurrentQueue<Exception> _listenerExceptions = new ConcurrentQueue<Exception>();
+
+        private void OnListenerError(Exception ex)
+        {
+            _listenerExceptions.Enqueue(ex);
         }
 
         private void CheckProtocols()
         {
-            foreach (var back in _backends)
-                Assert.IsNull(back.Protocol.ListenerException);
+            Assert.IsTrue(_listenerExceptions.IsEmpty);
         }
 
         [TestMethod]

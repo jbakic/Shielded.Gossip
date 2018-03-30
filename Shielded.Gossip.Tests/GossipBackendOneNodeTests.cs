@@ -28,7 +28,7 @@ namespace Shielded.Gossip.Tests
         public void Init()
         {
             _backend = new GossipBackend(new GossipProtocol(
-                "Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>()));
+                "Node", new IPEndPoint(IPAddress.Loopback, 2001), null, new Dictionary<string, IPEndPoint>()));
         }
 
         [TestCleanup]
