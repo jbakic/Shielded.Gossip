@@ -264,7 +264,6 @@ namespace Shielded.Gossip
         private ulong GetHash<TItem>(string key, TItem i) where TItem : IMergeable<TItem, TItem>
         {
             return FNV1a64.Hash(
-                BitConverter.GetBytes(key.Length),
                 Encoding.UTF8.GetBytes(key),
                 BitConverter.GetBytes(i.GetVersionHash()));
         }

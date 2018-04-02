@@ -39,16 +39,15 @@ namespace Shielded.Gossip.Tests
         {
             _backends = _addresses.Select(kvp =>
             {
-                var back = new GossipBackend(
-                    new TcpTransport(kvp.Key, kvp.Value,
-                        new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase)),
-                    new GossipConfiguration
-                    {
-                        GossipInterval = 250,
-                    });
-                back.Transport.Error += OnListenerError;
-                back.Transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
-                return back;
+                var transport = new TcpTransport(kvp.Key, kvp.Value,
+                    new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase));
+                transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
+                transport.Error += OnListenerError;
+
+                return new GossipBackend(transport, new GossipConfiguration
+                {
+                    GossipInterval = 250,
+                });
             }).ToDictionary(b => b.Transport.OwnId, StringComparer.OrdinalIgnoreCase);
         }
 
@@ -68,11 +67,11 @@ namespace Shielded.Gossip.Tests
             _listenerExceptions.Enqueue(ex);
         }
 
-        private ConcurrentQueue<(DateTime, string, object)> _messages = new ConcurrentQueue<(DateTime, string, object)>();
+        private ConcurrentQueue<(string, string, object)> _messages = new ConcurrentQueue<(string, string, object)>();
 
         private void OnMessage(string server, object msg)
         {
-            _messages.Enqueue((DateTime.Now, server, msg));
+            _messages.Enqueue((DateTime.Now.ToString("hh:mm:ss.fff"), server, msg));
         }
 
         private void CheckProtocols()
