@@ -47,6 +47,7 @@ namespace Shielded.Gossip.Tests
                         GossipInterval = 250,
                     });
                 back.Transport.Error += OnListenerError;
+                back.Transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
                 return back;
             }).ToDictionary(b => b.Transport.OwnId, StringComparer.OrdinalIgnoreCase);
         }
@@ -65,6 +66,13 @@ namespace Shielded.Gossip.Tests
         private void OnListenerError(object sender, Exception ex)
         {
             _listenerExceptions.Enqueue(ex);
+        }
+
+        private ConcurrentQueue<(DateTime, string, object)> _messages = new ConcurrentQueue<(DateTime, string, object)>();
+
+        private void OnMessage(string server, object msg)
+        {
+            _messages.Enqueue((DateTime.Now, server, msg));
         }
 
         private void CheckProtocols()

@@ -762,6 +762,17 @@ namespace Shielded.Standard
                         .ToList());
             }
         }
+
+        /// <summary>
+        /// Returns true if tree is empty. More efficient than any enumerator if not.
+        /// </summary>
+        public bool IsEmpty
+        {
+            get
+            {
+                return _head.Value == null;
+            }
+        }
     }
 }
 
