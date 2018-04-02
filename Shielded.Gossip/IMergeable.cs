@@ -4,6 +4,6 @@
     {
         TOut MergeWith(TIn other);
         VectorRelationship VectorCompare(TIn other);
-        //ulong VersionHash { get; }
+        VersionHash GetVersionHash();
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace Shielded.Gossip
 {
@@ -22,6 +23,7 @@ namespace Shielded.Gossip
     [Serializable]
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
+        where T : IEquatable<T>
     {
         public VectorBase() { }
 
@@ -46,21 +48,26 @@ namespace Shielded.Gossip
 
         public override int GetHashCode()
         {
-            if (Items == null || Items.Length == 0)
-                return 0;
+            var hash = GetVersionHash();
+            return unchecked((int)((hash >> 32) ^ hash));
+        }
+
+        private IEnumerable<byte[]> YieldFields()
+        {
             var idComparer = StringComparer.OrdinalIgnoreCase;
             var valueComparer = EqualityComparer;
-            unchecked
+            foreach (var item in Items.OrderBy(vi => vi.ServerId, idComparer))
             {
-                int hash = 17;
-                hash = hash * 486187739 + typeof(TVec).GetHashCode();
-                foreach (var item in Items.OrderBy(vi => vi.ServerId, idComparer))
-                {
-                    hash = hash * 486187739 + idComparer.GetHashCode(item.ServerId);
-                    hash = hash * 486187739 + valueComparer.GetHashCode(item.Value);
-                }
-                return hash;
+                yield return Encoding.UTF8.GetBytes(item.ServerId.ToLowerInvariant());
+                yield return BitConverter.GetBytes(valueComparer.GetHashCode(item.Value));
             }
+        }
+
+        public VersionHash GetVersionHash()
+        {
+            if (Items == null || Items.Length == 0)
+                return 0;
+            return FNV1a64.Hash(YieldFields());
         }
 
         public override string ToString()

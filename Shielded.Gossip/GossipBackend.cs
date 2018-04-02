@@ -56,14 +56,6 @@ namespace Shielded.Gossip
 
             [IgnoreDataMember, NonSerialized]
             public long Freshness;
-
-            public ulong GetHash()
-            {
-                // TODO: this should not depend on Data, i.e. the serializer output...
-                return FNV1a64.Hash(
-                    Encoding.UTF8.GetBytes(Key),
-                    Data);
-            }
         }
 
         private readonly ShieldedDictNc<string, Item> _local = new ShieldedDictNc<string, Item>();
@@ -269,6 +261,14 @@ namespace Shielded.Gossip
             return SetInternal(key, item);
         }
 
+        private ulong GetHash<TItem>(string key, TItem i) where TItem : IMergeable<TItem, TItem>
+        {
+            return FNV1a64.Hash(
+                BitConverter.GetBytes(key.Length),
+                Encoding.UTF8.GetBytes(key),
+                BitConverter.GetBytes(i.GetVersionHash()));
+        }
+
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem, TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
@@ -280,16 +280,16 @@ namespace Shielded.Gossip
                 if (cmp == VectorRelationship.Greater || cmp == VectorRelationship.Equal)
                     return cmp;
 
-                var newItem = _local[key] = new Item { Key = key, Data = Serializer.Serialize(oldVal.MergeWith(val)) };
-                var hash = oldItem.GetHash() ^ newItem.GetHash();
+                _local[key] = new Item { Key = key, Data = Serializer.Serialize(oldVal.MergeWith(val)) };
+                var hash = GetHash(key, oldVal) ^ GetHash(key, val);
                 if (hash != 0UL)
                     _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return cmp;
             }
             else
             {
-                var newItem = _local[key] = new Item { Key = key, Data = Serializer.Serialize(val) };
-                var hash = newItem.GetHash();
+                _local[key] = new Item { Key = key, Data = Serializer.Serialize(val) };
+                var hash = GetHash(key, val);
                 if (hash != 0UL)
                     _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return VectorRelationship.Less;

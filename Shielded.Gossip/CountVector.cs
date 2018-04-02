@@ -26,13 +26,8 @@ namespace Shielded.Gossip
 
             public override int GetHashCode()
             {
-                unchecked
-                {
-                    int hash = 17;
-                    hash = hash * 486187739 + Increments.GetHashCode();
-                    hash = hash * 486187739 + Decrements.GetHashCode();
-                    return hash;
-                }
+                var hash = FNV1a64.Hash(BitConverter.GetBytes(Increments), BitConverter.GetBytes(Decrements));
+                return unchecked((int)((hash >> 32) ^ hash));
             }
 
             public override string ToString()

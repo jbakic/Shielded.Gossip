@@ -1,8 +1,24 @@
-﻿namespace Shielded.Gossip
+﻿using System.Collections.Generic;
+using System.Linq;
+
+namespace Shielded.Gossip
 {
+    public struct VersionHash
+    {
+        public ulong Value;
+
+        public static implicit operator ulong(VersionHash v) => v.Value;
+        public static implicit operator VersionHash(ulong v) => new VersionHash { Value = v };
+    }
+
     public static class FNV1a64
     {
-        public static ulong Hash(params byte[][] fields)
+        public static VersionHash Hash(IEnumerable<byte[]> fields)
+        {
+            return Hash(fields.ToArray());
+        }
+
+        public static VersionHash Hash(params byte[][] fields)
         {
             unchecked
             {

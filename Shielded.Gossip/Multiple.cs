@@ -32,6 +32,8 @@ namespace Shielded.Gossip
 
         public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Clock);
 
+        public VersionHash GetVersionHash() => MergedClock.GetVersionHash();
+
         public static Multiple<T> operator |(Multiple<T> left, Multiple<T> right) => left.MergeWith(right);
 
         private static IEnumerable<T> SafeConcat(IEnumerable<T> first, IEnumerable<T> second)
