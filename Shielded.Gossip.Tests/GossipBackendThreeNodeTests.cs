@@ -40,13 +40,13 @@ namespace Shielded.Gossip.Tests
             _backends = _addresses.Select(kvp =>
             {
                 var back = new GossipBackend(
-                    new UdpTransport(kvp.Key, kvp.Value,
+                    new TcpTransport(kvp.Key, kvp.Value,
                         new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase)),
                     new GossipConfiguration
                     {
                         GossipInterval = 250,
                     });
-                back.Transport.ListenerError += OnListenerError;
+                back.Transport.Error += OnListenerError;
                 return back;
             }).ToDictionary(b => b.Transport.OwnId, StringComparer.OrdinalIgnoreCase);
         }
@@ -93,8 +93,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_SeriallyConnected()
         {
-            ((UdpTransport)_backends[A].Transport).ServerIPs.Remove(C);
-            ((UdpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            ((TcpTransport)_backends[A].Transport).ServerIPs.Remove(C);
+            ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
 
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 

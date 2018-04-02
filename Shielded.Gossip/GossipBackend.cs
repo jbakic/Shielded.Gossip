@@ -105,20 +105,24 @@ namespace Shielded.Gossip
 
         private void SpreadRumors()
         {
-            Shield.InTransaction(() =>
+            try
             {
-                var servers = Transport.Servers;
-                if (!servers.Any())
-                    return;
-                var server = servers.Skip(new Random().Next(servers.Count)).First();
+                Shield.InTransaction(() =>
+                {
+                    var servers = Transport.Servers;
+                    if (servers == null || !servers.Any())
+                        return;
+                    var server = servers.Skip(new Random().Next(servers.Count)).First();
 
-                Shield.SideEffect(() => Transport.Send(server,
-                    new GossipStart
-                    {
-                        From = Transport.OwnId,
-                        DatabaseHash = _databaseHash
-                    }));
-            });
+                    Shield.SideEffect(() => Transport.Send(server,
+                        new GossipStart
+                        {
+                            From = Transport.OwnId,
+                            DatabaseHash = _databaseHash
+                        }));
+                });
+            }
+            catch { } // TODO
         }
 
         private void Transport_MessageReceived(object sender, object msg)
@@ -239,11 +243,10 @@ namespace Shielded.Gossip
         public Task Commit(CommitContinuation cont)
         {
             var transaction = new Transaction();
-            cont.InContext(() =>
-                transaction.Items = _local.Changes.Select(key => _local[key]).ToArray());
-            if (!transaction.Items.Any())
-                return Task.FromResult<object>(null);
-            return Transport.Broadcast(transaction);
+            cont.InContext(() => transaction.Items = _local.Changes.Select(key => _local[key]).ToArray());
+            if (transaction.Items.Any())
+                Transport.Broadcast(transaction);
+            return Task.FromResult<object>(null);
         }
 
         public void Rollback() { }

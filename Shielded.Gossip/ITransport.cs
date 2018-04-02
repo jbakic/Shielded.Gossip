@@ -9,9 +9,9 @@ namespace Shielded.Gossip
     {
         string OwnId { get; }
         ICollection<string> Servers { get; }
-        Task Broadcast(object msg);
-        Task Send(string server, object msg);
+        void Broadcast(object msg);
+        void Send(string server, object msg);
         event EventHandler<object> MessageReceived;
-        event EventHandler<Exception> ListenerError;
+        event EventHandler<Exception> Error;
     }
 }
