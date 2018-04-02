@@ -229,6 +229,17 @@ namespace Shielded.Standard.Tests
             Assert.AreEqual(0, failCommitCount.Value);
             Assert.AreEqual(0, failVisibleCount);
         }
+
+        [Test]
+        public void PreCommitFirstCommute()
+        {
+            var a = new Shielded<int>();
+            var b = new Shielded<int>();
+            using (Shield.PreCommit(() => a == 0 || true, () => b.Commute((ref int n) => n++)))
+                Shield.InTransaction(() => a.Value = 1);
+            Assert.AreEqual(1, a.Value);
+            Assert.AreEqual(1, b.Value);
+        }
     }
 }
 

@@ -22,11 +22,15 @@ namespace Shielded.Gossip
                 Versions = Filter(SafeConcat(other.Versions, Versions))?.ToArray()
             };
 
+        public VectorRelationship VectorCompare(Multiple<T> other) => MergedClock.VectorCompare(other.MergedClock);
+
         public Multiple<T> MergeWith(T other) =>
             new Multiple<T>
             {
                 Versions = Filter(other == null ? Versions : SafeConcat(new[] { other }, Versions)).ToArray()
             };
+
+        public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Clock);
 
         public static Multiple<T> operator |(Multiple<T> left, Multiple<T> right) => left.MergeWith(right);
 
@@ -52,7 +56,7 @@ namespace Shielded.Gossip
                 {
                     if (skipCurrent)
                         return false;
-                    var comp = r.Clock.CompareWith(v.Clock);
+                    var comp = r.Clock.VectorCompare(v.Clock);
                     if (comp == VectorRelationship.Greater)
                     {
                         skipCurrent = true;

@@ -524,6 +524,20 @@ namespace Shielded.Standard
         }
 
         /// <summary>
+        /// Executes the delegate in a context where every read returns the value as
+        /// it was at transaction opening. Writes still work, even though their
+        /// effects cannot be seen in this context. And please note that
+        /// <see cref="Shielded&lt;T&gt;.Modify"/> will not be affected and will expose
+        /// the last written value.
+        /// </summary>
+        public static T ReadOldState<T>(Func<T> act)
+        {
+            T retVal = default(T);
+            Shield.ReadOldState(() => { retVal = act(); });
+            return retVal;
+        }
+
+        /// <summary>
         /// Runs the action, and returns a set of IShieldeds that the action enlisted.
         /// It will make sure to restore original enlisted items, merged with the ones
         /// that the action enlisted, before returning. This is important to make sure
@@ -634,6 +648,8 @@ namespace Shielded.Standard
                             items.Commutes.SelectMany(c => c.Affecting)) :
                         items.Enlisted.Where(HasChanges))
                     .Run();
+                // in case a new commute sub was made
+                brokeInCommutes = items.Commutes != null && items.Commutes.Count > 0;
             }
 
             try

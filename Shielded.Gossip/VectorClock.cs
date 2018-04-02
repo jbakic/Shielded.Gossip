@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace Shielded.Gossip
 {
@@ -19,7 +20,5 @@ namespace Shielded.Gossip
                 throw new ArgumentNullException();
             return Modify(ownServerId, n => checked(n + 1));
         }
-
-        public new VectorRelationship CompareWith(VectorClock other) => base.CompareWith(other);
     }
 }

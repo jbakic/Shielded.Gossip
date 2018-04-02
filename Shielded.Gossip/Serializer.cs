@@ -2,27 +2,40 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization.Formatters.Binary;
+using System.Runtime.Serialization.Json;
 using System.Text;
 
 namespace Shielded.Gossip
 {
     public static class Serializer
     {
-        public static byte[] Serialize(object obj)
+        public static byte[] Serialize(object msg)
         {
-            var ser = new BinaryFormatter();
+            var type = msg.GetType();
+            var ser = new DataContractJsonSerializer(type);
+            var typeName = TypeId.Get(type);
+            var nameBytes = Encoding.UTF8.GetBytes(typeName);
+            var lengthBytes = BitConverter.GetBytes(nameBytes.Length);
             using (var ms = new MemoryStream())
             {
-                ser.Serialize(ms, obj);
+                ms.Write(lengthBytes, 0, lengthBytes.Length);
+                ms.Write(nameBytes, 0, nameBytes.Length);
+                ser.WriteObject(ms, msg);
                 return ms.ToArray();
             }
         }
 
-        public static T Deserialize<T>(byte[] bytes)
+        public static object Deserialize(byte[] bytes)
         {
-            var ser = new BinaryFormatter();
-            using (var ms = new MemoryStream(bytes))
-                return (T)ser.Deserialize(ms);
+            var nameLength = BitConverter.ToInt32(bytes, 0);
+            var name = Encoding.UTF8.GetString(bytes, 4, nameLength);
+            var type = Type.GetType(name);
+            if (type == null)
+                throw new ApplicationException("Unable to read message type: " + name);
+            var spent = 4 + nameLength;
+            var ser = new DataContractJsonSerializer(type);
+            using (var ms = new MemoryStream(bytes, spent, bytes.Length - spent))
+                return ser.ReadObject(ms);
         }
     }
 }

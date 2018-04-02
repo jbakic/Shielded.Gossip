@@ -54,9 +54,8 @@ namespace Shielded.Gossip
             {
                 int hash = 17;
                 hash = hash * 486187739 + typeof(TVec).GetHashCode();
-                for (int i = 0; i < Items.Length; i++)
+                foreach (var item in Items.OrderBy(vi => vi.ServerId, idComparer))
                 {
-                    var item = Items[i];
                     hash = hash * 486187739 + idComparer.GetHashCode(item.ServerId);
                     hash = hash * 486187739 + valueComparer.GetHashCode(item.Value);
                 }
@@ -72,19 +71,17 @@ namespace Shielded.Gossip
                 string.Format("({0}, {1})", i.ServerId, i.Value)));
         }
 
-        protected virtual IComparer<T> Comparer => Comparer<T>.Default;
-
-        protected VectorRelationship CompareWith(TVec other)
+        protected virtual VectorRelationship Compare(T left, T right)
         {
-            var comparer = Comparer;
-            return Join(other, (left, right) =>
-            {
-                var cmp = comparer.Compare(left, right);
-                return
-                    cmp == 0 ? VectorRelationship.Equal :
-                    cmp > 0 ? VectorRelationship.Greater :
-                    VectorRelationship.Less;
-            }).Aggregate(VectorRelationship.Equal, (a, b) => a | b);
+            var cmp = Comparer<T>.Default.Compare(left, right);
+            return
+                cmp == 0 ? VectorRelationship.Equal :
+                cmp > 0 ? VectorRelationship.Greater : VectorRelationship.Less;
+        }
+
+        public VectorRelationship VectorCompare(TVec other)
+        {
+            return Join(other, Compare).Aggregate(VectorRelationship.Equal, (a, b) => a | b);
         }
 
         public IEnumerable<TRes> Join<TRes>(TVec rightVec, Func<T, T, TRes> resultSelector)

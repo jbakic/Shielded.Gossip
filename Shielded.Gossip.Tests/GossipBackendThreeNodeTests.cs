@@ -32,29 +32,37 @@ namespace Shielded.Gossip.Tests
             { C, new IPEndPoint(IPAddress.Loopback, 2003) },
         };
 
-        private GossipBackend[] _backends;
+        private IDictionary<string, GossipBackend> _backends;
 
         [TestInitialize]
         public void Init()
         {
             _backends = _addresses.Select(kvp =>
-                new GossipBackend(new GossipProtocol(kvp.Key, kvp.Value, OnListenerError,
-                    new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase))))
-                .ToArray();
+            {
+                var back = new GossipBackend(
+                    new UdpTransport(kvp.Key, kvp.Value,
+                        new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase)),
+                    new GossipConfiguration
+                    {
+                        GossipInterval = 250,
+                    });
+                back.Transport.ListenerError += OnListenerError;
+                return back;
+            }).ToDictionary(b => b.Transport.OwnId, StringComparer.OrdinalIgnoreCase);
         }
 
         [TestCleanup]
         public void Cleanup()
         {
-            foreach (var back in _backends)
-                back.Protocol.Dispose();
+            foreach (var back in _backends.Values)
+                back.Dispose();
             _backends = null;
             _listenerExceptions.Clear();
         }
 
         private ConcurrentQueue<Exception> _listenerExceptions = new ConcurrentQueue<Exception>();
 
-        private void OnListenerError(Exception ex)
+        private void OnListenerError(object sender, Exception ex)
         {
             _listenerExceptions.Enqueue(ex);
         }
@@ -69,12 +77,33 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 
-            Distributed.Run(() => _backends[0].SetVersion("key", testEntity)).Wait();
+            Distributed.Run(() => _backends[A].SetVersion("key", testEntity)).Wait();
 
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Distributed.Run(() => _backends[1].TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Run(() => _backends[B].TryGet("key", out Multiple<TestClass> res) ? res : null)
+                .Result.Single();
+
+            Assert.AreEqual(testEntity.Id, read.Id);
+            Assert.AreEqual(testEntity.Name, read.Name);
+            Assert.AreEqual(testEntity.Clock, read.Clock);
+        }
+
+        [TestMethod]
+        public void GossipBackendMultiple_SeriallyConnected()
+        {
+            ((UdpTransport)_backends[A].Transport).ServerIPs.Remove(C);
+            ((UdpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+
+            var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
+
+            Distributed.Run(() => _backends[A].SetVersion("key", testEntity)).Wait();
+
+            Thread.Sleep(500);
+            CheckProtocols();
+
+            var read = Distributed.Run(() => _backends[C].TryGet("key", out Multiple<TestClass> res) ? res : null)
                 .Result.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);

@@ -35,56 +35,56 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_CompareWithAndNext()
+        public void VectorClock_VectorCompareAndNext()
         {
             var a = new VectorClock(A, 4);
 
-            Assert.AreEqual(VectorRelationship.Equal, a.CompareWith(a));
+            Assert.AreEqual(VectorRelationship.Equal, a.VectorCompare(a));
 
             var b = new VectorClock(B, 6);
 
-            Assert.AreEqual(VectorRelationship.Conflict, a.CompareWith(b));
-            Assert.AreEqual(VectorRelationship.Conflict, b.CompareWith(a));
+            Assert.AreEqual(VectorRelationship.Conflict, a.VectorCompare(b));
+            Assert.AreEqual(VectorRelationship.Conflict, b.VectorCompare(a));
 
             var cNext = a.Next(C);
 
-            Assert.AreEqual(VectorRelationship.Equal, cNext.CompareWith(cNext));
-            Assert.AreEqual(VectorRelationship.Greater, cNext.CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Conflict, cNext.CompareWith(b));
+            Assert.AreEqual(VectorRelationship.Equal, cNext.VectorCompare(cNext));
+            Assert.AreEqual(VectorRelationship.Greater, cNext.VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Conflict, cNext.VectorCompare(b));
 
             var aNext = (cNext | a).Next(A);
             var bNext = (cNext | b).Next(B);
 
-            Assert.AreEqual(VectorRelationship.Greater, aNext.CompareWith(cNext));
-            Assert.AreEqual(VectorRelationship.Greater, aNext.CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Conflict, aNext.CompareWith(b));
-            Assert.AreEqual(VectorRelationship.Less, cNext.CompareWith(aNext));
-            Assert.AreEqual(VectorRelationship.Less, a.CompareWith(aNext));
-            Assert.AreEqual(VectorRelationship.Conflict, b.CompareWith(aNext));
+            Assert.AreEqual(VectorRelationship.Greater, aNext.VectorCompare(cNext));
+            Assert.AreEqual(VectorRelationship.Greater, aNext.VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Conflict, aNext.VectorCompare(b));
+            Assert.AreEqual(VectorRelationship.Less, cNext.VectorCompare(aNext));
+            Assert.AreEqual(VectorRelationship.Less, a.VectorCompare(aNext));
+            Assert.AreEqual(VectorRelationship.Conflict, b.VectorCompare(aNext));
 
-            Assert.AreEqual(VectorRelationship.Greater, bNext.CompareWith(cNext));
-            Assert.AreEqual(VectorRelationship.Greater, bNext.CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Greater, bNext.CompareWith(b));
-            Assert.AreEqual(VectorRelationship.Less, cNext.CompareWith(bNext));
-            Assert.AreEqual(VectorRelationship.Less, a.CompareWith(bNext));
-            Assert.AreEqual(VectorRelationship.Less, b.CompareWith(bNext));
+            Assert.AreEqual(VectorRelationship.Greater, bNext.VectorCompare(cNext));
+            Assert.AreEqual(VectorRelationship.Greater, bNext.VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Greater, bNext.VectorCompare(b));
+            Assert.AreEqual(VectorRelationship.Less, cNext.VectorCompare(bNext));
+            Assert.AreEqual(VectorRelationship.Less, a.VectorCompare(bNext));
+            Assert.AreEqual(VectorRelationship.Less, b.VectorCompare(bNext));
         }
 
         [TestMethod]
         public void VectorClock_MergeWith_DefaultIsZero()
         {
             Assert.AreEqual(VectorRelationship.Equal,
-                (new VectorClock() | new VectorClock()).CompareWith(new VectorClock()));
+                (new VectorClock() | new VectorClock()).VectorCompare(new VectorClock()));
 
             Assert.AreEqual(VectorRelationship.Equal,
-                ((VectorClock)null | null).CompareWith(null));
+                ((VectorClock)null | null).VectorCompare(null));
 
             var a = (VectorClock)(A, 3);
 
-            Assert.AreEqual(VectorRelationship.Equal, (new VectorClock() | a).CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Equal, (null | a).CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Equal, (a | new VectorClock()).CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Equal, (a | null).CompareWith(a));
+            Assert.AreEqual(VectorRelationship.Equal, (new VectorClock() | a).VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Equal, (null | a).VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Equal, (a | new VectorClock()).VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Equal, (a | null).VectorCompare(a));
         }
 
         [TestMethod]
@@ -95,8 +95,8 @@ namespace Shielded.Gossip.Tests
 
             var id = a | b;
 
-            Assert.AreEqual(VectorRelationship.Equal, id.CompareWith(a));
-            Assert.AreEqual(VectorRelationship.Equal, id.CompareWith(b));
+            Assert.AreEqual(VectorRelationship.Equal, id.VectorCompare(a));
+            Assert.AreEqual(VectorRelationship.Equal, id.VectorCompare(b));
         }
 
         [TestMethod]
@@ -108,7 +108,7 @@ namespace Shielded.Gossip.Tests
             var ab = a | b;
             var ba = b | a;
 
-            Assert.AreEqual(VectorRelationship.Equal, ab.CompareWith(ba));
+            Assert.AreEqual(VectorRelationship.Equal, ab.VectorCompare(ba));
         }
 
         [TestMethod]
@@ -121,7 +121,7 @@ namespace Shielded.Gossip.Tests
             var aLast = a | (b | c);
             var cLast = (a | b) | c;
 
-            Assert.AreEqual(VectorRelationship.Equal, aLast.CompareWith(cLast));
+            Assert.AreEqual(VectorRelationship.Equal, aLast.VectorCompare(cLast));
         }
 
         [TestMethod]
