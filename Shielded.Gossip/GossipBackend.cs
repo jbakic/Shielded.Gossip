@@ -41,12 +41,12 @@ namespace Shielded.Gossip
             public long? LastWindowEnd;
         }
 
-        [Serializable]
-        public class GossipEnd
-        {
-            public string From;
-            public bool Success;
-        }
+        //[Serializable]
+        //public class GossipEnd
+        //{
+        //    public string From;
+        //    public bool Success;
+        //}
 
         [Serializable]
         public class Item
@@ -141,8 +141,8 @@ namespace Shielded.Gossip
                     });
                     break;
 
-                case GossipEnd end:
-                    break;
+                //case GossipEnd end:
+                //    break;
             }
         }
 
@@ -166,27 +166,19 @@ namespace Shielded.Gossip
         {
             var ownHash = _databaseHash.Value;
             if (ownHash == hisHash)
-            {
-                Shield.SideEffect(() =>
-                    Transport.Send(server, new GossipEnd { From = Transport.OwnId, Success = true }));
                 return;
-            }
 
             var toSend = YieldReplyItems(ourLastStart, ourLastEnd).ToArray();
             if (toSend.Length == 0)
-            {
-                Shield.SideEffect(() =>
-                    Transport.Send(server, new GossipEnd { From = Transport.OwnId, Success = false }));
                 return;
-            }
 
             var windowStart = toSend[toSend.Length - 1].Freshness;
             if (ourLastStart != null && ourLastStart < windowStart)
                 windowStart = ourLastStart.Value;
 
-            var windowEnd = toSend[0].Freshness;
-            if (ourLastEnd != null && ourLastEnd > windowEnd)
-                windowEnd = ourLastEnd.Value;
+            var windowEnd = _freshIndex.Descending.First().Key;
+            if (_local.Changes.Any())
+                windowEnd++;
 
             Shield.SideEffect(() => Transport.Send(server,
                 new GossipReply
