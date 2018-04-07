@@ -1,17 +1,14 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Shielded.Cluster;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Text;
 
 namespace Shielded.Gossip.Tests
 {
     [TestClass]
     public class GossipBackendOneNodeTests
     {
-        [Serializable]
         public class TestClass : IHasVectorClock
         {
             public int Id { get; set; }

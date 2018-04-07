@@ -1,9 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
-    [Serializable]
+    [DataContract(Namespace = "")]
     public class VectorClock : VectorBase<VectorClock, int>
     {
         public VectorClock() : base() { }

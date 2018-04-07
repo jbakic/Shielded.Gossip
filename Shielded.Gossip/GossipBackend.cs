@@ -2,11 +2,8 @@
 using Shielded.Standard;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Serialization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,66 +12,6 @@ namespace Shielded.Gossip
 {
     public class GossipBackend : IBackend, IDisposable
     {
-        [Serializable]
-        public class Transaction
-        {
-            public Item[] Items;
-        }
-
-        [Serializable]
-        public class GossipStart
-        {
-            public string From;
-            public ulong DatabaseHash;
-            public DateTimeOffset Time = DateTimeOffset.UtcNow;
-        }
-
-        [Serializable]
-        public class GossipReply
-        {
-            public string From;
-            public ulong DatabaseHash;
-            public Item[] Items;
-            public long WindowStart;
-            public long WindowEnd;
-            public DateTimeOffset Time = DateTimeOffset.UtcNow;
-
-            public long? LastWindowStart;
-            public long? LastWindowEnd;
-            public DateTimeOffset LastTime;
-        }
-
-        [Serializable]
-        public class GossipEnd
-        {
-            public string From;
-            public bool Success;
-        }
-
-        [Serializable]
-        public class Item
-        {
-            public string Key;
-            public byte[] Data;
-
-            [IgnoreDataMember, NonSerialized]
-            public long Freshness;
-
-            [IgnoreDataMember]
-            public object Deserialized
-            {
-                get
-                {
-                    return Serializer.Deserialize(Data);
-                }
-            }
-
-            public override string ToString()
-            {
-                return string.Format("{0}{1}: {2}", Key, Freshness != 0 ? " at " + Freshness : "", Deserialized);
-            }
-        }
-
         private readonly ShieldedDictNc<string, Item> _local = new ShieldedDictNc<string, Item>();
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
         private readonly Shielded<ulong> _databaseHash = new Shielded<ulong>();

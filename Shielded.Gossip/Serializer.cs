@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Runtime.Serialization.Json;
+using System.Runtime.Serialization;
 using System.Text;
 
 namespace Shielded.Gossip
@@ -12,7 +10,7 @@ namespace Shielded.Gossip
         public static byte[] Serialize(object msg)
         {
             var type = msg.GetType();
-            var ser = new DataContractJsonSerializer(type);
+            var ser = new DataContractSerializer(type);
             var typeName = TypeId.Get(type);
             var nameBytes = Encoding.UTF8.GetBytes(typeName);
             var lengthBytes = BitConverter.GetBytes(nameBytes.Length);
@@ -33,7 +31,7 @@ namespace Shielded.Gossip
             if (type == null)
                 throw new ApplicationException("Unable to read message type: " + name);
             var spent = 4 + nameLength;
-            var ser = new DataContractJsonSerializer(type);
+            var ser = new DataContractSerializer(type);
             using (var ms = new MemoryStream(bytes, spent, bytes.Length - spent))
                 return ser.ReadObject(ms);
         }

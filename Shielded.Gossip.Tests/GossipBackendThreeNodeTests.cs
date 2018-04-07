@@ -14,7 +14,6 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class GossipBackendThreeNodeTests
     {
-        [Serializable]
         public class TestClass : IHasVectorClock
         {
             public int Id { get; set; }

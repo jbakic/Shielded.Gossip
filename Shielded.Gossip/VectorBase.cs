@@ -1,14 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Serialization;
 using System.Text;
 
 namespace Shielded.Gossip
 {
-    [Serializable]
+    [DataContract(Namespace = "")]
     public struct VectorItem<T>
     {
+        [DataMember]
         public string ServerId { get; set; }
+        [DataMember]
         public T Value { get; set; }
 
         public VectorItem(string serverId, T value)
@@ -20,7 +23,7 @@ namespace Shielded.Gossip
         }
     }
 
-    [Serializable]
+    [DataContract(Namespace = "")]
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
         where T : IEquatable<T>
@@ -34,6 +37,7 @@ namespace Shielded.Gossip
 
         public VectorBase(string ownServerId, T item) : this(new VectorItem<T>(ownServerId, item)) { }
 
+        [DataMember]
         public VectorItem<T>[] Items { get; set; }
 
         protected virtual IEqualityComparer<T> EqualityComparer => EqualityComparer<T>.Default;

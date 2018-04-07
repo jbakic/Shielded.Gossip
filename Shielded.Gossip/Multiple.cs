@@ -2,13 +2,15 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
-    [Serializable]
+    [DataContract(Namespace = "")]
     public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>, Multiple<T>>, IEnumerable<T>
         where T : IHasVectorClock
     {
+        [DataMember]
         public T[] Versions { get; set; }
 
         public T this[int index] => Versions != null ? Versions[index] : throw new ArgumentOutOfRangeException();

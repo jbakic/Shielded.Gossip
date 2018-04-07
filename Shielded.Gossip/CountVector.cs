@@ -1,17 +1,18 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
+using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
-    [Serializable]
+    [DataContract(Namespace="")]
     public class CountVector : VectorBase<CountVector, CountVector.Item>
     {
-        [Serializable]
+        [DataContract(Namespace="")]
         public struct Item : IEquatable<Item>
         {
+            [DataMember]
             public long Increments { get; set; }
+            [DataMember]
             public long Decrements { get; set; }
 
             public Item(long inc, long dec)
