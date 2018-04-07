@@ -56,6 +56,20 @@ namespace Shielded.Gossip
 
             [IgnoreDataMember, NonSerialized]
             public long Freshness;
+
+            [IgnoreDataMember]
+            public object Deserialized
+            {
+                get
+                {
+                    return Serializer.Deserialize(Data);
+                }
+            }
+
+            public override string ToString()
+            {
+                return string.Format("{0}{1}: {2}", Key, Freshness != 0 ? " at " + Freshness : "", Deserialized);
+            }
         }
 
         private readonly ShieldedDictNc<string, Item> _local = new ShieldedDictNc<string, Item>();
@@ -128,17 +142,17 @@ namespace Shielded.Gossip
 
                 case GossipStart start:
                     Shield.InTransaction(() =>
-                    {
-                        SendReply(start.From, start.DatabaseHash);
-                    });
+                        SendReply(start.From, start.DatabaseHash));
                     break;
 
                 case GossipReply reply:
-                    Shield.InTransaction(() =>
+                    var doNotSend = Shield.InTransaction(() =>
                     {
                         ApplyItems(reply.Items);
-                        SendReply(reply.From, reply.DatabaseHash, reply.WindowStart, reply.WindowEnd, reply.LastWindowStart, reply.LastWindowEnd);
+                        return new HashSet<string>(_local.Changes);
                     });
+                    Shield.InTransaction(() =>
+                        SendReply(reply.From, reply.DatabaseHash, reply, doNotSend));
                     break;
 
                 //case GossipEnd end:
@@ -156,29 +170,35 @@ namespace Shielded.Gossip
             foreach (var item in items)
             {
                 var obj = Serializer.Deserialize(item.Data);
-                _itemMsgMethod.MakeGenericMethod(obj.GetType())
-                    .Invoke(this, new object[] { item.Key, obj });
+                try
+                {
+                    _itemMsgMethod.MakeGenericMethod(obj.GetType())
+                        .Invoke(this, new object[] { item.Key, obj });
+                }
+                catch (TargetInvocationException ex)
+                {
+                    // why, .NET, whyyy?!
+                    throw ex.InnerException;
+                }
             }
         }
 
-        private void SendReply(string server, ulong hisHash,
-            long? hisWindowStart = null, long? hisWindowEnd = null, long? ourLastStart = null, long? ourLastEnd = null)
+        private void SendReply(string server, ulong hisHash, GossipReply reply = null, HashSet<string> doNotSend = null)
         {
             var ownHash = _databaseHash.Value;
             if (ownHash == hisHash)
                 return;
 
-            var toSend = YieldReplyItems(ourLastStart, ourLastEnd).ToArray();
+            var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd, doNotSend)
+                .Take(Configuration.AntiEntropyPackageCutoff).ToArray();
             if (toSend.Length == 0)
                 return;
 
             var windowStart = toSend[toSend.Length - 1].Freshness;
-            if (ourLastStart != null && ourLastStart < windowStart)
-                windowStart = ourLastStart.Value;
+            if (reply?.LastWindowStart != null && reply.LastWindowStart < windowStart)
+                windowStart = reply.LastWindowStart.Value;
 
             var windowEnd = _freshIndex.Descending.First().Key;
-            if (_local.Changes.Any())
-                windowEnd++;
 
             Shield.SideEffect(() => Transport.Send(server,
                 new GossipReply
@@ -188,29 +208,27 @@ namespace Shielded.Gossip
                     Items = toSend,
                     WindowStart = windowStart,
                     WindowEnd = windowEnd,
-                    LastWindowStart = hisWindowStart,
-                    LastWindowEnd = hisWindowEnd
+                    LastWindowStart = reply?.WindowStart,
+                    LastWindowEnd = reply?.WindowEnd
                 }));
         }
 
-        private IEnumerable<Item> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd)
+        private IEnumerable<Item> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd, HashSet<string> doNotSend)
         {
             var startFrom = long.MaxValue;
-            // all _local.Changes were caused by new items in the incoming message. we will not send those back.
-            var localChanges = new HashSet<string>(_local.Changes);
             var result = new HashSet<string>();
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
-                    if (!localChanges.Contains(kvp.Value))
-                        result.Add(kvp.Value);
+                    if (!(doNotSend?.Contains(kvp.Value) ?? false) && result.Add(kvp.Value))
+                        yield return _local[kvp.Value];
                 startFrom = prevWindowStart.Value - 1;
             }
             int countDistinct = 0;
             long? prevFreshness = null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
             {
-                if (localChanges.Contains(kvp.Value))
+                if (doNotSend?.Contains(kvp.Value) ?? false)
                     continue;
                 if (prevFreshness == null || kvp.Key != prevFreshness.Value)
                 {
@@ -219,13 +237,15 @@ namespace Shielded.Gossip
                     countDistinct++;
                     prevFreshness = kvp.Key;
                 }
-                result.Add(kvp.Value);
+                if (result.Add(kvp.Value))
+                    yield return _local[kvp.Value];
             }
-            return result.Select(key => _local[key]);
         }
 
         public Task Commit(CommitContinuation cont)
         {
+            if (!Configuration.DirectMail)
+                return Task.FromResult<object>(null);
             var transaction = new Transaction();
             cont.InContext(() => transaction.Items = _local.Changes.Select(key => _local[key]).ToArray());
             if (transaction.Items.Any())
@@ -271,7 +291,8 @@ namespace Shielded.Gossip
                 if (cmp == VectorRelationship.Greater || cmp == VectorRelationship.Equal)
                     return cmp;
 
-                _local[key] = new Item { Key = key, Data = Serializer.Serialize(oldVal.MergeWith(val)) };
+                val = oldVal.MergeWith(val);
+                _local[key] = new Item { Key = key, Data = Serializer.Serialize(val) };
                 var hash = GetHash(key, oldVal) ^ GetHash(key, val);
                 if (hash != 0UL)
                     _databaseHash.Commute((ref ulong h) => h ^= hash);

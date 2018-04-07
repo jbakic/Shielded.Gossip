@@ -5,8 +5,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Shielded.Gossip.Tests
 {
@@ -95,6 +95,32 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
             Assert.AreEqual(testEntity.Clock, read.Clock);
+        }
+
+        [TestMethod]
+        public void GossipBackendMultiple_Race()
+        {
+            foreach (var back in _backends.Values)
+                back.Configuration.DirectMail = false;
+
+            Task.WaitAll(Enumerable.Range(1, 1000).Select(i =>
+                Task.Run(() => Distributed.Run(() =>
+                {
+                    var backend = _backends.Values.Skip(i % 3).First();
+                    var key = "key" + (i % 20);
+                    var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
+                    backend.Set(key, val.Increment(backend.Transport.OwnId));
+                }))).ToArray());
+
+            Thread.Sleep(1000);
+            OnMessage(null, "Done waiting.");
+            CheckProtocols();
+
+            var read = Distributed.Run(() =>
+                    Enumerable.Range(0, 20).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0))
+                .Result;
+
+            Assert.AreEqual(1000, read);
         }
 
         [TestMethod]

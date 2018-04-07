@@ -52,6 +52,9 @@ namespace Shielded.Gossip
             return unchecked((int)((hash >> 32) ^ hash));
         }
 
+        public static bool operator ==(VectorBase<TVec, T> left, TVec right) => left.Equals(right);
+        public static bool operator !=(VectorBase<TVec, T> left, TVec right) => !left.Equals(right);
+
         private IEnumerable<byte[]> YieldFields()
         {
             var idComparer = StringComparer.OrdinalIgnoreCase;
