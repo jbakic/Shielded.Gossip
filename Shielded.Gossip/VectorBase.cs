@@ -48,8 +48,9 @@ namespace Shielded.Gossip
 
         public override int GetHashCode()
         {
-            var hash = GetVersionHash();
-            return unchecked((int)((hash >> 32) ^ hash));
+            if (Items == null || Items.Length == 0)
+                return 0;
+            return FNV1a32.Hash(YieldFields());
         }
 
         public static bool operator ==(VectorBase<TVec, T> left, TVec right) => left.Equals(right);

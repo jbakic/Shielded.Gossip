@@ -24,16 +24,11 @@ namespace Shielded.Gossip
 
             public override bool Equals(object obj) => obj is Item i && Equals(i);
 
-            public override int GetHashCode()
-            {
-                var hash = FNV1a64.Hash(BitConverter.GetBytes(Increments), BitConverter.GetBytes(Decrements));
-                return unchecked((int)((hash >> 32) ^ hash));
-            }
+            public override int GetHashCode() =>
+                FNV1a32.Hash(BitConverter.GetBytes(Increments), BitConverter.GetBytes(Decrements));
 
-            public override string ToString()
-            {
-                return string.Format("+{0}, -{1}", Increments, Decrements);
-            }
+            public override string ToString() =>
+                string.Format("+{0}, -{1}", Increments, Decrements);
         }
 
         public CountVector() : base() { }

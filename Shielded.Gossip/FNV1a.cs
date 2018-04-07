@@ -37,4 +37,31 @@ namespace Shielded.Gossip
             }
         }
     }
+
+    public static class FNV1a32
+    {
+        public static int Hash(IEnumerable<byte[]> fields)
+        {
+            return Hash(fields.ToArray());
+        }
+
+        public static int Hash(params byte[][] fields)
+        {
+            unchecked
+            {
+                // FNV-1a implementation for 32 bits
+                uint hash = 2166136261U;
+                const uint prime = 16777619U;
+
+                for (int f = 0; f < fields.Length; f++)
+                {
+                    var field = fields[f];
+                    for (int i = 0; i < field.Length; i++)
+                        hash = (hash ^ field[i]) * prime;
+                    hash *= prime;
+                }
+                return (int)hash;
+            }
+        }
+    }
 }
