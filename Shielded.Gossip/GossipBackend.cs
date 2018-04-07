@@ -41,12 +41,12 @@ namespace Shielded.Gossip
             public long? LastWindowEnd;
         }
 
-        //[Serializable]
-        //public class GossipEnd
-        //{
-        //    public string From;
-        //    public bool Success;
-        //}
+        [Serializable]
+        public class GossipEnd
+        {
+            public string From;
+            public bool Success;
+        }
 
         [Serializable]
         public class Item
@@ -109,6 +109,8 @@ namespace Shielded.Gossip
             }
         }
 
+        private ShieldedDictNc<string, DateTime> _lastSendTime = new ShieldedDictNc<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
         private void SpreadRumors()
         {
             try
@@ -118,8 +120,21 @@ namespace Shielded.Gossip
                     var servers = Transport.Servers;
                     if (servers == null || !servers.Any())
                         return;
-                    var server = servers.Skip(new Random().Next(servers.Count)).First();
+                    var limit = Configuration.AntiEntropyHuntingLimit;
+                    var rand = new Random();
+                    string server;
+                    do
+                    {
+                        server = servers.Skip(rand.Next(servers.Count)).First();
+                    }
+                    while (
+                        _lastSendTime.TryGetValue(server, out var lastTime) &&
+                        (DateTime.UtcNow - lastTime).TotalMilliseconds < Configuration.AntiEntropyIdleTimeout &&
+                        --limit >= 0);
+                    if (limit < 0)
+                        return;
 
+                    _lastSendTime[server] = DateTime.UtcNow;
                     Shield.SideEffect(() => Transport.Send(server,
                         new GossipStart
                         {
@@ -155,8 +170,9 @@ namespace Shielded.Gossip
                         SendReply(reply.From, reply.DatabaseHash, reply, doNotSend));
                     break;
 
-                //case GossipEnd end:
-                //    break;
+                case GossipEnd end:
+                    Shield.InTransaction(() => _lastSendTime.Remove(end.From));
+                    break;
             }
         }
 
@@ -183,16 +199,28 @@ namespace Shielded.Gossip
             }
         }
 
+        private void SendEnd(string server, bool success)
+        {
+            _lastSendTime.Remove(server);
+            Shield.SideEffect(() => Transport.Send(server, new GossipEnd { From = Transport.OwnId, Success = success }));
+        }
+
         private void SendReply(string server, ulong hisHash, GossipReply reply = null, HashSet<string> doNotSend = null)
         {
             var ownHash = _databaseHash.Value;
             if (ownHash == hisHash)
+            {
+                SendEnd(server, true);
                 return;
+            }
 
             var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd, doNotSend)
                 .Take(Configuration.AntiEntropyPackageCutoff).ToArray();
             if (toSend.Length == 0)
+            {
+                SendEnd(server, false);
                 return;
+            }
 
             var windowStart = toSend[toSend.Length - 1].Freshness;
             if (reply?.LastWindowStart != null && reply.LastWindowStart < windowStart)
@@ -200,6 +228,7 @@ namespace Shielded.Gossip
 
             var windowEnd = _freshIndex.Descending.First().Key;
 
+            _lastSendTime[server] = DateTime.UtcNow;
             Shield.SideEffect(() => Transport.Send(server,
                 new GossipReply
                 {
