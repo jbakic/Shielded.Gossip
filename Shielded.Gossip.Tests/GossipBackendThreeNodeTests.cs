@@ -1,5 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Shielded.Cluster;
+using Shielded.Standard;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -40,7 +41,7 @@ namespace Shielded.Gossip.Tests
             _backends = _addresses.Select(kvp =>
             {
                 var transport = new TcpTransport(kvp.Key, kvp.Value,
-                    new Dictionary<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), StringComparer.OrdinalIgnoreCase));
+                    new ShieldedDict<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), null, StringComparer.OrdinalIgnoreCase));
                 transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
                 transport.Error += OnListenerError;
 
@@ -126,8 +127,11 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_SeriallyConnected()
         {
-            ((TcpTransport)_backends[A].Transport).ServerIPs.Remove(C);
-            ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            Shield.InTransaction(() =>
+            {
+                ((TcpTransport)_backends[A].Transport).ServerIPs.Remove(C);
+                ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            });
 
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 

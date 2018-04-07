@@ -231,8 +231,28 @@ namespace Shielded.Gossip
                 return;
             }
 
+            bool allNewIncluded = false;
+            int cutoff = Configuration.AntiEntropyPackageCutoff;
+            int packageSize = Configuration.AntiEntropyPackageSize;
+            long? prevFreshness = null;
             var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd, doNotSend)
-                .Take(Configuration.AntiEntropyPackageCutoff).ToArray();
+                .TakeWhile(item =>
+                {
+                    if (item == null)
+                    {
+                        allNewIncluded = true;
+                        return true;
+                    }
+                    if (prevFreshness == null || prevFreshness.Value != item.Freshness)
+                    {
+                        if (--cutoff < 0 || (allNewIncluded && --packageSize < 0))
+                            return false;
+                        prevFreshness = item.Freshness;
+                    }
+                    return true;
+                })
+                .Where(i => i != null)
+                .ToArray();
             if (toSend.Length == 0)
             {
                 SendEnd(server, false);
@@ -240,7 +260,7 @@ namespace Shielded.Gossip
             }
 
             var windowStart = toSend[toSend.Length - 1].Freshness;
-            if (reply?.LastWindowStart != null && reply.LastWindowStart < windowStart)
+            if (allNewIncluded && reply?.LastWindowStart != null && reply.LastWindowStart < windowStart)
                 windowStart = reply.LastWindowStart.Value;
 
             var windowEnd = _freshIndex.Descending.First().Key;
@@ -268,22 +288,11 @@ namespace Shielded.Gossip
                         yield return _local[kvp.Value];
                 startFrom = prevWindowStart.Value - 1;
             }
-            int countDistinct = 0;
-            long? prevFreshness = null;
+            // to signal that the new result connects with the previous window.
+            yield return null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
-            {
-                if (doNotSend?.Contains(kvp.Value) ?? false)
-                    continue;
-                if (prevFreshness == null || kvp.Key != prevFreshness.Value)
-                {
-                    if (countDistinct == Configuration.AntiEntropyPackageSize)
-                        break;
-                    countDistinct++;
-                    prevFreshness = kvp.Key;
-                }
-                if (result.Add(kvp.Value))
+                if (!(doNotSend?.Contains(kvp.Value) ?? false) && result.Add(kvp.Value))
                     yield return _local[kvp.Value];
-            }
         }
 
         public Task Commit(CommitContinuation cont)

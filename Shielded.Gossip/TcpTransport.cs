@@ -1,10 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Shielded.Gossip
@@ -108,8 +105,8 @@ namespace Shielded.Gossip
         public void Broadcast(object msg)
         {
             var bytes = Serializer.Serialize(msg);
-            foreach (var s in ServerIPs)
-                Send(s.Value, bytes);
+            foreach (var ip in ServerIPs.Values)
+                Send(ip, bytes);
         }
 
         public void Send(string server, object msg)
