@@ -119,11 +119,11 @@ namespace Shielded.Gossip
                     break;
 
                 case GossipReply reply:
-                    var doNotSend = new HashSet<string>(Shield.InTransaction(() =>
+                    var doNotSend = Shield.InTransaction(() =>
                     {
                         ApplyItems(reply.Items);
-                        return _local.Changes;
-                    }));
+                        return new HashSet<string>(_local.Changes);
+                    });
                     Shield.InTransaction(() =>
                         SendReply(reply.From, reply.DatabaseHash, reply.Time, reply, doNotSend));
                     break;
