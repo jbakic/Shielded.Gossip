@@ -26,6 +26,7 @@ namespace Shielded.Gossip
         {
             public string From;
             public ulong DatabaseHash;
+            public DateTimeOffset Time = DateTimeOffset.UtcNow;
         }
 
         [Serializable]
@@ -36,9 +37,11 @@ namespace Shielded.Gossip
             public Item[] Items;
             public long WindowStart;
             public long WindowEnd;
+            public DateTimeOffset Time = DateTimeOffset.UtcNow;
 
             public long? LastWindowStart;
             public long? LastWindowEnd;
+            public DateTimeOffset LastTime;
         }
 
         [Serializable]
@@ -109,7 +112,7 @@ namespace Shielded.Gossip
             }
         }
 
-        private ShieldedDictNc<string, DateTime> _lastSendTime = new ShieldedDictNc<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private ShieldedDictNc<string, DateTimeOffset> _lastSendTime = new ShieldedDictNc<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
 
         private void Send(string server, object msg, bool clearState = false)
         {
@@ -123,7 +126,7 @@ namespace Shielded.Gossip
                     if (clearState)
                         _lastSendTime.Remove(server);
                     else
-                        _lastSendTime[server] = DateTime.UtcNow;
+                        _lastSendTime[server] = DateTimeOffset.UtcNow;
                 });
                 Transport.Send(server, msg);
             });
@@ -147,13 +150,13 @@ namespace Shielded.Gossip
                     }
                     while (
                         _lastSendTime.TryGetValue(server, out var lastTime) &&
-                        (DateTime.UtcNow - lastTime).TotalMilliseconds < Configuration.AntiEntropyIdleTimeout &&
+                        (DateTimeOffset.UtcNow - lastTime).TotalMilliseconds < Configuration.AntiEntropyIdleTimeout &&
                         --limit >= 0);
                     if (limit < 0)
                         return;
 
                     // here, we want a conflict.
-                    _lastSendTime[server] = DateTime.UtcNow;
+                    _lastSendTime[server] = DateTimeOffset.UtcNow;
                     Shield.SideEffect(() => Transport.Send(server, new GossipStart
                     {
                         From = Transport.OwnId,
@@ -175,17 +178,17 @@ namespace Shielded.Gossip
 
                 case GossipStart start:
                     Shield.InTransaction(() =>
-                        SendReply(start.From, start.DatabaseHash));
+                        SendReply(start.From, start.DatabaseHash, start.Time));
                     break;
 
                 case GossipReply reply:
-                    var doNotSend = Shield.InTransaction(() =>
+                    var doNotSend = new HashSet<string>(Shield.InTransaction(() =>
                     {
                         ApplyItems(reply.Items);
-                        return new HashSet<string>(_local.Changes);
-                    });
+                        return _local.Changes;
+                    }));
                     Shield.InTransaction(() =>
-                        SendReply(reply.From, reply.DatabaseHash, reply, doNotSend));
+                        SendReply(reply.From, reply.DatabaseHash, reply.Time, reply, doNotSend));
                     break;
 
                 case GossipEnd end:
@@ -222,8 +225,12 @@ namespace Shielded.Gossip
             Send(server, new GossipEnd { From = Transport.OwnId, Success = success }, true);
         }
 
-        private void SendReply(string server, ulong hisHash, GossipReply reply = null, HashSet<string> doNotSend = null)
+        private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null, HashSet<string> doNotSend = null)
         {
+            var ourLast = reply?.LastTime;
+            if (ourLast != null && (DateTimeOffset.UtcNow - ourLast.Value).TotalMilliseconds > Configuration.AntiEntropyIdleTimeout)
+                return;
+
             var ownHash = _databaseHash.Value;
             if (ownHash == hisHash)
             {
@@ -273,7 +280,8 @@ namespace Shielded.Gossip
                 WindowStart = windowStart,
                 WindowEnd = windowEnd,
                 LastWindowStart = reply?.WindowStart,
-                LastWindowEnd = reply?.WindowEnd
+                LastWindowEnd = reply?.WindowEnd,
+                LastTime = hisTime,
             });
         }
 
@@ -295,7 +303,7 @@ namespace Shielded.Gossip
                     yield return _local[kvp.Value];
         }
 
-        public Task Commit(CommitContinuation cont)
+        Task IBackend.Commit(CommitContinuation cont)
         {
             if (!Configuration.DirectMail)
                 return Task.FromResult<object>(null);
@@ -306,7 +314,7 @@ namespace Shielded.Gossip
             return Task.FromResult<object>(null);
         }
 
-        public void Rollback() { }
+        void IBackend.Rollback() { }
 
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
