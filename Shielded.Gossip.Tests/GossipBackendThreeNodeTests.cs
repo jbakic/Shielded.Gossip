@@ -43,6 +43,7 @@ namespace Shielded.Gossip.Tests
                     new ShieldedDict<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), null, StringComparer.OrdinalIgnoreCase));
                 transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
                 transport.Error += OnListenerError;
+                transport.StartListening();
 
                 return new GossipBackend(transport, new GossipConfiguration
                 {

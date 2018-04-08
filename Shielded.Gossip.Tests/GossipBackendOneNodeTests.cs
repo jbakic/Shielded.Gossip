@@ -24,9 +24,9 @@ namespace Shielded.Gossip.Tests
         [TestInitialize]
         public void Init()
         {
-            _backend = new GossipBackend(
-                new TcpTransport("Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>()),
-                new GossipConfiguration());
+            var transport = new TcpTransport("Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>());
+            transport.StartListening();
+            _backend = new GossipBackend(transport, new GossipConfiguration());
         }
 
         [TestCleanup]

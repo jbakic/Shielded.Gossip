@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Shielded.Gossip
@@ -13,9 +14,6 @@ namespace Shielded.Gossip
             OwnId = ownId;
             LocalEndpoint = localEndpoint;
             ServerIPs = serverIPs;
-
-            _listener = new TcpListener(LocalEndpoint);
-            StartListening();
         }
 
         public string OwnId { get; private set; }
@@ -25,27 +23,47 @@ namespace Shielded.Gossip
 
         public int ReceiveTimeout { get; set; } = 5000;
 
-        private readonly TcpListener _listener;
+        private TcpListener _listener;
+
+        public void StopListening()
+        {
+            var listener = _listener;
+            if (listener != null)
+            {
+                try
+                {
+                    listener.Stop();
+                }
+                catch { }
+                _listener = null;
+            }
+        }
 
         public void Dispose()
         {
-            _listener.Stop();
+            StopListening();
         }
 
-        private async void StartListening()
+        public async void StartListening()
         {
-            _listener.Start();
+            if (_listener != null)
+                throw new InvalidOperationException("Already listening.");
+            var listener = new TcpListener(LocalEndpoint);
+            if (Interlocked.CompareExchange(ref _listener, listener, null) != null)
+                return;
             try
             {
+                listener.Start();
                 while (true)
                 {
-                    var client = await _listener.AcceptTcpClientAsync();
+                    var client = await listener.AcceptTcpClientAsync();
                     ProcessIncoming(client);
                 }
             }
             catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
+                StopListening();
                 Error?.Invoke(this, ex);
             }
         }
