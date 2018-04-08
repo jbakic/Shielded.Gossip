@@ -94,17 +94,14 @@ namespace Shielded.Gossip
             }
             catch (Exception ex)
             {
-                Error?.Invoke(this, ex);
-                return;
-            }
-            finally
-            {
                 try
                 {
                     if (client.Connected)
                         client.Close();
                 }
                 catch { }
+                Error?.Invoke(this, ex);
+                return;
             }
 
             try
