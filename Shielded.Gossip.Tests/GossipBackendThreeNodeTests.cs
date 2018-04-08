@@ -100,14 +100,17 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_Race()
         {
+            const int transactions = 1000;
+            const int fieldCount = 50;
+
             foreach (var back in _backends.Values)
                 back.Configuration.DirectMail = false;
 
-            Task.WaitAll(Enumerable.Range(1, 1000).Select(i =>
+            Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
                 Task.Run(() => Distributed.Run(() =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
-                    var key = "key" + (i % 20);
+                    var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
                 }))).ToArray());
@@ -117,10 +120,10 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             var read = Distributed.Run(() =>
-                    Enumerable.Range(0, 20).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0))
+                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0))
                 .Result;
 
-            Assert.AreEqual(1000, read);
+            Assert.AreEqual(transactions, read);
         }
 
         [TestMethod]
@@ -145,6 +148,40 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
             Assert.AreEqual(testEntity.Clock, read.Clock);
+        }
+
+        [TestMethod]
+        public void GossipBackendMultiple_RaceSeriallyConnected()
+        {
+            const int transactions = 1000;
+            const int fieldCount = 50;
+
+            Shield.InTransaction(() =>
+            {
+                ((TcpTransport)_backends[A].Transport).ServerIPs.Remove(C);
+                ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            });
+            foreach (var back in _backends.Values)
+                back.Configuration.DirectMail = false;
+
+            Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
+                Task.Run(() => Distributed.Run(() =>
+                {
+                    var backend = _backends.Values.Skip(i % 3).First();
+                    var key = "key" + (i % fieldCount);
+                    var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
+                    backend.Set(key, val.Increment(backend.Transport.OwnId));
+                }))).ToArray());
+
+            Thread.Sleep(1000);
+            OnMessage(null, "Done waiting.");
+            CheckProtocols();
+
+            var read = Distributed.Run(() =>
+                    Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0))
+                .Result;
+
+            Assert.AreEqual(transactions, read);
         }
     }
 }
