@@ -35,7 +35,7 @@ namespace Shielded.Gossip
 
         private void SyncIndexes()
         {
-            long newFresh = checked(_freshIndex.Descending.FirstOrDefault().Key + 1);
+            long newFresh = GetNextFreshness();
             foreach (var key in _local.Changes)
             {
                 var oldItem = Shield.ReadOldState(() => _local.TryGetValue(key, out Item o) ? o : null);
@@ -47,6 +47,16 @@ namespace Shielded.Gossip
                 newItem.Freshness = newFresh;
                 _freshIndex.Add(newFresh, key);
             }
+        }
+
+        private long GetNextFreshness()
+        {
+            return checked(GetMaxFreshness() + 1);
+        }
+
+        private long GetMaxFreshness()
+        {
+            return _freshIndex.Descending.FirstOrDefault().Key;
         }
 
         private ShieldedDictNc<string, DateTimeOffset> _lastSendTime = new ShieldedDictNc<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
@@ -109,8 +119,7 @@ namespace Shielded.Gossip
             switch (msg)
             {
                 case Transaction trans:
-                    Shield.InTransaction(() =>
-                        ApplyItems(trans.Items));
+                    Shield.InTransaction(() => ApplyItems(trans.Items));
                     break;
 
                 case GossipStart start:
@@ -119,13 +128,9 @@ namespace Shielded.Gossip
                     break;
 
                 case GossipReply reply:
-                    var doNotSend = Shield.InTransaction(() =>
-                    {
-                        ApplyItems(reply.Items);
-                        return new HashSet<string>(_local.Changes);
-                    });
+                    Shield.InTransaction(() => ApplyItems(reply.Items));
                     Shield.InTransaction(() =>
-                        SendReply(reply.From, reply.DatabaseHash, reply.Time, reply, doNotSend));
+                        SendReply(reply.From, reply.DatabaseHash, reply.Time, reply));
                     break;
 
                 case GossipEnd end:
@@ -162,7 +167,7 @@ namespace Shielded.Gossip
             Send(server, new GossipEnd { From = Transport.OwnId, Success = success }, true);
         }
 
-        private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null, HashSet<string> doNotSend = null)
+        private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null)
         {
             var ourLast = reply?.LastTime;
             if (ourLast != null && (DateTimeOffset.UtcNow - ourLast.Value).TotalMilliseconds > Configuration.AntiEntropyIdleTimeout)
@@ -178,8 +183,8 @@ namespace Shielded.Gossip
             bool allNewIncluded = false;
             int cutoff = Configuration.AntiEntropyPackageCutoff;
             int packageSize = Configuration.AntiEntropyPackageSize;
-            long? prevFreshness = null;
-            var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd, doNotSend)
+            long? prevFreshness = null; 
+            var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd)
                 .TakeWhile(item =>
                 {
                     if (item == null)
@@ -207,7 +212,7 @@ namespace Shielded.Gossip
             if (allNewIncluded && reply?.LastWindowStart != null && reply.LastWindowStart < windowStart)
                 windowStart = reply.LastWindowStart.Value;
 
-            var windowEnd = _freshIndex.Descending.First().Key;
+            var windowEnd = GetMaxFreshness();
 
             Send(server, new GossipReply
             {
@@ -222,21 +227,21 @@ namespace Shielded.Gossip
             });
         }
 
-        private IEnumerable<Item> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd, HashSet<string> doNotSend)
+        private IEnumerable<Item> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd)
         {
             var startFrom = long.MaxValue;
             var result = new HashSet<string>();
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
-                    if (!(doNotSend?.Contains(kvp.Value) ?? false) && result.Add(kvp.Value))
+                    if (result.Add(kvp.Value))
                         yield return _local[kvp.Value];
                 startFrom = prevWindowStart.Value - 1;
             }
             // to signal that the new result connects with the previous window.
             yield return null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
-                if (!(doNotSend?.Contains(kvp.Value) ?? false) && result.Add(kvp.Value))
+                if (result.Add(kvp.Value))
                     yield return _local[kvp.Value];
         }
 
