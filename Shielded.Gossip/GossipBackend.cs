@@ -1,6 +1,7 @@
 ﻿using Shielded.Cluster;
 using Shielded.Standard;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -142,6 +143,27 @@ namespace Shielded.Gossip
         private static readonly MethodInfo _itemMsgMethod = typeof(GossipBackend)
             .GetMethod("SetInternal", BindingFlags.Instance | BindingFlags.NonPublic);
 
+        private delegate VectorRelationship ApplyDelegate(string key, object obj);
+
+        private readonly ConcurrentDictionary<Type, ApplyDelegate> _applyDelegates = new ConcurrentDictionary<Type, ApplyDelegate>();
+
+        private ApplyDelegate CreateSetter(Type t)
+        {
+            var methodInfo = _itemMsgMethod.MakeGenericMethod(t);
+            var genericMethod = typeof(GossipBackend).GetMethod("CreateSetterGeneric", BindingFlags.NonPublic | BindingFlags.Instance);
+            MethodInfo genericHelper = genericMethod.MakeGenericMethod(t);
+            return (ApplyDelegate)genericHelper.Invoke(this, new object[] { methodInfo });
+        }
+
+        private ApplyDelegate CreateSetterGeneric<TItem>(MethodInfo setter)
+            where TItem : IMergeable<TItem, TItem>
+        {
+            var setterTypedDelegate = (Func<string, TItem, VectorRelationship>)
+                Delegate.CreateDelegate(typeof(Func<string, TItem, VectorRelationship>), this, setter);
+            ApplyDelegate setterDelegate = ((key, obj) => setterTypedDelegate(key, (TItem)obj));
+            return setterDelegate;
+        }
+
         private void ApplyItems(Item[] items)
         {
             if (items == null)
@@ -149,16 +171,8 @@ namespace Shielded.Gossip
             foreach (var item in items)
             {
                 var obj = Serializer.Deserialize(item.Data);
-                try
-                {
-                    _itemMsgMethod.MakeGenericMethod(obj.GetType())
-                        .Invoke(this, new object[] { item.Key, obj });
-                }
-                catch (TargetInvocationException ex)
-                {
-                    // why, .NET, whyyy?!
-                    throw ex.InnerException;
-                }
+                var method = _applyDelegates.GetOrAdd(obj.GetType(), CreateSetter);
+                method(item.Key, obj);
             }
         }
 
