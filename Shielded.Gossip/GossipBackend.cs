@@ -170,7 +170,7 @@ namespace Shielded.Gossip
         private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null)
         {
             var ourLast = reply?.LastTime;
-            if (ourLast != null && (DateTimeOffset.UtcNow - ourLast.Value).TotalMilliseconds > Configuration.AntiEntropyIdleTimeout)
+            if (ourLast != null && (DateTimeOffset.UtcNow - ourLast.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
                 return;
 
             var ownHash = _databaseHash.Value;
