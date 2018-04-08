@@ -184,5 +184,40 @@ namespace Shielded.Gossip.Tests
 
             Assert.AreEqual(transactions, read);
         }
+
+        [TestMethod]
+        public void GossipBackendMultiple_RaceAsymmetric()
+        {
+            const int transactions = 1000;
+            const int fieldCount = 50;
+
+            Shield.InTransaction(() =>
+            {
+                ((TcpTransport)_backends[A].Transport).ServerIPs.Remove(C);
+                ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            });
+            foreach (var back in _backends.Values)
+                back.Configuration.DirectMail = false;
+
+            Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
+                Task.Run(() => Distributed.Run(() =>
+                {
+                    // run all updates on A, to cause asymmetry in the amount of data they have to gossip about.
+                    var backend = _backends[A];
+                    var key = "key" + (i % fieldCount);
+                    var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
+                    backend.Set(key, val.Increment(backend.Transport.OwnId));
+                }))).ToArray());
+
+            Thread.Sleep(1000);
+            OnMessage(null, "Done waiting.");
+            CheckProtocols();
+
+            var read = Distributed.Run(() =>
+                    Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0))
+                .Result;
+
+            Assert.AreEqual(transactions, read);
+        }
     }
 }

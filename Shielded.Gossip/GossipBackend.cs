@@ -218,7 +218,21 @@ namespace Shielded.Gossip
                 .ToArray();
             if (toSend.Length == 0)
             {
-                SendEnd(server, false);
+                // we reached our end of time, but maybe the other side has more.
+                if (reply != null && (reply.Items == null || reply.Items.Length == 0))
+                    SendEnd(server, false);
+                else
+                    Send(server, new GossipReply
+                    {
+                        From = Transport.OwnId,
+                        DatabaseHash = ownHash,
+                        Items = null,
+                        WindowStart = reply?.LastWindowStart ?? 0,
+                        WindowEnd = GetMaxFreshness(),
+                        LastWindowStart = reply?.WindowStart,
+                        LastWindowEnd = reply?.WindowEnd,
+                        LastTime = hisTime,
+                    });
                 return;
             }
 
