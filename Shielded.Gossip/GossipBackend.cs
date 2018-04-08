@@ -118,7 +118,7 @@ namespace Shielded.Gossip
         {
             switch (msg)
             {
-                case Transaction trans:
+                case DirectMail trans:
                     Shield.InTransaction(() => ApplyItems(trans.Items));
                     break;
 
@@ -249,7 +249,7 @@ namespace Shielded.Gossip
         {
             if (!Configuration.DirectMail)
                 return Task.FromResult<object>(null);
-            var transaction = new Transaction();
+            var transaction = new DirectMail();
             cont.InContext(() => transaction.Items = _local.Changes.Select(key => _local[key]).ToArray());
             if (transaction.Items.Any())
                 Transport.Broadcast(transaction);

@@ -4,7 +4,7 @@ using System.Runtime.Serialization;
 namespace Shielded.Gossip
 {
     [DataContract(Namespace = "")]
-    public class Transaction
+    public class DirectMail
     {
         [DataMember]
         public Item[] Items;
