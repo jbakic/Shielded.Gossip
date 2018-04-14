@@ -7,63 +7,65 @@ namespace Shielded.Gossip
     public class DirectMail
     {
         [DataMember]
-        public Item[] Items;
+        public MessageItem[] Items { get; set; }
     }
 
     [DataContract(Namespace = "")]
     public class GossipStart
     {
         [DataMember]
-        public string From;
+        public string From { get; set; }
         [DataMember]
-        public ulong DatabaseHash;
+        public ulong DatabaseHash { get; set; }
         [DataMember]
-        public DateTimeOffset Time = DateTimeOffset.UtcNow;
+        public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
     }
 
     [DataContract(Namespace = "")]
     public class GossipReply
     {
         [DataMember]
-        public string From;
+        public string From { get; set; }
         [DataMember]
-        public ulong DatabaseHash;
+        public ulong DatabaseHash { get; set; }
         [DataMember]
-        public Item[] Items;
+        public MessageItem[] Items { get; set; }
         [DataMember]
-        public long WindowStart;
+        public long WindowStart { get; set; }
         [DataMember]
-        public long WindowEnd;
+        public long WindowEnd { get; set; }
         [DataMember]
-        public DateTimeOffset Time = DateTimeOffset.UtcNow;
+        public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
 
         [DataMember]
-        public long? LastWindowStart;
+        public long? LastWindowStart { get; set; }
         [DataMember]
-        public long? LastWindowEnd;
+        public long? LastWindowEnd { get; set; }
         [DataMember]
-        public DateTimeOffset LastTime;
+        public DateTimeOffset LastTime { get; set; }
     }
 
     [DataContract(Namespace = "")]
     public class GossipEnd
     {
         [DataMember]
-        public string From;
+        public string From { get; set; }
         [DataMember]
-        public bool Success;
+        public bool Success { get; set; }
     }
 
     [DataContract(Namespace = "")]
-    public class Item
+    public class MessageItem
     {
         [DataMember]
-        public string Key;
+        public string Key { get; set; }
         [DataMember]
-        public byte[] Data;
+        public byte[] Data { get; set; }
 
         [IgnoreDataMember]
-        public long Freshness;
+        public VectorRelationship LastSetResult { get; set; }
+        [IgnoreDataMember]
+        public long Freshness { get; set; }
 
         [IgnoreDataMember]
         public object Deserialized

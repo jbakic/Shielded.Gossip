@@ -1,9 +1,13 @@
 ﻿namespace Shielded.Gossip
 {
-    public interface IMergeable<in TIn, out TOut>
+    public interface IHasVersionHash
+    {
+        VersionHash GetVersionHash();
+    }
+
+    public interface IMergeable<in TIn, out TOut> : IHasVersionHash
     {
         TOut MergeWith(TIn other);
         VectorRelationship VectorCompare(TIn other);
-        VersionHash GetVersionHash();
     }
 }

@@ -12,6 +12,7 @@ namespace Shielded.Cluster
     {
         private class TransactionInfo
         {
+            public bool IsConsistent;
             public HashSet<IBackend> Backends = new HashSet<IBackend>();
         }
 
@@ -19,6 +20,14 @@ namespace Shielded.Cluster
         {
             if (_current == null)
                 throw new InvalidOperationException("Operation needs to be in a Distributed.Run call.");
+        }
+
+        public static bool IsConsistent
+        {
+            get
+            {
+                return _current != null && _current.IsConsistent;
+            }
         }
 
         [ThreadStatic]
@@ -32,7 +41,7 @@ namespace Shielded.Cluster
                 return;
             }
 
-            var info = new TransactionInfo();
+            var info = new TransactionInfo { IsConsistent = false };
             try
             {
                 _current = info;
@@ -71,7 +80,7 @@ namespace Shielded.Cluster
 
             try
             {
-                _current = new TransactionInfo();
+                _current = new TransactionInfo { IsConsistent = false };
                 Shield.InTransaction(act);
             }
             finally
@@ -80,9 +89,60 @@ namespace Shielded.Cluster
             }
         }
 
+        public static async Task<bool> Consistent(Action act)
+        {
+            if (_current != null)
+            {
+                if (!_current.IsConsistent)
+                    throw new InvalidOperationException("Consistent calls cannot nest within Run calls.");
+                act();
+                return true;
+            }
+
+            var info = new TransactionInfo { IsConsistent = true };
+            try
+            {
+                _current = info;
+                using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
+                {
+                    _current = null;
+                    if (!await Prepare(cont, info))
+                    {
+                        Rollback(info);
+                        return false;
+                    }
+                    await Commit(cont, info);
+                    cont.Commit();
+                    return true;
+                }
+            }
+            catch
+            {
+                Rollback(info);
+                throw;
+            }
+            finally
+            {
+                _current = null;
+            }
+        }
+
+        public static async Task<(bool, T)> Consistent<T>(Func<T> func)
+        {
+            T res = default;
+            var success = await Consistent(() => { res = func(); });
+            return (success, success ? res : default);
+        }
+
+        private static async Task<bool> Prepare(CommitContinuation cont, TransactionInfo info)
+        {
+            var bools = await Task.WhenAll(info.Backends.Select(b => b.Prepare(cont)));
+            return bools.All(b => b);
+        }
+
         private static Task Commit(CommitContinuation cont, TransactionInfo info)
         {
-            return Task.WhenAll(info.Backends.Select(b => b.Commit(cont)).ToArray());
+            return Task.WhenAll(info.Backends.Select(b => b.Commit(cont)));
         }
 
         private static void Rollback(TransactionInfo info)

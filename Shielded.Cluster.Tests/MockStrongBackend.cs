@@ -11,6 +11,8 @@ namespace Shielded.Cluster.Tests
     {
         private static int _commitCounter;
 
+        public Task<bool> Prepare(CommitContinuation cont) => Task.FromResult(true);
+
         public Task Commit(CommitContinuation cont)
         {
             TaskCompletionSource<object> tcs = new TaskCompletionSource<object>();

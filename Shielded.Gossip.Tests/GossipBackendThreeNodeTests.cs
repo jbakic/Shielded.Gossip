@@ -11,8 +11,7 @@ using System.Threading.Tasks;
 
 namespace Shielded.Gossip.Tests
 {
-    [TestClass]
-    public class GossipBackendThreeNodeTests
+    public class GossipBackendThreeNodeTestsBase
     {
         public class TestClass : IHasVectorClock
         {
@@ -21,18 +20,18 @@ namespace Shielded.Gossip.Tests
             public VectorClock Clock { get; set; }
         }
 
-        private const string A = "A";
-        private const string B = "B";
-        private const string C = "C";
+        protected const string A = "A";
+        protected const string B = "B";
+        protected const string C = "C";
 
-        private static readonly Dictionary<string, IPEndPoint> _addresses = new Dictionary<string, IPEndPoint>(StringComparer.OrdinalIgnoreCase)
+        protected static readonly Dictionary<string, IPEndPoint> _addresses = new Dictionary<string, IPEndPoint>(StringComparer.InvariantCultureIgnoreCase)
         {
             { A, new IPEndPoint(IPAddress.Loopback, 2001) },
             { B, new IPEndPoint(IPAddress.Loopback, 2002) },
             { C, new IPEndPoint(IPAddress.Loopback, 2003) },
         };
 
-        private IDictionary<string, GossipBackend> _backends;
+        protected IDictionary<string, GossipBackend> _backends;
 
         [TestInitialize]
         public void Init()
@@ -40,7 +39,7 @@ namespace Shielded.Gossip.Tests
             _backends = _addresses.Select(kvp =>
             {
                 var transport = new TcpTransport(kvp.Key, kvp.Value,
-                    new ShieldedDict<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), null, StringComparer.OrdinalIgnoreCase));
+                    new ShieldedDict<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), null, StringComparer.InvariantCultureIgnoreCase));
                 transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
                 transport.Error += OnListenerError;
                 transport.StartListening();
@@ -49,7 +48,7 @@ namespace Shielded.Gossip.Tests
                 {
                     GossipInterval = 250,
                 });
-            }).ToDictionary(b => b.Transport.OwnId, StringComparer.OrdinalIgnoreCase);
+            }).ToDictionary(b => b.Transport.OwnId, StringComparer.InvariantCultureIgnoreCase);
         }
 
         [TestCleanup]
@@ -61,7 +60,7 @@ namespace Shielded.Gossip.Tests
             _listenerExceptions.Clear();
         }
 
-        private ConcurrentQueue<Exception> _listenerExceptions = new ConcurrentQueue<Exception>();
+        protected ConcurrentQueue<Exception> _listenerExceptions = new ConcurrentQueue<Exception>();
 
         private void OnListenerError(object sender, Exception ex)
         {
@@ -70,16 +69,20 @@ namespace Shielded.Gossip.Tests
 
         private ConcurrentQueue<(string, string, object)> _messages = new ConcurrentQueue<(string, string, object)>();
 
-        private void OnMessage(string server, object msg)
+        protected void OnMessage(string server, object msg)
         {
             _messages.Enqueue((DateTime.Now.ToString("hh:mm:ss.fff"), server, msg));
         }
 
-        private void CheckProtocols()
+        protected void CheckProtocols()
         {
             Assert.IsTrue(_listenerExceptions.IsEmpty);
         }
+    }
 
+    [TestClass]
+    public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase
+    {
         [TestMethod]
         public void GossipBackendMultiple_Basics()
         {

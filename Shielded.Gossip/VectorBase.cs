@@ -26,7 +26,6 @@ namespace Shielded.Gossip
     [DataContract(Namespace = "")]
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
-        where T : IEquatable<T>
     {
         public VectorBase() { }
 
@@ -62,7 +61,7 @@ namespace Shielded.Gossip
 
         private IEnumerable<byte[]> YieldFields()
         {
-            var idComparer = StringComparer.OrdinalIgnoreCase;
+            var idComparer = StringComparer.InvariantCultureIgnoreCase;
             var valueComparer = EqualityComparer;
             foreach (var item in Items.OrderBy(vi => vi.ServerId, idComparer))
             {
@@ -111,7 +110,7 @@ namespace Shielded.Gossip
 
             foreach (var grp in lefts.Select(i => (left: true, item: i))
                 .Concat(rights.Select(i => (left: false, item: i)))
-                .GroupBy(t => t.item.ServerId, StringComparer.OrdinalIgnoreCase))
+                .GroupBy(t => t.item.ServerId, StringComparer.InvariantCultureIgnoreCase))
             {
                 // note that this validates that the same server ID is not present multiple times in either.
                 var left = grp.SingleOrDefault(t => t.left).item;
@@ -144,7 +143,7 @@ namespace Shielded.Gossip
             {
                 if (string.IsNullOrWhiteSpace(item.ServerId))
                     throw new InvalidOperationException("Vector server IDs may not be empty.");
-                if (item.ServerId.Equals(ownServerId, StringComparison.OrdinalIgnoreCase))
+                if (item.ServerId.Equals(ownServerId, StringComparison.InvariantCultureIgnoreCase))
                 {
                     if (foundIt)
                         throw new InvalidOperationException("Vector may not mention the same server multiple times.");
@@ -174,5 +173,21 @@ namespace Shielded.Gossip
 
         public static TVec operator |(VectorBase<TVec, T> first, TVec second) =>
             first?.MergeWith(second) ?? second ?? new TVec();
+
+        public IEnumerable<VectorItem<T>> WithoutMe(string ownServerId)
+        {
+            if (string.IsNullOrWhiteSpace(ownServerId))
+                throw new ArgumentNullException();
+            return (Items ?? Enumerable.Empty<VectorItem<T>>())
+                .Where(i => !i.ServerId.Equals(ownServerId, StringComparison.InvariantCultureIgnoreCase));
+        }
+
+        public T GetOwn(string ownServerId)
+        {
+            if (string.IsNullOrWhiteSpace(ownServerId))
+                throw new ArgumentNullException();
+            return Items == null ? default :
+                Items.FirstOrDefault(i => i.ServerId.Equals(ownServerId, StringComparison.InvariantCultureIgnoreCase)).Value;
+        }
     }
 }
