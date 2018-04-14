@@ -127,7 +127,7 @@ namespace Shielded.Cluster
             }
         }
 
-        public static async Task<(bool, T)> Consistent<T>(Func<T> func)
+        public static async Task<(bool Success, T Value)> Consistent<T>(Func<T> func)
         {
             T res = default;
             var success = await Consistent(() => { res = func(); });

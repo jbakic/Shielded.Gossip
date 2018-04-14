@@ -21,7 +21,7 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             var read = Distributed.Consistent(() => _backends[B].TryGet("key", out Multiple<TestClass> res) ? res : null)
-                .Result.Item2.Single();
+                .Result.Value.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
