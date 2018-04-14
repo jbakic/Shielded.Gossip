@@ -174,7 +174,7 @@ namespace Shielded.Gossip
         public static TVec operator |(VectorBase<TVec, T> first, TVec second) =>
             first?.MergeWith(second) ?? second ?? new TVec();
 
-        public IEnumerable<VectorItem<T>> WithoutMe(string ownServerId)
+        public IEnumerable<VectorItem<T>> Without(string ownServerId)
         {
             if (string.IsNullOrWhiteSpace(ownServerId))
                 throw new ArgumentNullException();
@@ -182,12 +182,15 @@ namespace Shielded.Gossip
                 .Where(i => !i.ServerId.Equals(ownServerId, StringComparison.InvariantCultureIgnoreCase));
         }
 
-        public T GetOwn(string ownServerId)
+        public T this[string serverId]
         {
-            if (string.IsNullOrWhiteSpace(ownServerId))
-                throw new ArgumentNullException();
-            return Items == null ? default :
-                Items.FirstOrDefault(i => i.ServerId.Equals(ownServerId, StringComparison.InvariantCultureIgnoreCase)).Value;
+            get
+            {
+                if (string.IsNullOrWhiteSpace(serverId))
+                    throw new ArgumentNullException();
+                return Items == null ? default :
+                    Items.FirstOrDefault(i => i.ServerId.Equals(serverId, StringComparison.InvariantCultureIgnoreCase)).Value;
+            }
         }
     }
 }

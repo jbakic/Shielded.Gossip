@@ -22,6 +22,9 @@ namespace Shielded.Gossip
     {
         public TransactionVector() : base() { }
         public TransactionVector(params VectorItem<TransactionState>[] items) : base(items) { }
+        public TransactionVector(string ownServerId, TransactionState init) : base(ownServerId, init) { }
+
+        public static implicit operator TransactionVector((string, TransactionState) t) => new TransactionVector(t.Item1, t.Item2);
 
         protected override TransactionState Merge(TransactionState left, TransactionState right) => left | right;
     }
@@ -38,17 +41,27 @@ namespace Shielded.Gossip
     public class TransactionInfo : IMergeable<TransactionInfo, TransactionInfo>
     {
         [DataMember]
+        public string Initiator { get; set; }
+        [DataMember]
         public TransactionItem[] Items { get; set; }
         [DataMember]
         public TransactionVector State { get; set; }
 
         public VersionHash GetVersionHash() => (State ?? new TransactionVector()).GetVersionHash();
 
-        public TransactionInfo MergeWith(TransactionInfo other)
+        public TransactionInfo MergeWith(TransactionInfo other) => WithState(other?.State);
+
+        public TransactionInfo WithState(TransactionVector newState)
         {
-            // we assume the items are the same...
-            return new TransactionInfo { Items = Items, State = (State ?? new TransactionVector()).MergeWith(other?.State) };
+            return new TransactionInfo
+            {
+                Initiator = Initiator,
+                Items = Items,
+                State = (State ?? new TransactionVector()).MergeWith(newState)
+            };
         }
+
+        public TransactionInfo WithState(string ownServerId, TransactionState newState) => WithState((ownServerId, newState));
 
         public VectorRelationship VectorCompare(TransactionInfo other) => (State ?? new TransactionVector()).VectorCompare(other?.State);
     }

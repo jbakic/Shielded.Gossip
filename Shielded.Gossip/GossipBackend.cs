@@ -357,7 +357,7 @@ namespace Shielded.Gossip
 
         Task<bool> IBackend.Prepare(CommitContinuation cont)
         {
-            var transaction = new TransactionInfo();
+            var transaction = new TransactionInfo { Initiator = Transport.OwnId };
             TaskCompletionSource<bool> tcs = null;
             var id = WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString());
             cont.InContext(() =>
@@ -409,11 +409,7 @@ namespace Shielded.Gossip
                     _continuations.Remove(id);
                     if (!TryGetInternal(id, out TransactionInfo current))
                         return;
-                    SetInternal(id, new TransactionInfo
-                    {
-                        Items = current.Items,
-                        State = current.State.Modify(Transport.OwnId, TransactionState.Success),
-                    });
+                    SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Success));
                 });
             }
 
@@ -565,11 +561,7 @@ namespace Shielded.Gossip
                             {
                                 if (!TryGetInternal(id, out TransactionInfo current))
                                     return;
-                                SetInternal(id, new TransactionInfo
-                                {
-                                    Items = newVal.Items,
-                                    State = current.State.Modify(Transport.OwnId, TransactionState.Fail),
-                                });
+                                SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Fail));
                             });
                             return;
                         }
@@ -577,16 +569,11 @@ namespace Shielded.Gossip
                         {
                             if (!TryGetInternal(id, out TransactionInfo current))
                                 return false;
-                            if (current.State.GetOwn(Transport.OwnId) != TransactionState.None)
+                            if (current.State[Transport.OwnId] != TransactionState.None)
                                 return false;
-                            var newState = current.State.Modify(Transport.OwnId, TransactionState.Prepared);
                             _continuations[id] = cont;
                             // this is kinda recursive!
-                            SetInternal(id, new TransactionInfo
-                            {
-                                Items = current.Items,
-                                State = newState,
-                            });
+                            SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
                             return true;
                         });
                         if (!ok)
@@ -616,35 +603,31 @@ namespace Shielded.Gossip
                         {
                             _continuations.Remove(id);
                             TaskCompletionSource<bool> tcs = null;
-                            cont.InContext(() => tcs = _prepareCompleter.Value);
+                            cont.InContext(() => tcs = _prepareCompleter.GetValueOrDefault());
                             Shield.SideEffect(() =>
                             {
                                 if (tcs != null)
-                                    tcs.SetResult(false);
+                                    tcs.TrySetResult(false);
                                 else
                                     cont.TryRollback();
                             });
                         }
-                        else if (current.State.WithoutMe(Transport.OwnId).All(s => s.Value == TransactionState.Prepared) &&
-                            current.State.GetOwn(Transport.OwnId) == TransactionState.None)
+                        else if (current.State.Without(Transport.OwnId).All(s => s.Value == TransactionState.Prepared) &&
+                            current.State[Transport.OwnId] == TransactionState.None)
                         {
                             TaskCompletionSource<bool> tcs = null;
                             cont.InContext(() => tcs = _prepareCompleter.Value);
                             Shield.SideEffect(() => tcs.TrySetResult(true));
                         }
                         else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
-                            current.State.GetOwn(Transport.OwnId) != TransactionState.Success)
+                            current.State[Transport.OwnId] != TransactionState.Success)
                         {
                             _continuations.Remove(id);
                             Shield.SideEffect(() =>
                             {
                                 cont.TryCommit();
                                 Distributed.Run(() =>
-                                    SetInternal(id, new TransactionInfo
-                                    {
-                                        Items = current.Items,
-                                        State = current.State.Modify(Transport.OwnId, TransactionState.Success),
-                                    })).Wait();
+                                    SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Success))).Wait();
                             });
                         }
                     });
