@@ -20,6 +20,7 @@ namespace Shielded.Gossip
         private readonly ShieldedLocal<bool> _isExternalConsistent = new ShieldedLocal<bool>();
         private readonly ShieldedLocal<ulong> _localOldHash = new ShieldedLocal<ulong>();
         private readonly ShieldedLocal<ulong> _localNewHash = new ShieldedLocal<ulong>();
+        private readonly ShieldedLocal<string> _directMailRestriction = new ShieldedLocal<string>();
 
         private readonly Timer _gossipTimer;
         private readonly IDisposable _preCommit;
@@ -416,10 +417,23 @@ namespace Shielded.Gossip
             // eventual transaction
             if (!Configuration.DirectMail)
                 return Task.FromResult<object>(null);
-            var transaction = new DirectMail();
-            cont.InContext(() => transaction.Items = _local.Changes.Select(key => _local[key]).ToArray());
-            if (transaction.Items.Any())
-                Transport.Broadcast(transaction);
+            var package = new DirectMail();
+            bool hasRestriction = false;
+            string restriction = null;
+            cont.InContext(() =>
+            {
+                hasRestriction = _directMailRestriction.HasValue;
+                if (hasRestriction)
+                    restriction = _directMailRestriction.Value;
+                package.Items = _local.Changes.Select(key => _local[key]).ToArray();
+            });
+            if (package.Items.Any())
+            {
+                if (!hasRestriction)
+                    Transport.Broadcast(package);
+                else if (restriction != null)
+                    Transport.Send(restriction, package);
+            }
             return Task.FromResult<object>(null);
         }
 
@@ -572,7 +586,7 @@ namespace Shielded.Gossip
                             if (current.State[Transport.OwnId] != TransactionState.None)
                                 return false;
                             _continuations[id] = cont;
-                            // this is kinda recursive!
+                            _directMailRestriction.Value = current.Initiator;
                             SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
                             return true;
                         });
@@ -623,12 +637,7 @@ namespace Shielded.Gossip
                             current.State[Transport.OwnId] != TransactionState.Success)
                         {
                             _continuations.Remove(id);
-                            Shield.SideEffect(() =>
-                            {
-                                cont.TryCommit();
-                                Distributed.Run(() =>
-                                    SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Success))).Wait();
-                            });
+                            Shield.SideEffect(() => cont.TryCommit());
                         }
                     });
                 });
