@@ -19,7 +19,7 @@ namespace Shielded.Cluster
         public static void AssertInTransaction()
         {
             if (_current == null)
-                throw new InvalidOperationException("Operation needs to be in a Distributed.Run call.");
+                throw new InvalidOperationException("Operation needs to be in a Distributed transaction.");
         }
 
         public static bool IsConsistent
