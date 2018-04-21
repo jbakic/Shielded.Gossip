@@ -184,7 +184,8 @@ namespace Shielded.Gossip
         async Task<bool> PrepareInternal(string id, BackendState ourState, TransactionInfo newInfo = null)
         {
             var lockTask = BlockGossip(ourState);
-            var timeout = GetNewTimeout();
+            // "slaves" always wait for max timeout.
+            var timeout = newInfo != null ? GetNewTimeout() : Configuration.ConsistentPrepareTimeoutRange.Max;
             var resTask = await Task.WhenAny(lockTask, Task.Delay(timeout));
             return resTask == lockTask && lockTask.Result &&
                 Check(id, newInfo);
