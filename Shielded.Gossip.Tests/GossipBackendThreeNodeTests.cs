@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace Shielded.Gossip.Tests
 {
-    public class GossipBackendThreeNodeTestsBase
+    public abstract class GossipBackendThreeNodeTestsBase<TBackend> where TBackend : IBackend, IDisposable
     {
         public class TestClass : IHasVectorClock
         {
@@ -31,12 +31,14 @@ namespace Shielded.Gossip.Tests
             { C, new IPEndPoint(IPAddress.Loopback, 2003) },
         };
 
-        protected IDictionary<string, GossipBackend> _backends;
+        protected IDictionary<string, TBackend> _backends;
+
+        protected abstract TBackend CreateBackend(ITransport transport, GossipConfiguration configuration);
 
         [TestInitialize]
         public void Init()
         {
-            _backends = _addresses.Select(kvp =>
+            _backends = new Dictionary<string, TBackend>(_addresses.Select(kvp =>
             {
                 var transport = new TcpTransport(kvp.Key, kvp.Value,
                     new ShieldedDict<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), null, StringComparer.InvariantCultureIgnoreCase));
@@ -44,11 +46,11 @@ namespace Shielded.Gossip.Tests
                 transport.Error += OnListenerError;
                 transport.StartListening();
 
-                return new GossipBackend(transport, new GossipConfiguration
+                return new KeyValuePair<string, TBackend>(kvp.Key, CreateBackend(transport, new GossipConfiguration
                 {
                     GossipInterval = 250,
-                });
-            }).ToDictionary(b => b.Transport.OwnId, StringComparer.InvariantCultureIgnoreCase);
+                }));
+            }), StringComparer.InvariantCultureIgnoreCase);
         }
 
         [TestCleanup]
@@ -81,8 +83,13 @@ namespace Shielded.Gossip.Tests
     }
 
     [TestClass]
-    public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase
+    public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase<GossipBackend>
     {
+        protected override GossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
+        {
+            return new GossipBackend(transport, configuration);
+        }
+
         [TestMethod]
         public void GossipBackendMultiple_Basics()
         {
@@ -117,7 +124,7 @@ namespace Shielded.Gossip.Tests
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).ToArray());
+                }).Wait())).ToArray());
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
@@ -175,7 +182,7 @@ namespace Shielded.Gossip.Tests
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).ToArray());
+                }).Wait())).ToArray());
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
@@ -210,7 +217,7 @@ namespace Shielded.Gossip.Tests
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).ToArray());
+                }).Wait())).ToArray());
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");

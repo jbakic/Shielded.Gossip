@@ -1,7 +1,6 @@
 ﻿using Shielded.Cluster;
 using Shielded.Standard;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -14,19 +13,16 @@ namespace Shielded.Gossip
     public class GossipBackend : IBackend, IDisposable
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
-        private readonly ShieldedDictNc<string, int> _gossipBlock = new ShieldedDictNc<string, int>();
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
         private readonly Shielded<ulong> _databaseHash = new Shielded<ulong>();
-        private readonly ShieldedLocal<bool> _isExternalConsistent = new ShieldedLocal<bool>();
-        private readonly ShieldedLocal<ulong> _localOldHash = new ShieldedLocal<ulong>();
-        private readonly ShieldedLocal<ulong> _localNewHash = new ShieldedLocal<ulong>();
-        private readonly ShieldedLocal<string> _directMailRestriction = new ShieldedLocal<string>();
 
         private readonly Timer _gossipTimer;
         private readonly IDisposable _preCommit;
 
         public readonly ITransport Transport;
         public readonly GossipConfiguration Configuration;
+
+        public readonly ShieldedLocal<string> DirectMailRestriction = new ShieldedLocal<string>();
 
         public GossipBackend(ITransport transport, GossipConfiguration configuration)
         {
@@ -38,14 +34,9 @@ namespace Shielded.Gossip
 
             _preCommit = Shield.PreCommit(() => _local.TryGetValue("any", out MessageItem _) || true, () =>
             {
-                if (IsConsistent)
-                    BlockGossip();
-                else
-                    SyncIndexes();
+                SyncIndexes();
             });
         }
-
-        private bool IsConsistent => Distributed.IsConsistent || _isExternalConsistent.GetValueOrDefault();
 
         private void SyncIndexes()
         {
@@ -61,68 +52,6 @@ namespace Shielded.Gossip
                 newItem.Freshness = newFresh;
                 _freshIndex.Add(newFresh, key);
             }
-        }
-
-        private void BlockGossip()
-        {
-            var changes = _local.Changes.ToArray();
-            if (!changes.Any())
-                return;
-            var oldHash = _localOldHash.GetValueOrDefault();
-            var newHash = _localNewHash.GetValueOrDefault();
-
-            void unblock(ulong hash) => Shield.InTransaction(() =>
-            {
-                _databaseHash.Commute((ref ulong h) => h ^= hash);
-                foreach (var key in changes)
-                {
-                    UnblockGossip(key);
-                    if (_local.TryGetValue(key, out var local))
-                        _local[key] = local;
-                }
-            });
-            Shield.SideEffect(() => unblock(newHash), () => unblock(oldHash));
-
-            var tcs = new TaskCompletionSource<object>();
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                try
-                {
-                    Shield.InTransaction(() =>
-                    {
-                        _databaseHash.Commute((ref ulong h) => h ^= oldHash);
-                        foreach (var key in changes)
-                            BlockGossip(key);
-                    });
-                    tcs.SetResult(null);
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetException(ex);
-                }
-            });
-            tcs.Task.Wait();
-        }
-
-        private void BlockGossip(string key)
-        {
-            _gossipBlock.TryGetValue(key, out var i);
-            _gossipBlock[key] = ++i;
-        }
-
-        private void UnblockGossip(string key)
-        {
-            if (!_gossipBlock.TryGetValue(key, out var i))
-                return;
-            if (--i <= 0)
-                _gossipBlock.Remove(key);
-            else
-                _gossipBlock[key] = i;
-        }
-
-        private bool IsGossipBlocked(string key)
-        {
-            return _gossipBlock.ContainsKey(key);
         }
 
         private long GetNextFreshness()
@@ -215,41 +144,17 @@ namespace Shielded.Gossip
             }
         }
 
-        private static readonly MethodInfo _itemMsgMethod = typeof(GossipBackend)
-            .GetMethod("SetInternalWoEnlist", BindingFlags.Instance | BindingFlags.NonPublic);
+        private readonly ApplyMethods _applyMethods = new ApplyMethods(typeof(GossipBackend)
+            .GetMethod("SetInternalWoEnlist", BindingFlags.Instance | BindingFlags.NonPublic));
 
-        private delegate VectorRelationship ApplyDelegate(string key, object obj);
-
-        private readonly ConcurrentDictionary<Type, ApplyDelegate> _applyDelegates = new ConcurrentDictionary<Type, ApplyDelegate>();
-
-        private ApplyDelegate CreateSetter(Type t)
-        {
-            var methodInfo = _itemMsgMethod.MakeGenericMethod(t);
-            var genericMethod = typeof(GossipBackend).GetMethod("CreateSetterGeneric", BindingFlags.NonPublic | BindingFlags.Instance);
-            MethodInfo genericHelper = genericMethod.MakeGenericMethod(t);
-            return (ApplyDelegate)genericHelper.Invoke(this, new object[] { methodInfo });
-        }
-
-        private ApplyDelegate CreateSetterGeneric<TItem>(MethodInfo setter)
-            where TItem : IMergeable<TItem, TItem>
-        {
-            var setterTypedDelegate = (Func<string, TItem, VectorRelationship>)
-                Delegate.CreateDelegate(typeof(Func<string, TItem, VectorRelationship>), this, setter);
-            ApplyDelegate setterDelegate = ((key, obj) => setterTypedDelegate(key, (TItem)obj));
-            return setterDelegate;
-        }
-
-        private void ApplyItems(MessageItem[] items)
+        public void ApplyItems(IEnumerable<MessageItem> items)
         {
             if (items == null)
                 return;
-            var isConsistent = IsConsistent;
             foreach (var item in items)
             {
-                if (!isConsistent && IsGossipBlocked(item.Key))
-                    continue;
-                var obj = Serializer.Deserialize(item.Data);
-                var method = _applyDelegates.GetOrAdd(obj.GetType(), CreateSetter);
+                var obj = (IHasVersionHash)Serializer.Deserialize(item.Data);
+                var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
             }
         }
@@ -336,7 +241,7 @@ namespace Shielded.Gossip
         private IEnumerable<MessageItem> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd)
         {
             var startFrom = long.MaxValue;
-            var result = new HashSet<string>(_gossipBlock.Keys);
+            var result = new HashSet<string>();
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
@@ -351,70 +256,13 @@ namespace Shielded.Gossip
                     yield return _local[kvp.Value];
         }
 
-        private readonly ShieldedDictNc<string, CommitContinuation> _continuations = new ShieldedDictNc<string, CommitContinuation>();
-
-        private readonly ShieldedLocal<string> _transactionId = new ShieldedLocal<string>();
-        private readonly ShieldedLocal<TaskCompletionSource<bool>> _prepareCompleter = new ShieldedLocal<TaskCompletionSource<bool>>();
-
         Task<bool> IBackend.Prepare(CommitContinuation cont)
         {
-            var transaction = new TransactionInfo { Initiator = Transport.OwnId };
-            TaskCompletionSource<bool> tcs = null;
-            var id = WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString());
-            cont.InContext(() =>
-            {
-                transaction.Items = _local.Changes.Select(key =>
-                {
-                    var local = _local[key];
-                    return new TransactionItem
-                    {
-                        Key = key,
-                        Data = local.Data,
-                        Expected = local.LastSetResult,
-                    };
-                }).ToArray();
-                if (transaction.Items.Any())
-                {
-                    _transactionId.Value = id;
-                    _prepareCompleter.Value = tcs = new TaskCompletionSource<bool>();
-                }
-            });
-            if (!transaction.Items.Any())
-                return Task.FromResult(true);
-
-            Distributed.Run(() =>
-            {
-                transaction.State = new TransactionVector(
-                    new[] { new VectorItem<TransactionState>(Transport.OwnId, TransactionState.None) }
-                    .Concat(Transport.Servers.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
-                    .ToArray());
-                _continuations[id] = cont;
-                SetInternal(id, transaction);
-            }).Wait();
-            return tcs.Task;
+            return Task.FromResult(true);
         }
 
         Task IBackend.Commit(CommitContinuation cont)
         {
-            string id = null;
-            cont.InContext(() =>
-            {
-                if (_transactionId.HasValue)
-                    id = _transactionId.Value;
-            });
-            if (id != null)
-            {
-                // consistent transaction
-                return Distributed.Run(() =>
-                {
-                    _continuations.Remove(id);
-                    if (!TryGetInternal(id, out TransactionInfo current))
-                        return;
-                    SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Success));
-                });
-            }
-
-            // eventual transaction
             if (!Configuration.DirectMail)
                 return Task.FromResult<object>(null);
             var package = new DirectMail();
@@ -422,9 +270,9 @@ namespace Shielded.Gossip
             string restriction = null;
             cont.InContext(() =>
             {
-                hasRestriction = _directMailRestriction.HasValue;
+                hasRestriction = DirectMailRestriction.HasValue;
                 if (hasRestriction)
-                    restriction = _directMailRestriction.Value;
+                    restriction = DirectMailRestriction.Value;
                 package.Items = _local.Changes.Select(key => _local[key]).ToArray();
             });
             if (package.Items.Any())
@@ -439,32 +287,7 @@ namespace Shielded.Gossip
 
         void IBackend.Rollback() { }
 
-        private string WrapPublicKey(string key)
-        {
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException();
-            return PublicPfx + key;
-        }
-
-        private string WrapInternalKey(string prefix, string key)
-        {
-            return prefix + key;
-        }
-
-        private const string PublicPfx = "|";
-        private const string TransactionPfx = "transaction|";
-
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
-        {
-            key = WrapPublicKey(key);
-            item = default;
-            if (!_local.TryGetValue(key, out MessageItem i))
-                return false;
-            item = (TItem)Serializer.Deserialize(i.Data);
-            return true;
-        }
-
-        private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
             item = default;
             if (!_local.TryGetValue(key, out MessageItem i))
@@ -475,8 +298,6 @@ namespace Shielded.Gossip
 
         public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
         {
-            key = WrapPublicKey(key);
-            Distributed.EnlistBackend(this);
             return SetInternal(key, item);
         }
 
@@ -508,146 +329,40 @@ namespace Shielded.Gossip
                 var cmp = oldVal.VectorCompare(val);
                 if (cmp == VectorRelationship.Greater || cmp == VectorRelationship.Equal)
                     return cmp;
-
                 val = oldVal.MergeWith(val);
+
+                if (OnChanging(key, oldVal, val))
+                    return VectorRelationship.Greater;
+
                 _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val), LastSetResult = cmp };
-                if (IsConsistent)
-                {
-                    _localOldHash.Value = _localOldHash.GetValueOrDefault() ^ GetHash(key, oldVal);
-                    _localNewHash.Value = _localNewHash.GetValueOrDefault() ^ GetHash(key, val);
-                }
-                else
-                {
-                    var hash = GetHash(key, oldVal) ^ GetHash(key, val);
-                    _databaseHash.Commute((ref ulong h) => h ^= hash);
-                }
-                OnChanging(key, oldVal, val);
+                var hash = GetHash(key, oldVal) ^ GetHash(key, val);
+                _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return cmp;
             }
             else
             {
+                if (OnChanging(key, default(TItem), val))
+                    return VectorRelationship.Greater;
+
                 _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val), LastSetResult = VectorRelationship.Less };
                 var hash = GetHash(key, val);
-                if (IsConsistent)
-                    _localNewHash.Value = _localNewHash.GetValueOrDefault() ^ hash;
-                else
-                    _databaseHash.Commute((ref ulong h) => h ^= hash);
+                _databaseHash.Commute((ref ulong h) => h ^= hash);
                 OnChanging(key, null, val);
                 return VectorRelationship.Less;
             }
         }
 
-        private void OnChanging(string key, object oldVal, object newVal)
+        private bool OnChanging(string key, object oldVal, object newVal)
         {
-            if (key.StartsWith(TransactionPfx))
-                OnTransactionChanging(key, oldVal as TransactionInfo, newVal as TransactionInfo);
+            var ch = Changing;
+            if (ch == null)
+                return false;
+            var ev = new ChangingEventArgs(key, oldVal, newVal);
+            ch.Invoke(this, ev);
+            return ev.Cancel;
         }
 
-        private void OnTransactionChanging(string id, TransactionInfo oldVal, TransactionInfo newVal)
-        {
-            if (oldVal == null)
-            {
-                if (newVal == null)
-                    throw new ApplicationException("Both old and new transaction info are null.");
-                if (_continuations.ContainsKey(id))
-                    return;
-                Shield.SideEffect(async () =>
-                {
-                    bool ok = true;
-                    CommitContinuation cont = null;
-                    try
-                    {
-                        cont = Shield.RunToCommit(Timeout.Infinite, () =>
-                        {
-                            _isExternalConsistent.Value = true;
-                            if (!TryGetInternal(id, out TransactionInfo current))
-                            {
-                                ok = false;
-                                return;
-                            }
-                            ApplyItems(current.Items);
-                            var items = _local.Changes.ToDictionary(k => k, k => _local[k]);
-                            ok = current.Items.All(input => IsOkApplied(input, items.TryGetValue(input.Key, out var local) ? local : null));
-                        });
-                        if (!ok)
-                        {
-                            await Distributed.Run(() =>
-                            {
-                                if (!TryGetInternal(id, out TransactionInfo current))
-                                    return;
-                                SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Fail));
-                            });
-                            return;
-                        }
-                        ok = await Distributed.Run(() =>
-                        {
-                            if (!TryGetInternal(id, out TransactionInfo current))
-                                return false;
-                            if (current.State[Transport.OwnId] != TransactionState.None)
-                                return false;
-                            _continuations[id] = cont;
-                            _directMailRestriction.Value = current.Initiator;
-                            SetInternal(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
-                            return true;
-                        });
-                        if (!ok)
-                            cont.TryRollback();
-                    }
-                    catch
-                    {
-                        if (cont != null)
-                            cont.TryRollback();
-                        throw;
-                    }
-                });
-            }
-            else if (newVal == null)
-            {
-                // TODO: currently we never remove a transaction.
-            }
-            else // both != null
-            {
-                Shield.SideEffect(async () =>
-                {
-                    await Distributed.Run(() =>
-                    {
-                        if (!_continuations.TryGetValue(id, out var cont))
-                            return;
-                        if (!TryGetInternal(id, out TransactionInfo current) || current.State.Items.Any(s => s.Value == TransactionState.Fail))
-                        {
-                            _continuations.Remove(id);
-                            TaskCompletionSource<bool> tcs = null;
-                            cont.InContext(() => tcs = _prepareCompleter.GetValueOrDefault());
-                            Shield.SideEffect(() =>
-                            {
-                                if (tcs != null)
-                                    tcs.TrySetResult(false);
-                                else
-                                    cont.TryRollback();
-                            });
-                        }
-                        else if (current.State.Without(Transport.OwnId).All(s => s.Value == TransactionState.Prepared) &&
-                            current.State[Transport.OwnId] == TransactionState.None)
-                        {
-                            TaskCompletionSource<bool> tcs = null;
-                            cont.InContext(() => tcs = _prepareCompleter.Value);
-                            Shield.SideEffect(() => tcs.TrySetResult(true));
-                        }
-                        else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
-                            current.State[Transport.OwnId] != TransactionState.Success)
-                        {
-                            _continuations.Remove(id);
-                            Shield.SideEffect(() => cont.TryCommit());
-                        }
-                    });
-                });
-            }
-        }
-
-        private static bool IsOkApplied(TransactionItem incoming, MessageItem applied)
-        {
-            return incoming.Expected == applied?.LastSetResult;
-        }
+        public event EventHandler<ChangingEventArgs> Changing;
 
         public void Dispose()
         {

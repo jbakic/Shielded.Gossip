@@ -18,5 +18,7 @@ namespace Shielded.Gossip
         // server. flood control.
         public int AntiEntropyIdleTimeout { get; set; } = 2000;
         public int AntiEntropyHuntingLimit { get; set; } = 2;
+
+        public int ConsistentPrepareTimeout { get; set; } = 30000;
     }
 }
