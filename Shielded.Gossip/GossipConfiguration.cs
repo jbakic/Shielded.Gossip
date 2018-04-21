@@ -19,6 +19,6 @@ namespace Shielded.Gossip
         public int AntiEntropyIdleTimeout { get; set; } = 2000;
         public int AntiEntropyHuntingLimit { get; set; } = 2;
 
-        public int ConsistentPrepareTimeout { get; set; } = 30000;
+        public (int Min, int Max) ConsistentPrepareTimeoutRange { get; set; } = (10000, 30000);
     }
 }

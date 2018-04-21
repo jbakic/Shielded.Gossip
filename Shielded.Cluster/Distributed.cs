@@ -89,8 +89,16 @@ namespace Shielded.Cluster
             }
         }
 
-        public static async Task<bool> Consistent(Action act)
+        public static Task<bool> Consistent(Action act)
         {
+            return Consistent(1, act);
+        }
+
+        public static async Task<bool> Consistent(int attempts, Action act)
+        {
+            if (attempts <= 0)
+                throw new ArgumentOutOfRangeException();
+
             if (_current != null)
             {
                 if (!_current.IsConsistent)
@@ -99,38 +107,47 @@ namespace Shielded.Cluster
                 return true;
             }
 
-            var info = new TransactionInfo { IsConsistent = true };
-            try
+            while (attempts --> 0)
             {
-                _current = info;
-                using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
+                var info = new TransactionInfo { IsConsistent = true };
+                try
+                {
+                    _current = info;
+                    using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
+                    {
+                        _current = null;
+                        if (!await Prepare(cont, info))
+                        {
+                            Rollback(info);
+                            continue;
+                        }
+                        await Commit(cont, info);
+                        cont.Commit();
+                        return true;
+                    }
+                }
+                catch
+                {
+                    Rollback(info);
+                    throw;
+                }
+                finally
                 {
                     _current = null;
-                    if (!await Prepare(cont, info))
-                    {
-                        Rollback(info);
-                        return false;
-                    }
-                    await Commit(cont, info);
-                    cont.Commit();
-                    return true;
                 }
             }
-            catch
-            {
-                Rollback(info);
-                throw;
-            }
-            finally
-            {
-                _current = null;
-            }
+            return false;
         }
 
-        public static async Task<(bool Success, T Value)> Consistent<T>(Func<T> func)
+        public static Task<(bool Success, T Value)> Consistent<T>(Func<T> func)
+        {
+            return Consistent(1, func);
+        }
+
+        public static async Task<(bool Success, T Value)> Consistent<T>(int attempts, Func<T> func)
         {
             T res = default;
-            var success = await Consistent(() => { res = func(); });
+            var success = await Consistent(attempts, () => { res = func(); });
             return (success, success ? res : default);
         }
 

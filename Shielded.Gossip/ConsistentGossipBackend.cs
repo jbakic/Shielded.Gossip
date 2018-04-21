@@ -109,10 +109,10 @@ namespace Shielded.Gossip
 
             public void Complete(bool res)
             {
-                PrepareCompleter.TrySetResult(res);
-                Committer.TrySetResult(null);
                 Shield.InTransaction(() => { Self._transactions.Remove(TransactionId); });
                 Self.UnblockGossip(this);
+                PrepareCompleter.TrySetResult(res);
+                Committer.TrySetResult(null);
             }
         }
 
@@ -175,10 +175,17 @@ namespace Shielded.Gossip
             return await ourState.PrepareCompleter.Task;
         }
 
+        int GetNewTimeout()
+        {
+            var rnd = new Random();
+            return rnd.Next(Configuration.ConsistentPrepareTimeoutRange.Min, Configuration.ConsistentPrepareTimeoutRange.Max);
+        }
+
         async Task<bool> PrepareInternal(string id, BackendState ourState, TransactionInfo newInfo = null)
         {
             var lockTask = BlockGossip(ourState);
-            var resTask = await Task.WhenAny(lockTask, Task.Delay(Configuration.ConsistentPrepareTimeout));
+            var timeout = GetNewTimeout();
+            var resTask = await Task.WhenAny(lockTask, Task.Delay(timeout));
             return resTask == lockTask && lockTask.Result &&
                 Check(id, newInfo);
         }
@@ -368,8 +375,8 @@ namespace Shielded.Gossip
                     _transactions.Remove(id);
                     Shield.SideEffect(() =>
                     {
-                        ourState.Complete(true);
                         Shield.InTransaction(() => Apply(current));
+                        ourState.Complete(true);
                     });
                 }
             });

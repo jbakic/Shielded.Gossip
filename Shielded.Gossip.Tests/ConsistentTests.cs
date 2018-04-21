@@ -37,17 +37,17 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void Consistent_Race()
         {
-            const int transactions = 11;
-            const int fieldCount = 10;
+            const int transactions = 100;
+            const int fieldCount = 50;
 
             foreach (var back in _backends.Values)
             {
                 back.Configuration.DirectMail = false;
-                back.Configuration.ConsistentPrepareTimeout = 2000;
+                back.Configuration.ConsistentPrepareTimeoutRange = (600, 1000);
             }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Consistent(() =>
+                Distributed.Consistent(5, () =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
@@ -56,6 +56,7 @@ namespace Shielded.Gossip.Tests
                 }))).Result;
             var expected = bools.Count(b => b);
 
+            Thread.Sleep(100);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
