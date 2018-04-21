@@ -218,16 +218,21 @@ namespace Shielded.Gossip
             return true;
         }
 
+        private readonly ApplyMethods _unblockMethods = new ApplyMethods(
+            typeof(GossipBackend).GetMethod("Set", BindingFlags.Instance | BindingFlags.Public));
+
         private void UnblockGossip(BackendState ourState)
         {
-            Shield.InTransaction(() =>
+            Distributed.RunLocal(() =>
             {
                 foreach (var key in ourState.Changes.Keys)
                     if (_fieldBlockers.TryGetValue(key, out BackendState state) && state == ourState)
                         _fieldBlockers.Remove(key);
-                // TODO: this serializes and immediately deserializes... maybe should not be using ApplyItems at all
-                _wrapped.ApplyItems(ourState.Blocked.Select(kvp =>
-                    new MessageItem { Key = kvp.Key, Data = Serializer.Serialize(kvp.Value) }));
+                foreach (var kvp in ourState.Blocked)
+                {
+                    var setter = _unblockMethods.Get(_wrapped, kvp.Value.GetType());
+                    setter(kvp.Key, kvp.Value);
+                }
             });
         }
 
