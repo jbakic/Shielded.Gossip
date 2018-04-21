@@ -334,7 +334,7 @@ namespace Shielded.Gossip
                 if (OnChanging(key, oldVal, val))
                     return VectorRelationship.Greater;
 
-                _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val), LastSetResult = cmp };
+                _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
                 var hash = GetHash(key, oldVal) ^ GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return cmp;
@@ -344,7 +344,7 @@ namespace Shielded.Gossip
                 if (OnChanging(key, default(TItem), val))
                     return VectorRelationship.Greater;
 
-                _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val), LastSetResult = VectorRelationship.Less };
+                _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
                 OnChanging(key, null, val);

@@ -63,8 +63,6 @@ namespace Shielded.Gossip
         public byte[] Data { get; set; }
 
         [IgnoreDataMember]
-        public VectorRelationship LastSetResult { get; set; }
-        [IgnoreDataMember]
         public long Freshness { get; set; }
 
         [IgnoreDataMember]
