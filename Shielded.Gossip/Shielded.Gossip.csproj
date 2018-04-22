@@ -2,6 +2,12 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <Authors>Josip Bakić</Authors>
+    <Version>0.1.0</Version>
+    <Description>Distributed Transactional Memory for .NET Standard 2.0</Description>
+    <PackageId>Shielded.Gossip</PackageId>
+    <Product>Shielded.Gossip</Product>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">

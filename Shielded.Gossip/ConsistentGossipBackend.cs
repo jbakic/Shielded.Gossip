@@ -196,10 +196,12 @@ namespace Shielded.Gossip
             var prepareTask = ourState.PrepareCompleter.Task;
             foreach (var key in ourState.Changes.Keys.OrderBy(k => k, StringComparer.InvariantCulture))
             {
-                Task nextWait;
+                Task nextWait = null;
                 while ((nextWait = Shield.InTransaction(() =>
                 {
-                    if (_fieldBlockers.TryGetValue(key, out var someState))
+                    if (_fieldBlockers.TryGetValue(key, out var someState) &&
+                        // we won't wait twice, in case someone forgot to remove himself.
+                        someState.Committer.Task != nextWait)
                     {
                         return someState.Committer.Task;
                     }
@@ -257,9 +259,11 @@ namespace Shielded.Gossip
                         return false;
                     foreach (var item in current.Items)
                     {
+                        if (item.Expected == VectorRelationship.Conflict)
+                            continue;
                         var obj = Serializer.Deserialize(item.Data);
                         var comparer = _compareMethods.Get(this, obj.GetType());
-                        if (!IsItemOk(item.Expected, comparer(item.Key, obj)))
+                        if (item.Expected != comparer(item.Key, obj))
                             return false;
                     }
                     return true;
@@ -269,11 +273,6 @@ namespace Shielded.Gossip
             {
                 return false;
             }
-        }
-
-        private static bool IsItemOk(VectorRelationship expected, VectorRelationship currentRel)
-        {
-            return expected == VectorRelationship.Conflict || expected == currentRel;
         }
 
         private void _wrapped_Changing(object sender, ChangingEventArgs e)
@@ -401,7 +400,7 @@ namespace Shielded.Gossip
             {
                 var id = ourState.TransactionId;
                 if (!_wrapped.TryGet(id, out TransactionInfo current) || current.State[Transport.OwnId] != TransactionState.None)
-                    return;
+                    throw new ApplicationException("Critical error - unexpected commit failure.");
                 Apply(current);
                 _wrapped.Set(id, current.WithState(current.State.Modify(Transport.OwnId, TransactionState.Success)));
                 Shield.SideEffect(() => ourState.Complete(true));

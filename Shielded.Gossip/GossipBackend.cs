@@ -153,7 +153,7 @@ namespace Shielded.Gossip
                 return;
             foreach (var item in items)
             {
-                var obj = (IHasVersionHash)Serializer.Deserialize(item.Data);
+                var obj = Serializer.Deserialize(item.Data);
                 var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
             }
@@ -180,7 +180,7 @@ namespace Shielded.Gossip
             bool allNewIncluded = false;
             int cutoff = Configuration.AntiEntropyPackageCutoff;
             int packageSize = Configuration.AntiEntropyPackageSize;
-            long? prevFreshness = null; 
+            long? prevFreshness = null;
             var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd)
                 .TakeWhile(item =>
                 {
@@ -241,25 +241,19 @@ namespace Shielded.Gossip
         private IEnumerable<MessageItem> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd)
         {
             var startFrom = long.MaxValue;
-            var result = new HashSet<string>();
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
-                    if (result.Add(kvp.Value))
-                        yield return _local[kvp.Value];
+                    yield return _local[kvp.Value];
                 startFrom = prevWindowStart.Value - 1;
             }
             // to signal that the new result connects with the previous window.
             yield return null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
-                if (result.Add(kvp.Value))
-                    yield return _local[kvp.Value];
+                yield return _local[kvp.Value];
         }
 
-        Task<bool> IBackend.Prepare(CommitContinuation cont)
-        {
-            return Task.FromResult(true);
-        }
+        Task<bool> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(true);
 
         Task IBackend.Commit(CommitContinuation cont)
         {
@@ -279,7 +273,7 @@ namespace Shielded.Gossip
             {
                 if (!hasRestriction)
                     Transport.Broadcast(package);
-                else if (restriction != null)
+                else if (!string.IsNullOrWhiteSpace(restriction))
                     Transport.Send(restriction, package);
             }
             return Task.FromResult<object>(null);
@@ -347,7 +341,6 @@ namespace Shielded.Gossip
                 _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
-                OnChanging(key, null, val);
                 return VectorRelationship.Less;
             }
         }
