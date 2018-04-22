@@ -73,7 +73,10 @@ namespace Shielded.Gossip.Tests
 
         protected void OnMessage(string server, object msg)
         {
-            _messages.Enqueue((DateTime.Now.ToString("hh:mm:ss.fff"), server, msg));
+            if (msg is DirectMail dm && dm.Items != null && dm.Items.Length == 1)
+                _messages.Enqueue((DateTime.Now.ToString("hh:mm:ss.fff"), server, dm.Items[0]));
+            else
+                _messages.Enqueue((DateTime.Now.ToString("hh:mm:ss.fff"), server, msg));
         }
 
         protected void CheckProtocols()

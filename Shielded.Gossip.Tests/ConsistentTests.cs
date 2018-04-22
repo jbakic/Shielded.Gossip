@@ -43,11 +43,11 @@ namespace Shielded.Gossip.Tests
             foreach (var back in _backends.Values)
             {
                 back.Configuration.DirectMail = false;
-                back.Configuration.ConsistentPrepareTimeoutRange = (600, 1000);
+                back.Configuration.ConsistentPrepareTimeoutRange = (1000, 2000);
             }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Consistent(5, () =>
+                Distributed.Consistent(10, () =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
@@ -65,6 +65,7 @@ namespace Shielded.Gossip.Tests
                 .Result;
 
             Assert.AreEqual(expected, read);
+            Assert.AreEqual(transactions, read);
         }
     }
 }

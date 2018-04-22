@@ -253,7 +253,7 @@ namespace Shielded.Gossip
                 yield return _local[kvp.Value];
         }
 
-        Task<bool> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(true);
+        Task<PrepareResult> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(new PrepareResult(true));
 
         Task IBackend.Commit(CommitContinuation cont)
         {

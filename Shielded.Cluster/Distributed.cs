@@ -116,9 +116,13 @@ namespace Shielded.Cluster
                     using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
                     {
                         _current = null;
-                        if (!await Prepare(cont, info))
+                        var prepareRes = await Prepare(cont, info);
+                        if (!prepareRes.Success)
                         {
                             Rollback(info);
+                            cont.Rollback();
+                            if (prepareRes.WaitBeforeRetry != null)
+                                await prepareRes.WaitBeforeRetry;
                             continue;
                         }
                         await Commit(cont, info);
@@ -151,10 +155,10 @@ namespace Shielded.Cluster
             return (success, success ? res : default);
         }
 
-        private static async Task<bool> Prepare(CommitContinuation cont, TransactionInfo info)
+        private static async Task<PrepareResult> Prepare(CommitContinuation cont, TransactionInfo info)
         {
-            var bools = await Task.WhenAll(info.Backends.Select(b => b.Prepare(cont)));
-            return bools.All(b => b);
+            var prepares = await Task.WhenAll(info.Backends.Select(b => b.Prepare(cont)));
+            return new PrepareResult(prepares.All(p => p.Success), prepares.FirstOrDefault(p => p.WaitBeforeRetry != null).WaitBeforeRetry);
         }
 
         private static Task Commit(CommitContinuation cont, TransactionInfo info)
