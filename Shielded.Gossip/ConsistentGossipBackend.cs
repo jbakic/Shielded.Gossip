@@ -167,13 +167,13 @@ namespace Shielded.Gossip
                     .Concat(Transport.Servers.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
                     .ToArray()),
             };
+            var id = ourState.TransactionId;
+            Shield.InTransaction(() => _transactions.Add(id, ourState));
             async Task<PrepareResult> PreparationProcess()
             {
-                var id = ourState.TransactionId;
-                Shield.InTransaction(() => _transactions.Add(id, ourState));
-                var prepare = await PrepareInternal(id, ourState, transaction);
-                if (!prepare.Success)
-                    return prepare;
+                var prepare = await Task.WhenAny(PrepareInternal(id, ourState, transaction), ourState.PrepareCompleter.Task);
+                if (!prepare.Result.Success)
+                    return prepare.Result;
                 await Distributed.Run(() => _wrapped.Set(id, transaction));
                 return await ourState.PrepareCompleter.Task;
             }
@@ -210,56 +210,66 @@ namespace Shielded.Gossip
             return lockTask.Result.Success ? new PrepareResult(Check(id), null) : lockTask.Result;
         }
 
+
         private async Task<PrepareResult> BlockGossip(BackendState ourState)
         {
             var prepareTask = ourState.PrepareCompleter.Task;
-            foreach (var key in ourState.Changes.Keys.OrderBy(k => k, StringComparer.InvariantCulture))
+            var keys = ourState.Changes.Keys.OrderBy(k => k, StringComparer.InvariantCulture).ToArray();
+            bool success = false;
+            try
             {
-                BackendState nextWait = null;
-                while ((nextWait = Shield.InTransaction(() =>
+                while (true)
                 {
-                    if (_fieldBlockers.TryGetValue(key, out var someState) && someState != nextWait)
+                    (Task waitFor, Task retryFor) = Shield.InTransaction(() =>
                     {
-                        if (IsHigherPrio(ourState, someState))
-                            Shield.SideEffect(() =>
-                                someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task)));
-                        return someState;
-                    }
-                    _fieldBlockers[key] = ourState;
-                    return null;
-                })) != null)
-                {
-                    try
+                        var tasks = keys.Select<string, (Task, Task)>(key =>
+                        {
+                            if (!_fieldBlockers.TryGetValue(key, out var someState))
+                                return (null, null);
+                            if (IsHigherPrio(someState, ourState))
+                                return (null, someState.Committer.Task);
+                            if (IsHigherPrio(ourState, someState))
+                            {
+                                Shield.SideEffect(() =>
+                                    someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task)));
+                                return (someState.Committer.Task, null);
+                            }
+                            return (someState.Committer.Task, null);
+                        }).ToArray();
+
+                        if (tasks.Any(t => t.Item2 != null))
+                            return ((Task)null, Task.WhenAll(tasks.Where(t => t.Item2 != null).Select(t => t.Item2)));
+                        else if (tasks.Any(t => t.Item1 != null))
+                            return (Task.WhenAll(tasks.Where(t => t.Item1 != null).Select(t => t.Item1)), null);
+
+                        foreach (var key in keys)
+                            _fieldBlockers[key] = ourState;
+                        return (null, null);
+                    });
+                    if (retryFor != null)
+                        return new PrepareResult(false, retryFor);
+                    if (prepareTask.IsCompleted)
+                        return prepareTask.Result;
+                    if (waitFor == null)
                     {
-                        if (IsHigherPrio(nextWait, ourState))
-                            return new PrepareResult(false, nextWait.Committer.Task);
-                        if (await Task.WhenAny(prepareTask, nextWait.Committer.Task) == prepareTask)
-                            return new PrepareResult(false, null);
+                        success = true;
+                        return new PrepareResult(true);
                     }
-                    catch { }
+
+                    if (await Task.WhenAny(prepareTask, waitFor) == prepareTask)
+                        return prepareTask.Result;
                 }
-                if (prepareTask.IsCompleted)
-                    return new PrepareResult(false, null);
             }
-            return new PrepareResult(true, null);
+            finally
+            {
+                if (!success)
+                    ourState.Complete(false);
+            }
         }
 
         private bool IsHigherPrio(BackendState left, BackendState right)
         {
             return StringComparer.InvariantCultureIgnoreCase.Compare(left.Initiator, right.Initiator) < 0;
-            //var ourHash = FNV1a32.Hash(YieldBytes(ourState));
-            //var otherHash = FNV1a32.Hash(YieldBytes(other));
-            //return otherHash < ourHash;
-        }
-
-        private IEnumerable<byte[]> YieldBytes(BackendState state)
-        {
-            yield return Encoding.UTF8.GetBytes(state.Initiator.ToLowerInvariant());
-            foreach (var kvp in state.Changes.OrderBy(kvp => kvp.Key, StringComparer.InvariantCulture))
-            {
-                yield return Encoding.UTF8.GetBytes(kvp.Key);
-                yield return BitConverter.GetBytes(((IHasVersionHash)Serializer.Deserialize(kvp.Value.Data)).GetVersionHash());
-            }
         }
 
         private readonly ApplyMethods _unblockMethods = new ApplyMethods(
@@ -371,20 +381,26 @@ namespace Shielded.Gossip
             {
                 if (newVal == null)
                     throw new ApplicationException("Both old and new transaction info are null.");
-                if (_transactions.ContainsKey(id))
+                if (_transactions.ContainsKey(id) || newVal.State.Items.Any(s => s.Value == TransactionState.Fail))
                     return;
+                var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
+                _transactions.Add(id, ourState);
                 Shield.SideEffect(async () =>
                 {
-                    var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
                     try
                     {
-                        Shield.InTransaction(() => _transactions.Add(id, ourState));
-                        if (!(await PrepareInternal(id, ourState)).Success || !await SetPrepared(id))
+                        if (!(await Task.WhenAny(PrepareInternal(id, ourState), ourState.PrepareCompleter.Task)).Result.Success)
                         {
                             await SetFail(id);
                             ourState.Complete(false);
                             return;
                         }
+                        if (!await SetPrepared(id))
+                        {
+                            ourState.Complete(false);
+                            return;
+                        }
+                        ourState.PrepareCompleter.TrySetResult(new PrepareResult(true));
                     }
                     catch
                     {
@@ -453,11 +469,8 @@ namespace Shielded.Gossip
                     current.State[Transport.OwnId] != TransactionState.Success)
                 {
                     _transactions.Remove(id);
-                    Shield.SideEffect(() =>
-                    {
-                        Shield.InTransaction(() => Apply(current));
-                        ourState.Complete(true);
-                    });
+                    Apply(current);
+                    Shield.SideEffect(() => ourState.Complete(true));
                 }
             });
         }

@@ -37,17 +37,16 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void Consistent_Race()
         {
-            const int transactions = 100;
+            const int transactions = 500;
             const int fieldCount = 50;
 
             foreach (var back in _backends.Values)
             {
                 back.Configuration.DirectMail = false;
-                back.Configuration.ConsistentPrepareTimeoutRange = (1000, 2000);
             }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Consistent(10, () =>
+                Distributed.Consistent(100, () =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);

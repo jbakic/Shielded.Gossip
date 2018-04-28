@@ -158,7 +158,8 @@ namespace Shielded.Cluster
         private static async Task<PrepareResult> Prepare(CommitContinuation cont, TransactionInfo info)
         {
             var prepares = await Task.WhenAll(info.Backends.Select(b => b.Prepare(cont)));
-            return new PrepareResult(prepares.All(p => p.Success), prepares.FirstOrDefault(p => p.WaitBeforeRetry != null).WaitBeforeRetry);
+            return new PrepareResult(prepares.All(p => p.Success),
+                Task.WhenAll(prepares.Where(p => p.WaitBeforeRetry != null).Select(p => p.WaitBeforeRetry)));
         }
 
         private static Task Commit(CommitContinuation cont, TransactionInfo info)
