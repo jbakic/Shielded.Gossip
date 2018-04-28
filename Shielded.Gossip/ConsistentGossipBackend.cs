@@ -182,7 +182,6 @@ namespace Shielded.Gossip
             if (resTask != prepTask || !prepTask.Result.Success)
             {
                 await SetFail(ourState.TransactionId);
-                ourState.Complete(false);
                 if (resTask != prepTask)
                     return new PrepareResult(false, null);
             }
