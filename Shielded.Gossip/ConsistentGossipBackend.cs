@@ -229,11 +229,8 @@ namespace Shielded.Gossip
                             if (IsHigherPrio(someState, ourState))
                                 return (null, someState.Committer.Task);
                             if (IsHigherPrio(ourState, someState))
-                            {
                                 Shield.SideEffect(() =>
                                     someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task)));
-                                return (someState.Committer.Task, null);
-                            }
                             return (someState.Committer.Task, null);
                         }).ToArray();
 
