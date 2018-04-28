@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27130.2027
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Distro", "Distro\Distro.csproj", "{22A230C6-E2E7-4032-963F-91F38B2F7674}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Shielded.Standard", "Shielded.Standard\Shielded.Standard.csproj", "{E172743D-5598-45E2-AD83-131090B3E34A}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Shielded.Standard.Tests", "Shielded.Standard.Tests\Shielded.Standard.Tests.csproj", "{1ED4A252-8208-4F17-B497-E09173E363EB}"
@@ -25,10 +23,6 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{22A230C6-E2E7-4032-963F-91F38B2F7674}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{22A230C6-E2E7-4032-963F-91F38B2F7674}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{22A230C6-E2E7-4032-963F-91F38B2F7674}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{22A230C6-E2E7-4032-963F-91F38B2F7674}.Release|Any CPU.Build.0 = Release|Any CPU
 		{E172743D-5598-45E2-AD83-131090B3E34A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{E172743D-5598-45E2-AD83-131090B3E34A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E172743D-5598-45E2-AD83-131090B3E34A}.Release|Any CPU.ActiveCfg = Release|Any CPU
