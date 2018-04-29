@@ -45,11 +45,10 @@ namespace Shielded.Gossip
             {
                 var oldItem = Shield.ReadOldState(() => _local.TryGetValue(key, out MessageItem o) ? o : null);
                 if (oldItem != null)
-                {
                     _freshIndex.Remove(oldItem.Freshness, key);
-                }
-                var newItem = _local[key];
-                newItem.Freshness = newFresh;
+
+                if (_local.TryGetValue(key, out var newItem))
+                    newItem.Freshness = newFresh;
                 _freshIndex.Add(newFresh, key);
             }
         }
@@ -153,6 +152,11 @@ namespace Shielded.Gossip
                 return;
             foreach (var item in items)
             {
+                if (item.Data == null)
+                {
+                    RemoveInternal(item.Key);
+                    continue;
+                }
                 var obj = Serializer.Deserialize(item.Data);
                 var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
@@ -244,13 +248,13 @@ namespace Shielded.Gossip
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
-                    yield return _local[kvp.Value];
+                    yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value };
                 startFrom = prevWindowStart.Value - 1;
             }
             // to signal that the new result connects with the previous window.
             yield return null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
-                yield return _local[kvp.Value];
+                yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value };
         }
 
         Task<PrepareResult> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(new PrepareResult(true));
@@ -267,7 +271,9 @@ namespace Shielded.Gossip
                 hasRestriction = DirectMailRestriction.HasValue;
                 if (hasRestriction)
                     restriction = DirectMailRestriction.Value;
-                package.Items = _local.Changes.Select(key => _local[key]).ToArray();
+                package.Items = _local.Changes
+                    .Select(key => _local.TryGetValue(key, out var mi) ? mi : new MessageItem { Key = key })
+                    .ToArray();
             });
             if (package.Items.Any())
             {
@@ -325,9 +331,15 @@ namespace Shielded.Gossip
                     return cmp;
                 val = oldVal.MergeWith(val);
 
-                if (OnChanging(key, oldVal, val))
+                if (OnChanging(key, oldVal, val, out var remove))
                     return VectorRelationship.Greater;
-
+                if (remove)
+                {
+                    _local.Remove(key);
+                    var hashOld = GetHash(key, oldVal);
+                    _databaseHash.Commute((ref ulong h) => h ^= hashOld);
+                    return VectorRelationship.Greater;
+                }
                 _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
                 var hash = GetHash(key, oldVal) ^ GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
@@ -335,7 +347,7 @@ namespace Shielded.Gossip
             }
             else
             {
-                if (OnChanging(key, default(TItem), val))
+                if (OnChanging(key, default(TItem), val, out var remove) || remove)
                     return VectorRelationship.Greater;
 
                 _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
@@ -345,13 +357,33 @@ namespace Shielded.Gossip
             }
         }
 
-        private bool OnChanging(string key, object oldVal, object newVal)
+        public void Remove(string key)
         {
+            Distributed.EnlistBackend(this);
+            RemoveInternal(key);
+        }
+
+        public void RemoveInternal(string key)
+        {
+            if (!_local.TryGetValue(key, out var current))
+                return;
+            var val = (IHasVersionHash)Serializer.Deserialize(current.Data);
+            if (OnChanging(key, val, null, out var _))
+                return;
+            _local.Remove(key);
+            var hash = GetHash(key, val);
+            _databaseHash.Commute((ref ulong h) => h ^= hash);
+        }
+
+        private bool OnChanging(string key, object oldVal, object newVal, out bool remove)
+        {
+            remove = false;
             var ch = Changing;
             if (ch == null)
                 return false;
             var ev = new ChangingEventArgs(key, oldVal, newVal);
             ch.Invoke(this, ev);
+            remove = ev.Remove;
             return ev.Cancel;
         }
 

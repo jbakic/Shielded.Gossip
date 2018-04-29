@@ -26,7 +26,8 @@ namespace Shielded.Gossip
 
         public static implicit operator TransactionVector((string, TransactionState) t) => new TransactionVector(t.Item1, t.Item2);
 
-        protected override TransactionState Merge(TransactionState left, TransactionState right) => left | right;
+        protected override TransactionState Merge(TransactionState left, TransactionState right) =>
+            left == TransactionState.Fail || right == TransactionState.Fail ? TransactionState.Fail : (left | right);
     }
 
     [DataContract(Namespace = "")]

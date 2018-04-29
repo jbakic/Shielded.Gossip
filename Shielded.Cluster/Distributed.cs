@@ -16,50 +16,43 @@ namespace Shielded.Cluster
             public HashSet<IBackend> Backends = new HashSet<IBackend>();
         }
 
-        public static void AssertInTransaction()
+        public static void AssertIsRunning()
         {
-            if (_current == null)
+            if (!IsRunning)
                 throw new InvalidOperationException("Operation needs to be in a Distributed transaction.");
         }
 
-        public static bool IsConsistent
-        {
-            get
-            {
-                return _current != null && _current.IsConsistent;
-            }
-        }
+        public static bool IsRunning => Shield.IsInTransaction && _current.HasValue;
+        public static bool IsConsistent => Shield.IsInTransaction && _current.HasValue && _current.Value.IsConsistent;
 
-        [ThreadStatic]
-        private static TransactionInfo _current;
+        private static readonly ShieldedLocal<TransactionInfo> _current = new ShieldedLocal<TransactionInfo>();
 
         public static async Task Run(Action act)
         {
-            if (_current != null)
+            if (IsRunning)
             {
                 act();
                 return;
             }
 
-            var info = new TransactionInfo { IsConsistent = false };
+            TransactionInfo info = null;
             try
             {
-                _current = info;
-                using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
+                using (var cont = Shield.RunToCommit(Timeout.Infinite, () =>
                 {
-                    _current = null;
+                    _current.Value = info = new TransactionInfo { IsConsistent = false };
+                    act();
+                }))
+                {
                     await Commit(cont, info);
                     cont.Commit();
                 }
             }
             catch
             {
-                Rollback(info);
+                if (info != null)
+                    Rollback(info);
                 throw;
-            }
-            finally
-            {
-                _current = null;
             }
         }
 
@@ -72,21 +65,16 @@ namespace Shielded.Cluster
 
         public static void RunLocal(Action act)
         {
-            if (_current != null)
+            if (IsRunning)
             {
                 act();
                 return;
             }
-
-            try
+            Shield.InTransaction(() =>
             {
-                _current = new TransactionInfo { IsConsistent = false };
-                Shield.InTransaction(act);
-            }
-            finally
-            {
-                _current = null;
-            }
+                _current.Value = new TransactionInfo { IsConsistent = false };
+                act();
+            });
         }
 
         public static Task<bool> Consistent(Action act)
@@ -99,9 +87,9 @@ namespace Shielded.Cluster
             if (attempts <= 0)
                 throw new ArgumentOutOfRangeException();
 
-            if (_current != null)
+            if (IsRunning)
             {
-                if (!_current.IsConsistent)
+                if (!IsConsistent)
                     throw new InvalidOperationException("Consistent calls cannot nest within Run calls.");
                 act();
                 return true;
@@ -109,13 +97,15 @@ namespace Shielded.Cluster
 
             while (attempts --> 0)
             {
-                var info = new TransactionInfo { IsConsistent = true };
+                TransactionInfo info = null;
                 try
                 {
-                    _current = info;
-                    using (var cont = Shield.RunToCommit(Timeout.Infinite, act))
+                    using (var cont = Shield.RunToCommit(Timeout.Infinite, () =>
                     {
-                        _current = null;
+                        _current.Value = info = new TransactionInfo { IsConsistent = true };
+                        act();
+                    }))
+                    {
                         var prepareRes = await Prepare(cont, info);
                         if (!prepareRes.Success)
                         {
@@ -132,12 +122,9 @@ namespace Shielded.Cluster
                 }
                 catch
                 {
-                    Rollback(info);
+                    if (info != null)
+                        Rollback(info);
                     throw;
-                }
-                finally
-                {
-                    _current = null;
                 }
             }
             return false;
@@ -175,8 +162,8 @@ namespace Shielded.Cluster
 
         public static void EnlistBackend(IBackend backend)
         {
-            AssertInTransaction();
-            _current.Backends.Add(backend);
+            AssertIsRunning();
+            _current.Value.Backends.Add(backend);
         }
     }
 }
