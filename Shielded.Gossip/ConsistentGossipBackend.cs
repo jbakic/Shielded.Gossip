@@ -473,8 +473,6 @@ namespace Shielded.Gossip
             if (current.State.Items.Any(s => s.Value == TransactionState.Fail) &&
                 (current.State[Transport.OwnId] & TransactionState.Done) == 0)
             {
-                //_transactions.Remove(id);
-                //await SetFail(id);
                 Shield.SideEffect(async () =>
                 {
                     await SetFail(id);
@@ -485,7 +483,6 @@ namespace Shielded.Gossip
             else if (current.State.Without(Transport.OwnId).All(s => s.Value == TransactionState.Prepared) &&
                 current.State[Transport.OwnId] == TransactionState.None)
             {
-                //_transactions.Remove(id);
                 Shield.SideEffect(() =>
                 {
                     if (_transactions.TryGetValue(id, out var ourState))
@@ -495,9 +492,6 @@ namespace Shielded.Gossip
             else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
                 current.State[Transport.OwnId] == TransactionState.Prepared)
             {
-                //_transactions.Remove(id);
-                //await ApplyAndSetSuccess(id);
-                //Apply(current);
                 Shield.SideEffect(async () =>
                 {
                     if (await ApplyAndSetSuccess(id) && _transactions.TryGetValue(id, out var ourState))
@@ -506,8 +500,6 @@ namespace Shielded.Gossip
             }
             else if (current.State.Items.All(s => (s.Value & TransactionState.Done) != 0))
             {
-                //_transactions.Remove(id);
-                //_wrapped.Remove(id);
                 return true;
             }
             return false;
