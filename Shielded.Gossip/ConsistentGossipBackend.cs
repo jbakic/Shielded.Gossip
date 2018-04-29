@@ -387,13 +387,13 @@ namespace Shielded.Gossip
             {
                 if (newVal == null || _transactions.ContainsKey(id))
                     return;
-                var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
-                _transactions.Add(id, ourState);
-                if (newVal.State.Items.Any(s => s.Value == TransactionState.Fail))
+                if (newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0))
                 {
                     ev.Remove = OnStateChange(id, newVal);
                     return;
                 }
+                var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
+                _transactions.Add(id, ourState);
                 Shield.SideEffect(async () =>
                 {
                     try
