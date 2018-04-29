@@ -13,13 +13,6 @@ namespace Shielded.Gossip.Tests
 {
     public abstract class GossipBackendThreeNodeTestsBase<TBackend> where TBackend : IBackend, IDisposable
     {
-        public class TestClass : IHasVectorClock
-        {
-            public int Id { get; set; }
-            public string Name { get; set; }
-            public VectorClock Clock { get; set; }
-        }
-
         protected const string A = "A";
         protected const string B = "B";
         protected const string C = "C";
@@ -88,6 +81,13 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase<GossipBackend>
     {
+        public class TestClass : IHasVectorClock
+        {
+            public int Id { get; set; }
+            public string Name { get; set; }
+            public VectorClock Clock { get; set; }
+        }
+
         protected override GossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
             return new GossipBackend(transport, configuration);

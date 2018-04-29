@@ -9,6 +9,14 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class ConsistentTests : GossipBackendThreeNodeTestsBase<ConsistentGossipBackend>
     {
+        public class TestClass : IHasVectorClock
+        {
+            public int Id { get; set; }
+            public string Name { get; set; }
+            public int Value { get; set; }
+            public VectorClock Clock { get; set; }
+        }
+
         protected override ConsistentGossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
             return new ConsistentGossipBackend(transport, configuration);
@@ -49,9 +57,15 @@ namespace Shielded.Gossip.Tests
                 Distributed.Consistent(100, () =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
-                    var key = "key" + (i % fieldCount);
-                    var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
-                    backend.Set(key, val.Increment(backend.Transport.OwnId));
+                    var id = (i % fieldCount);
+                    var key = "key" + id;
+                    var val = backend.TryGet(key, out Multiple<TestClass> v) ? v : new TestClass { Id = id, Clock = new VectorClock() };
+                    if (val.Items.Length > 1)
+                        Assert.Fail("Conflict detected.");
+                    var newVal = val.Items[0];
+                    newVal.Value = newVal.Value + 1;
+                    newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
+                    backend.SetVersion(key, newVal);
                 }))).Result;
             var expected = bools.Count(b => b);
 
@@ -60,7 +74,7 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0))
+                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out Multiple<TestClass> v) ? v.Single().Value : 0))
                 .Result;
 
             Assert.AreEqual(expected, read);

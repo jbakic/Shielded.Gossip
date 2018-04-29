@@ -25,20 +25,20 @@ namespace Shielded.Gossip.Tests
             var merge1 = (Multiple<TestClass>)mvA1 | mvB1;
 
             Assert.AreEqual((VectorClock)(A, 1) | (B, 1), merge1.MergedClock);
-            Assert.AreEqual(2, merge1.Versions.Length);
-            Assert.AreNotEqual(merge1.MergedClock, merge1.Versions[0].Clock);
-            Assert.AreNotEqual(merge1.MergedClock, merge1.Versions[1].Clock);
+            Assert.AreEqual(2, merge1.Items.Length);
+            Assert.AreNotEqual(merge1.MergedClock, merge1.Items[0].Clock);
+            Assert.AreNotEqual(merge1.MergedClock, merge1.Items[1].Clock);
 
             var merge2 = merge1 | new TestClass { Clock = mvA1.Clock.Next(A) };
 
             Assert.AreEqual((VectorClock)(A, 2) | (B, 1), merge2.MergedClock);
-            Assert.AreEqual(2, merge2.Versions.Length);
+            Assert.AreEqual(2, merge2.Items.Length);
 
             var merge3 = merge2 | new TestClass { Clock = merge2.MergedClock.Next(B) };
 
             Assert.AreEqual((VectorClock)(A, 2) | (B, 2), merge3.MergedClock);
-            Assert.AreEqual(1, merge3.Versions.Length);
-            Assert.AreEqual(merge3.MergedClock, merge3.Versions[0].Clock);
+            Assert.AreEqual(1, merge3.Items.Length);
+            Assert.AreEqual(merge3.MergedClock, merge3.Items[0].Clock);
         }
 
         [TestMethod]
@@ -46,7 +46,7 @@ namespace Shielded.Gossip.Tests
         {
             var nullCast = (Multiple<TestClass>)null;
 
-            Assert.IsNull(nullCast.Versions);
+            Assert.IsNull(nullCast.Items);
 
             var empty = new Multiple<TestClass>();
 

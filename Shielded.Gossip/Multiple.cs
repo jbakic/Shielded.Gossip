@@ -11,17 +11,17 @@ namespace Shielded.Gossip
         where T : IHasVectorClock
     {
         [DataMember]
-        public T[] Versions { get; set; }
+        public T[] Items { get; set; }
 
-        public T this[int index] => Versions != null ? Versions[index] : throw new ArgumentOutOfRangeException();
+        public T this[int index] => Items != null ? Items[index] : throw new ArgumentOutOfRangeException();
 
-        public VectorClock MergedClock => Versions?.Aggregate((VectorClock)null, (acc, n) => acc | n.Clock) ?? new VectorClock();
+        public VectorClock MergedClock => Items?.Aggregate((VectorClock)null, (acc, n) => acc | n.Clock) ?? new VectorClock();
 
 
         public Multiple<T> MergeWith(Multiple<T> other) =>
             new Multiple<T>
             {
-                Versions = Filter(SafeConcat(other.Versions, Versions))?.ToArray()
+                Items = Filter(SafeConcat(other.Items, Items))?.ToArray()
             };
 
         public VectorRelationship VectorCompare(Multiple<T> other) => MergedClock.VectorCompare(other.MergedClock);
@@ -29,7 +29,7 @@ namespace Shielded.Gossip
         public Multiple<T> MergeWith(T other) =>
             new Multiple<T>
             {
-                Versions = Filter(other == null ? Versions : SafeConcat(new[] { other }, Versions)).ToArray()
+                Items = Filter(other == null ? Items : SafeConcat(new[] { other }, Items)).ToArray()
             };
 
         public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Clock);
@@ -75,9 +75,9 @@ namespace Shielded.Gossip
             return res;
         }
 
-        public static implicit operator Multiple<T>(T val) => new Multiple<T> { Versions = val == null ? null : new[] { val } };
+        public static implicit operator Multiple<T>(T val) => new Multiple<T> { Items = val == null ? null : new[] { val } };
 
-        public IEnumerator<T> GetEnumerator() => (Versions ?? Enumerable.Empty<T>()).GetEnumerator();
+        public IEnumerator<T> GetEnumerator() => (Items ?? Enumerable.Empty<T>()).GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable<T>)this).GetEnumerator();
     }
 }
