@@ -377,17 +377,15 @@ namespace Shielded.Gossip
             var id = ev.Key;
             var oldVal = (TransactionInfo)ev.OldValue;
             var newVal = (TransactionInfo)ev.NewValue;
-            if (newVal != null && !_transactions.ContainsKey(id) &&
-                newVal.State[Transport.OwnId] != TransactionState.None)
+            if (oldVal == null && newVal != null)
             {
-                ev.Remove = true;
-                return;
-            }
-            if (oldVal == null)
-            {
-                if (newVal == null || _transactions.ContainsKey(id))
+                if (newVal.State[Transport.OwnId] != TransactionState.None)
+                {
+                    ev.Remove = true;
                     return;
-                if (newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0))
+                }
+                if (newVal.Initiator == Transport.OwnId ||
+                    newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0))
                 {
                     ev.Remove = OnStateChange(id, newVal);
                     return;
@@ -422,7 +420,7 @@ namespace Shielded.Gossip
             {
                 ev.Remove = OnStateChange(id, newVal);
             }
-            else
+            else if (oldVal != null)
             {
                 if (_transactions.TryGetValue(id, out var ourState))
                 {
