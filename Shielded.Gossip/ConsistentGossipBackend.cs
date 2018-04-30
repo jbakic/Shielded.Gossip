@@ -175,13 +175,18 @@ namespace Shielded.Gossip
                 var prepare = await Task.WhenAny(PrepareInternal(id, ourState, transaction), ourState.PrepareCompleter.Task);
                 if (!prepare.Result.Success)
                     return prepare.Result;
-                await Distributed.Run(() => _wrapped.Set(id, transaction));
+                await Distributed.Run(() =>
+                {
+                    if (_transactions.ContainsKey(id))
+                        _wrapped.Set(id, transaction);
+                });
                 return await ourState.PrepareCompleter.Task;
             }
             var prepTask = PreparationProcess();
             var resTask = await Task.WhenAny(prepTask, Task.Delay(GetNewTimeout()));
             if (resTask != prepTask || !prepTask.Result.Success)
             {
+                ourState.Complete(false);
                 await SetFail(ourState.TransactionId);
                 if (resTask != prepTask)
                     return new PrepareResult(false, null);
@@ -220,31 +225,25 @@ namespace Shielded.Gossip
             {
                 while (true)
                 {
-                    (Task waitFor, Task retryFor) = Shield.InTransaction(() =>
+                    Task waitFor = Shield.InTransaction(() =>
                     {
-                        var tasks = keys.Select<string, (Task, Task)>(key =>
+                        var tasks = keys.Select(key =>
                         {
                             if (!_fieldBlockers.TryGetValue(key, out var someState))
-                                return (null, null);
-                            if (IsHigherPrio(someState, ourState))
-                                return (null, someState.Committer.Task);
+                                return (Task)null;
                             if (IsHigherPrio(ourState, someState))
                                 Shield.SideEffect(() =>
                                     someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task)));
-                            return (someState.Committer.Task, null);
+                            return someState.Committer.Task;
                         }).ToArray();
 
-                        if (tasks.Any(t => t.Item2 != null))
-                            return ((Task)null, Task.WhenAll(tasks.Where(t => t.Item2 != null).Select(t => t.Item2)));
-                        else if (tasks.Any(t => t.Item1 != null))
-                            return (Task.WhenAll(tasks.Where(t => t.Item1 != null).Select(t => t.Item1)), null);
+                        if (tasks.Any(t => t != null))
+                            return Task.WhenAll(tasks.Where(t => t != null).Select(t => t));
 
                         foreach (var key in keys)
                             _fieldBlockers[key] = ourState;
-                        return (null, null);
+                        return null;
                     });
-                    if (retryFor != null)
-                        return new PrepareResult(false, retryFor);
                     if (prepareTask.IsCompleted)
                         return prepareTask.Result;
                     if (waitFor == null)
