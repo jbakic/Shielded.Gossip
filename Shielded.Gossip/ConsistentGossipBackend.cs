@@ -384,7 +384,8 @@ namespace Shielded.Gossip
                     return;
                 }
                 if (newVal.Initiator == Transport.OwnId ||
-                    newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0))
+                    newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0) ||
+                    _transactions.ContainsKey(id))
                 {
                     ev.Remove = OnStateChange(id, newVal);
                     return;
