@@ -39,7 +39,7 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void DodgyConsistent_Race()
         {
-            const int transactions = 50;
+            const int transactions = 40;
             const int fieldCount = 20;
 
             foreach (var back in _backends.Values)
@@ -63,12 +63,55 @@ namespace Shielded.Gossip.Tests
                 }))).Result;
             var expected = bools.Count(b => b);
 
-            Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
             var read = Distributed.Run(() =>
                     Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out Multiple<TestClass> v) ? v.Single().Value : 0))
+                .Result;
+
+            Assert.AreEqual(expected, read);
+            Assert.AreEqual(transactions, read);
+        }
+
+        [TestMethod]
+        public void DodgyConsistent_RaceAsymmetric()
+        {
+            const int transactions = 20;
+            const int fieldCount = 10;
+
+            Shield.InTransaction(() =>
+            {
+                ((DodgyTransport)_backends[A].Transport).ServerIPs.Remove(C);
+                ((DodgyTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            });
+            foreach (var back in _backends.Values)
+            {
+                back.Configuration.DirectMail = false;
+            }
+
+            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+                Distributed.Consistent(100, () =>
+                {
+                    // updates only on A and B
+                    var backend = _backends.Skip(i % 2).First().Value;
+                    var id = (i % fieldCount);
+                    var key = "key" + id;
+                    var val = backend.TryGet(key, out Multiple<TestClass> v) ? v : new TestClass { Id = id, Clock = new VectorClock() };
+                    if (val.Items.Length > 1)
+                        Assert.Fail("Conflict detected.");
+                    var newVal = val.Items[0];
+                    newVal.Value = newVal.Value + 1;
+                    newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
+                    backend.SetVersion(key, newVal);
+                }))).Result;
+            var expected = bools.Count(b => b);
+
+            OnMessage(null, "Done waiting.");
+            CheckProtocols();
+
+            var read = Distributed.Run(() =>
+                    Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out Multiple<TestClass> v) ? v.Single().Value : 0))
                 .Result;
 
             Assert.AreEqual(expected, read);

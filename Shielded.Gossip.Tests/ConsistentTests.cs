@@ -42,9 +42,6 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVersion("key", testEntity); }).Result);
 
-            // Consistent completes as soon as it sends command to commit, so we must wait a bit for others to finish up.
-            // this should maybe be changed...
-            Thread.Sleep(100);
             CheckProtocols();
 
             var read = Distributed.Consistent(() => _backends[B].TryGet("key", out Multiple<TestClass> res) ? res : null)
@@ -82,7 +79,6 @@ namespace Shielded.Gossip.Tests
                 }))).Result;
             var expected = bools.Count(b => b);
 
-            Thread.Sleep(300);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 

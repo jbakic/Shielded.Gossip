@@ -101,6 +101,7 @@ namespace Shielded.Gossip
             public ShieldedDict<string, object> Blocked = new ShieldedDict<string, object>();
             public TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>();
             public TaskCompletionSource<object> Committer = new TaskCompletionSource<object>();
+            public TaskCompletionSource<object> FullCommit = new TaskCompletionSource<object>();
 
             public BackendState(string id, string initiator, ConsistentGossipBackend self, IEnumerable<TransactionItem> changes = null)
             {
@@ -110,10 +111,14 @@ namespace Shielded.Gossip
                 Changes = changes?.ToDictionary(ti => ti.Key) ?? new Dictionary<string, TransactionItem>();
             }
 
-            public void Complete(bool res)
+            public void Complete(bool res, bool setFullCommit = true)
             {
-                if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
-                    return;
+                if (setFullCommit)
+                {
+                    if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
+                        return;
+                    FullCommit.TrySetResult(null);
+                }
                 PrepareCompleter.TrySetResult(new PrepareResult(res));
                 Self.UnblockGossip(this);
                 Committer.TrySetResult(null);
@@ -420,7 +425,8 @@ namespace Shielded.Gossip
             {
                 ev.Remove = OnStateChange(id, newVal);
             }
-            else if (oldVal != null)
+
+            if (oldVal != null && (ev.Remove || newVal == null))
             {
                 if (_transactions.TryGetValue(id, out var ourState))
                 {
@@ -499,7 +505,8 @@ namespace Shielded.Gossip
             {
                 Shield.SideEffect(() =>
                 {
-                    if (ApplyAndSetSuccess(id) && _transactions.TryGetValue(id, out var ourState))
+                    ApplyAndSetSuccess(id);
+                    if (_transactions.TryGetValue(id, out var ourState))
                         ourState.Complete(true);
                 });
             }
@@ -527,8 +534,9 @@ namespace Shielded.Gossip
                     throw new ApplicationException("Critical error - unexpected commit failure.");
                 Apply(current);
                 _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-                Shield.SideEffect(() => ourState.Complete(true));
+                Shield.SideEffect(() => ourState.Complete(true, false));
             });
+            await ourState.FullCommit.Task;
         }
 
         void IBackend.Rollback() { }
