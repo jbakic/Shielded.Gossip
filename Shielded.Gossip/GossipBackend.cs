@@ -363,7 +363,7 @@ namespace Shielded.Gossip
             RemoveInternal(key);
         }
 
-        public void RemoveInternal(string key)
+        private void RemoveInternal(string key)
         {
             if (!_local.TryGetValue(key, out var current))
                 return;

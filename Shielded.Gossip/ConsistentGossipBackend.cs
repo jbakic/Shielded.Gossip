@@ -28,7 +28,7 @@ namespace Shielded.Gossip
             return TryGetInternal(key, out item);
         }
 
-        public bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
+        private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
             if (!Distributed.IsConsistent)
                 return _wrapped.TryGet(key, out item);
@@ -214,7 +214,6 @@ namespace Shielded.Gossip
                 return new PrepareResult(false, null);
             return lockTask.Result.Success ? new PrepareResult(Check(id), null) : lockTask.Result;
         }
-
 
         private async Task<PrepareResult> BlockGossip(BackendState ourState)
         {
