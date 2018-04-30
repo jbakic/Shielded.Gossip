@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 namespace Shielded.Gossip.Tests
 {
     [TestClass]
-    public class DodgyTransportTests : GossipBackendThreeNodeTestsBase<GossipBackend, DodgyTransport>
+    public class DodgyBackendTests : GossipBackendThreeNodeTestsBase<GossipBackend, DodgyTransport>
     {
         protected override GossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
