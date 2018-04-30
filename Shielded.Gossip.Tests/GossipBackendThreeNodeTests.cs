@@ -74,7 +74,8 @@ namespace Shielded.Gossip.Tests
 
         protected void CheckProtocols()
         {
-            Assert.IsTrue(_listenerExceptions.IsEmpty);
+            if (!_listenerExceptions.IsEmpty)
+                throw new AggregateException(_listenerExceptions);
         }
     }
 
