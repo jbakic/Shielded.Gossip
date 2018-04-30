@@ -101,7 +101,6 @@ namespace Shielded.Gossip
             public ShieldedDict<string, object> Blocked = new ShieldedDict<string, object>();
             public TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>();
             public TaskCompletionSource<object> Committer = new TaskCompletionSource<object>();
-            public TaskCompletionSource<object> FullCommit = new TaskCompletionSource<object>();
 
             public BackendState(string id, string initiator, ConsistentGossipBackend self, IEnumerable<TransactionItem> changes = null)
             {
@@ -111,14 +110,10 @@ namespace Shielded.Gossip
                 Changes = changes?.ToDictionary(ti => ti.Key) ?? new Dictionary<string, TransactionItem>();
             }
 
-            public void Complete(bool res, bool setFullCommit = true)
+            public void Complete(bool res)
             {
-                if (setFullCommit)
-                {
-                    if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
-                        return;
-                    FullCommit.TrySetResult(null);
-                }
+                if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
+                    return;
                 PrepareCompleter.TrySetResult(new PrepareResult(res));
                 Self.UnblockGossip(this);
                 Committer.TrySetResult(null);
@@ -224,7 +219,7 @@ namespace Shielded.Gossip
         private async Task<PrepareResult> BlockGossip(BackendState ourState)
         {
             var prepareTask = ourState.PrepareCompleter.Task;
-            var keys = ourState.Changes.Keys.OrderBy(k => k, StringComparer.InvariantCulture).ToArray();
+            var keys = ourState.Changes.Keys;
             bool success = false;
             try
             {
@@ -280,7 +275,7 @@ namespace Shielded.Gossip
         {
             Distributed.RunLocal(() =>
             {
-                foreach (var key in ourState.Changes.Keys.OrderByDescending(k => k, StringComparer.InvariantCulture))
+                foreach (var key in ourState.Changes.Keys)
                     if (_fieldBlockers.TryGetValue(key, out BackendState state) && state == ourState)
                         _fieldBlockers.Remove(key);
                 foreach (var kvp in ourState.Blocked)
@@ -540,9 +535,8 @@ namespace Shielded.Gossip
                     throw new ApplicationException("Critical error - unexpected commit failure.");
                 Apply(current);
                 _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-                Shield.SideEffect(() => ourState.Complete(true, false));
+                Shield.SideEffect(() => ourState.Complete(true));
             });
-            await ourState.FullCommit.Task;
         }
 
         void IBackend.Rollback() { }

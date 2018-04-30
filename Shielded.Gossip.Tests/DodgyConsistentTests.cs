@@ -43,9 +43,7 @@ namespace Shielded.Gossip.Tests
             const int fieldCount = 20;
 
             foreach (var back in _backends.Values)
-            {
                 back.Configuration.DirectMail = false;
-            }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
                 Distributed.Consistent(100, () =>
@@ -63,6 +61,7 @@ namespace Shielded.Gossip.Tests
                 }))).Result;
             var expected = bools.Count(b => b);
 
+            Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
@@ -77,8 +76,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void DodgyConsistent_RaceAsymmetric()
         {
-            const int transactions = 20;
-            const int fieldCount = 10;
+            const int transactions = 40;
+            const int fieldCount = 20;
 
             Shield.InTransaction(() =>
             {
@@ -86,9 +85,7 @@ namespace Shielded.Gossip.Tests
                 ((DodgyTransport)_backends[C].Transport).ServerIPs.Remove(A);
             });
             foreach (var back in _backends.Values)
-            {
                 back.Configuration.DirectMail = false;
-            }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
                 Distributed.Consistent(100, () =>
@@ -107,6 +104,7 @@ namespace Shielded.Gossip.Tests
                 }))).Result;
             var expected = bools.Count(b => b);
 
+            Thread.Sleep(2000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
