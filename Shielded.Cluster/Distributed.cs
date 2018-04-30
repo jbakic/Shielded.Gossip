@@ -111,7 +111,7 @@ namespace Shielded.Cluster
                         {
                             Rollback(info);
                             cont.Rollback();
-                            if (prepareRes.WaitBeforeRetry != null)
+                            if (prepareRes.WaitBeforeRetry != null && attempts > 0)
                                 await prepareRes.WaitBeforeRetry;
                             continue;
                         }
