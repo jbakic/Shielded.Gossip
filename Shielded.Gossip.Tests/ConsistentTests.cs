@@ -1,13 +1,17 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Shielded.Cluster;
+using Shielded.Standard;
+using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Shielded.Gossip.Tests
 {
     [TestClass]
-    public class ConsistentTests : GossipBackendThreeNodeTestsBase<ConsistentGossipBackend>
+    public class ConsistentTests : GossipBackendThreeNodeTestsBase<ConsistentGossipBackend, TcpTransport>
     {
         public class TestClass : IHasVectorClock
         {
@@ -20,6 +24,15 @@ namespace Shielded.Gossip.Tests
         protected override ConsistentGossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
             return new ConsistentGossipBackend(transport, configuration);
+        }
+
+        protected override TcpTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
+            IEnumerable<KeyValuePair<string, IPEndPoint>> servers)
+        {
+            var transport = new TcpTransport(ownId, localEndpoint,
+                new ShieldedDict<string, IPEndPoint>(servers, null, StringComparer.InvariantCultureIgnoreCase));
+            transport.StartListening();
+            return transport;
         }
 
         [TestMethod]

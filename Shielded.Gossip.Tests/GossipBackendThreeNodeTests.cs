@@ -11,7 +11,9 @@ using System.Threading.Tasks;
 
 namespace Shielded.Gossip.Tests
 {
-    public abstract class GossipBackendThreeNodeTestsBase<TBackend> where TBackend : IBackend, IDisposable
+    public abstract class GossipBackendThreeNodeTestsBase<TBackend, TTransport>
+        where TBackend : IBackend, IDisposable
+        where TTransport : ITransport
     {
         protected const string A = "A";
         protected const string B = "B";
@@ -27,17 +29,17 @@ namespace Shielded.Gossip.Tests
         protected IDictionary<string, TBackend> _backends;
 
         protected abstract TBackend CreateBackend(ITransport transport, GossipConfiguration configuration);
+        protected abstract TTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
+            IEnumerable<KeyValuePair<string, IPEndPoint>> servers);
 
         [TestInitialize]
         public void Init()
         {
             _backends = new Dictionary<string, TBackend>(_addresses.Select(kvp =>
             {
-                var transport = new TcpTransport(kvp.Key, kvp.Value,
-                    new ShieldedDict<string, IPEndPoint>(_addresses.Where(inner => inner.Key != kvp.Key), null, StringComparer.InvariantCultureIgnoreCase));
+                var transport = CreateTransport(kvp.Key, kvp.Value, _addresses.Where(inner => inner.Key != kvp.Key));
                 transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
                 transport.Error += OnListenerError;
-                transport.StartListening();
 
                 return new KeyValuePair<string, TBackend>(kvp.Key, CreateBackend(transport, new GossipConfiguration
                 {
@@ -80,7 +82,7 @@ namespace Shielded.Gossip.Tests
     }
 
     [TestClass]
-    public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase<GossipBackend>
+    public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase<GossipBackend, TcpTransport>
     {
         public class TestClass : IHasVectorClock
         {
@@ -92,6 +94,15 @@ namespace Shielded.Gossip.Tests
         protected override GossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
             return new GossipBackend(transport, configuration);
+        }
+
+        protected override TcpTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
+            IEnumerable<KeyValuePair<string, IPEndPoint>> servers)
+        {
+            var transport = new TcpTransport(ownId, localEndpoint,
+                new ShieldedDict<string, IPEndPoint>(servers, null, StringComparer.InvariantCultureIgnoreCase));
+            transport.StartListening();
+            return transport;
         }
 
         [TestMethod]
