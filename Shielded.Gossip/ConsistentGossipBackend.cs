@@ -388,7 +388,7 @@ namespace Shielded.Gossip
                 {
                     ev.Remove = true;
                     if (_transactions.TryGetValue(id, out var curr))
-                        Shield.SideEffect(() => curr.Complete(myState == TransactionState.Success));
+                        Shield.SideEffect(() => curr.Complete((myState & TransactionState.Prepared) != 0));
                     return;
                 }
                 if (newVal.Initiator == Transport.OwnId ||
