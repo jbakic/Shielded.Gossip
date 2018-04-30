@@ -383,9 +383,12 @@ namespace Shielded.Gossip
             var newVal = (TransactionInfo)ev.NewValue;
             if (oldVal == null && newVal != null)
             {
-                if (newVal.State[Transport.OwnId] != TransactionState.None)
+                var myState = newVal.State[Transport.OwnId];
+                if (myState != TransactionState.None)
                 {
                     ev.Remove = true;
+                    if (_transactions.TryGetValue(id, out var curr))
+                        Shield.SideEffect(() => curr.Complete(myState == TransactionState.Success));
                     return;
                 }
                 if (newVal.Initiator == Transport.OwnId ||
@@ -425,8 +428,7 @@ namespace Shielded.Gossip
             {
                 ev.Remove = OnStateChange(id, newVal);
             }
-
-            if (oldVal != null && (ev.Remove || newVal == null))
+            else if (oldVal != null)
             {
                 if (_transactions.TryGetValue(id, out var ourState))
                 {
@@ -481,12 +483,13 @@ namespace Shielded.Gossip
 
         private bool OnStateChange(string id, TransactionInfo current)
         {
+            _transactions.TryGetValue(id, out var ourState);
             if (current.State.Items.Any(s => s.Value == TransactionState.Fail) &&
                 (current.State[Transport.OwnId] & TransactionState.Done) == 0)
             {
                 Shield.SideEffect(async () =>
                 {
-                    if (_transactions.TryGetValue(id, out var ourState))
+                    if (ourState != null)
                         ourState.Complete(false);
                     await SetFail(id);
                 });
@@ -494,11 +497,9 @@ namespace Shielded.Gossip
             else if (current.State.Without(Transport.OwnId).All(s => s.Value == TransactionState.Prepared) &&
                 current.State[Transport.OwnId] == TransactionState.None)
             {
-                Shield.SideEffect(() =>
-                {
-                    if (_transactions.TryGetValue(id, out var ourState))
-                        ourState.PrepareCompleter.TrySetResult(new PrepareResult(true));
-                });
+                if (ourState != null)
+                    Shield.SideEffect(() =>
+                        ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
             }
             else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
                 current.State[Transport.OwnId] == TransactionState.Prepared)
@@ -506,12 +507,17 @@ namespace Shielded.Gossip
                 Shield.SideEffect(() =>
                 {
                     ApplyAndSetSuccess(id);
-                    if (_transactions.TryGetValue(id, out var ourState))
+                    if (ourState != null)
                         ourState.Complete(true);
                 });
             }
             else if (current.State.Items.All(s => (s.Value & TransactionState.Done) != 0))
             {
+                if (ourState != null)
+                {
+                    bool ok = current.State.Items[0].Value == TransactionState.Success;
+                    Shield.SideEffect(() => ourState.Complete(ok));
+                }
                 return true;
             }
             return false;
