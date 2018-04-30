@@ -104,7 +104,7 @@ namespace Shielded.Gossip.Tests
                 }))).Result;
             var expected = bools.Count(b => b);
 
-            Thread.Sleep(2000);
+            Thread.Sleep(3000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
