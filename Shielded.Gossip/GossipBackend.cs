@@ -204,6 +204,14 @@ namespace Shielded.Gossip
                 })
                 .Where(i => i != null)
                 .ToArray();
+            // if crossed the cutoff, remove the last package, except if it is the only one.
+            // this forces any package > cutoff to be sent alone.
+            if (cutoff < 0 && toSend[0].Freshness != toSend[toSend.Length - 1].Freshness)
+            {
+                var removeFreshness = toSend[toSend.Length - 1].Freshness;
+                toSend = toSend.TakeWhile(item => item.Freshness > removeFreshness).ToArray();
+            }
+
             if (toSend.Length == 0)
             {
                 // we reached our end of time, but maybe the other side has more.
@@ -249,13 +257,13 @@ namespace Shielded.Gossip
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
-                    yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value };
+                    yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value, Freshness = kvp.Key };
                 startFrom = prevWindowStart.Value - 1;
             }
             // to signal that the new result connects with the previous window.
             yield return null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
-                yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value };
+                yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value, Freshness = kvp.Key };
         }
 
         Task<PrepareResult> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(new PrepareResult(true));
