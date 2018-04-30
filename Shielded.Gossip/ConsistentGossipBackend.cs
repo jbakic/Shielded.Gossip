@@ -403,8 +403,8 @@ namespace Shielded.Gossip
                     {
                         if (!(await Task.WhenAny(PrepareInternal(id, ourState), ourState.PrepareCompleter.Task)).Result.Success)
                         {
-                            await SetFail(id);
                             ourState.Complete(false);
+                            await SetFail(id);
                             return;
                         }
                         if (!await SetPrepared(id))
@@ -416,8 +416,8 @@ namespace Shielded.Gossip
                     }
                     catch
                     {
-                        await SetFail(id);
                         ourState.Complete(false);
+                        await SetFail(id);
                     }
                 });
             }
@@ -486,9 +486,9 @@ namespace Shielded.Gossip
             {
                 Shield.SideEffect(async () =>
                 {
-                    await SetFail(id);
                     if (_transactions.TryGetValue(id, out var ourState))
                         ourState.Complete(false);
+                    await SetFail(id);
                 });
             }
             else if (current.State.Without(Transport.OwnId).All(s => s.Value == TransactionState.Prepared) &&
