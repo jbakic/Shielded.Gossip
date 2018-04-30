@@ -193,9 +193,10 @@ namespace Shielded.Gossip
                         allNewIncluded = true;
                         return true;
                     }
+                    --cutoff;
                     if (prevFreshness == null || prevFreshness.Value != item.Freshness)
                     {
-                        if (--cutoff < 0 || (allNewIncluded && --packageSize < 0))
+                        if (cutoff < 0 || (allNewIncluded && --packageSize < 0))
                             return false;
                         prevFreshness = item.Freshness;
                     }
