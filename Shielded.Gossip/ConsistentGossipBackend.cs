@@ -454,17 +454,22 @@ namespace Shielded.Gossip
             });
         }
 
-        private async Task<bool> ApplyAndSetSuccess(string id)
+        private bool ApplyAndSetSuccess(string id)
         {
-            return await Distributed.Run(() =>
+            bool res = false;
+            Distributed.RunLocal(() =>
             {
                 if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                     current.State[Transport.OwnId] != TransactionState.Prepared)
-                    return false;
+                {
+                    res = false;
+                    return;
+                }
                 Apply(current);
                 _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-                return true;
+                res = true;
             });
+            return res;
         }
 
         private bool OnStateChange(string id, TransactionInfo current)
@@ -491,9 +496,9 @@ namespace Shielded.Gossip
             else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
                 current.State[Transport.OwnId] == TransactionState.Prepared)
             {
-                Shield.SideEffect(async () =>
+                Shield.SideEffect(() =>
                 {
-                    if (await ApplyAndSetSuccess(id) && _transactions.TryGetValue(id, out var ourState))
+                    if (ApplyAndSetSuccess(id) && _transactions.TryGetValue(id, out var ourState))
                         ourState.Complete(true);
                 });
             }
