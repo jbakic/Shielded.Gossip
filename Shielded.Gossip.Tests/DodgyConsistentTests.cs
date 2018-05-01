@@ -39,11 +39,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void DodgyConsistent_Race()
         {
-            const int transactions = 40;
+            const int transactions = 100;
             const int fieldCount = 20;
-
-            foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
                 Distributed.Consistent(100, () =>
@@ -76,7 +73,7 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void DodgyConsistent_RaceAsymmetric()
         {
-            const int transactions = 40;
+            const int transactions = 100;
             const int fieldCount = 20;
 
             Shield.InTransaction(() =>
@@ -84,8 +81,6 @@ namespace Shielded.Gossip.Tests
                 ((DodgyTransport)_backends[A].Transport).ServerIPs.Remove(C);
                 ((DodgyTransport)_backends[C].Transport).ServerIPs.Remove(A);
             });
-            foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
                 Distributed.Consistent(100, () =>
