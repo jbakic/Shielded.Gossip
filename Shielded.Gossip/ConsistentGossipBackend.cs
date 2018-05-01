@@ -98,7 +98,6 @@ namespace Shielded.Gossip
             public string Initiator;
             public string TransactionId;
             public Dictionary<string, TransactionItem> Changes;
-            public ShieldedDict<string, object> Blocked = new ShieldedDict<string, object>();
             public TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>();
             public TaskCompletionSource<object> Committer = new TaskCompletionSource<object>();
 
@@ -115,7 +114,7 @@ namespace Shielded.Gossip
                 if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
                     return;
                 PrepareCompleter.TrySetResult(new PrepareResult(res));
-                Self.UnblockGossip(this);
+                Self.UnlockFields(this);
                 Committer.TrySetResult(null);
             }
         }
@@ -202,7 +201,7 @@ namespace Shielded.Gossip
 
         async Task<PrepareResult> PrepareInternal(string id, BackendState ourState, TransactionInfo newInfo = null)
         {
-            var lockTask = BlockGossip(ourState);
+            var lockTask = LockFields(ourState);
             if (newInfo != null)
             {
                 var lockRes = await lockTask;
@@ -215,7 +214,7 @@ namespace Shielded.Gossip
             return lockTask.Result.Success ? new PrepareResult(Check(id), null) : lockTask.Result;
         }
 
-        private async Task<PrepareResult> BlockGossip(BackendState ourState)
+        private async Task<PrepareResult> LockFields(BackendState ourState)
         {
             var prepareTask = ourState.PrepareCompleter.Task;
             var keys = ourState.Changes.Keys;
@@ -267,21 +266,13 @@ namespace Shielded.Gossip
             return StringComparer.InvariantCultureIgnoreCase.Compare(left.Initiator, right.Initiator) < 0;
         }
 
-        private readonly ApplyMethods _unblockMethods = new ApplyMethods(
-            typeof(GossipBackend).GetMethod("Set", BindingFlags.Instance | BindingFlags.Public));
-
-        private void UnblockGossip(BackendState ourState)
+        private void UnlockFields(BackendState ourState)
         {
             Distributed.RunLocal(() =>
             {
                 foreach (var key in ourState.Changes.Keys)
                     if (_fieldBlockers.TryGetValue(key, out BackendState state) && state == ourState)
                         _fieldBlockers.Remove(key);
-                foreach (var kvp in ourState.Blocked)
-                {
-                    var setter = _unblockMethods.Get(_wrapped, kvp.Value.GetType());
-                    setter(kvp.Key, kvp.Value);
-                }
             });
         }
 
@@ -330,44 +321,9 @@ namespace Shielded.Gossip
             }
             else if (e.Key.StartsWith(PublicPfx))
             {
-                var merger = _blockMergers.Get(this, e.NewValue.GetType());
-                if (merger(e.Key, e.NewValue) == VectorRelationship.Greater ||
-                    OnChanging(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue))
+                if (OnChanging(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue))
                     e.Cancel = true;
             }
-        }
-
-        private readonly ApplyMethods _blockMergers = new ApplyMethods(
-            typeof(ConsistentGossipBackend).GetMethod("MergeWithBlocked", BindingFlags.NonPublic | BindingFlags.Instance));
-
-        [ThreadStatic]
-        private bool _passThrough;
-
-        private void WithPassThrough(Action act)
-        {
-            if (_passThrough)
-            {
-                act();
-                return;
-            }
-            try
-            {
-                _passThrough = true;
-                act();
-            }
-            finally
-            {
-                _passThrough = false;
-            }
-        }
-
-        private VectorRelationship MergeWithBlocked<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
-        {
-            if (_passThrough || !_fieldBlockers.TryGetValue(key, out var state))
-                return VectorRelationship.Less;
-            state.Blocked.TryGetValue(key, out var current);
-            state.Blocked[key] = current != null ? ((TItem)current).MergeWith(item) : item;
-            return VectorRelationship.Greater;
         }
 
         private void OnTransactionChanging(ChangingEventArgs ev)
@@ -519,7 +475,7 @@ namespace Shielded.Gossip
 
         private void Apply(TransactionInfo current)
         {
-            WithPassThrough(() => _wrapped.ApplyItems(current.Items));
+            _wrapped.ApplyItems(current.Items);
         }
 
         async Task IBackend.Commit(CommitContinuation cont)
