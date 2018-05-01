@@ -160,10 +160,26 @@ namespace Shielded.Gossip
                     RemoveInternal(item.Key);
                     continue;
                 }
+                if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
+                    continue;
+
                 var obj = Serializer.Deserialize(item.Data);
                 var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
             }
+        }
+
+        private static bool IsByteEqual(byte[] one, byte[] two)
+        {
+            if (one == null && two == null)
+                return true;
+            if (one == null || two == null || one.Length != two.Length)
+                return false;
+            var len = one.Length;
+            for (int i = 0; i < len; i++)
+                if (one[i] != two[i])
+                    return false;
+            return true;
         }
 
         private void SendEnd(string server, bool success)
