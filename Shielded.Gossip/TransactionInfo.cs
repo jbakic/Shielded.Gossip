@@ -39,7 +39,7 @@ namespace Shielded.Gossip
 
     // this is an item that contains other items, so it's gonna be a 3-level serialization Matroshka.
     [DataContract(Namespace = "")]
-    public class TransactionInfo : IMergeable<TransactionInfo, TransactionInfo>
+    public class TransactionInfo : IMergeable<TransactionInfo, TransactionInfo>, IDeletable
     {
         [DataMember]
         public string Initiator { get; set; }
@@ -47,6 +47,8 @@ namespace Shielded.Gossip
         public TransactionItem[] Items { get; set; }
         [DataMember]
         public TransactionVector State { get; set; }
+
+        public bool CanDelete => State.Items.All(s => (s.Value & TransactionState.Done) != 0);
 
         public VersionHash GetVersionHash() => (State ?? new TransactionVector()).GetVersionHash();
 

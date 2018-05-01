@@ -18,6 +18,7 @@ namespace Shielded.Gossip
         private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
 
         private readonly Timer _gossipTimer;
+        private readonly Timer _deletableTimer;
         private readonly IDisposable _preCommit;
 
         public readonly ITransport Transport;
@@ -32,6 +33,7 @@ namespace Shielded.Gossip
             Transport.MessageReceived += Transport_MessageReceived;
 
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
+            _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.DeletableCleanUpInterval, Configuration.DeletableCleanUpInterval);
 
             _preCommit = Shield.PreCommit(() => _local.TryGetValue("any", out MessageItem _) || true, () =>
             {
@@ -39,6 +41,37 @@ namespace Shielded.Gossip
                 _changeLock.Value = true;
                 SyncIndexes();
             });
+        }
+
+        private TimerCallback GetDeletableTimerMethod()
+        {
+            var lastFreshness = new Shielded<long>();
+            var lockObj = new object();
+            return _ =>
+            {
+                bool lockTaken = false;
+                try
+                {
+                    Monitor.TryEnter(lockObj, ref lockTaken);
+                    if (!lockTaken)
+                        return;
+                    Shield.InTransaction(() =>
+                    {
+                        var toRemove = _freshIndex.Range(0, lastFreshness)
+                            .Where(kvp => _local[kvp.Value].Deletable)
+                            .Select(kvp => kvp.Value)
+                            .ToArray();
+                        lastFreshness.Value = GetMaxFreshness();
+                        foreach (var key in toRemove)
+                            _local.Remove(key);
+                    });
+                }
+                finally
+                {
+                    if (lockTaken)
+                        Monitor.Exit(lockObj);
+                }
+            };
         }
 
         private void SyncIndexes()
@@ -51,8 +84,10 @@ namespace Shielded.Gossip
                     _freshIndex.Remove(oldItem.Freshness, key);
 
                 if (_local.TryGetValue(key, out var newItem))
+                {
                     newItem.Freshness = newFresh;
-                _freshIndex.Add(newFresh, key);
+                    _freshIndex.Add(newFresh, key);
+                }
             }
         }
 
@@ -155,14 +190,8 @@ namespace Shielded.Gossip
                 return;
             foreach (var item in items)
             {
-                if (item.Data == null)
-                {
-                    RemoveInternal(item.Key);
-                    continue;
-                }
                 if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
                     continue;
-
                 var obj = Serializer.Deserialize(item.Data);
                 var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
@@ -276,13 +305,13 @@ namespace Shielded.Gossip
             if (prevWindowEnd != null)
             {
                 foreach (var kvp in _freshIndex.RangeDescending(long.MaxValue, prevWindowEnd.Value + 1))
-                    yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value, Freshness = kvp.Key };
+                    yield return _local[kvp.Value];
                 startFrom = prevWindowStart.Value - 1;
             }
             // to signal that the new result connects with the previous window.
             yield return null;
             foreach (var kvp in _freshIndex.RangeDescending(startFrom, long.MinValue))
-                yield return _local.TryGetValue(kvp.Value, out var mi) ? mi : new MessageItem { Key = kvp.Value, Freshness = kvp.Key };
+                yield return _local[kvp.Value];
         }
 
         Task<PrepareResult> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(new PrepareResult(true));
@@ -361,63 +390,47 @@ namespace Shielded.Gossip
                     return cmp;
                 val = oldVal.MergeWith(val);
 
-                if (OnChanging(key, oldVal, val, out var remove))
+                if (OnChanging(key, oldVal, val))
                     return VectorRelationship.Greater;
-                if (remove)
+                var deletable = val is IDeletable del && del.CanDelete;
+                _local[key] = new MessageItem
                 {
-                    _local.Remove(key);
-                    var hashOld = GetHash(key, oldVal);
-                    _databaseHash.Commute((ref ulong h) => h ^= hashOld);
-                    return VectorRelationship.Greater;
-                }
-                _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
-                var hash = GetHash(key, oldVal) ^ GetHash(key, val);
+                    Key = key,
+                    Data = Serializer.Serialize(val),
+                    Deletable = deletable,
+                };
+                var hash = deletable ? GetHash(key, oldVal) : GetHash(key, oldVal) ^ GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return cmp;
             }
             else
             {
-                if (OnChanging(key, default(TItem), val, out var remove) || remove)
+                if (OnChanging(key, default(TItem), val))
                     return VectorRelationship.Greater;
 
-                _local[key] = new MessageItem { Key = key, Data = Serializer.Serialize(val) };
-                var hash = GetHash(key, val);
-                _databaseHash.Commute((ref ulong h) => h ^= hash);
+                var deletable = val is IDeletable del && del.CanDelete;
+                _local[key] = new MessageItem
+                {
+                    Key = key,
+                    Data = Serializer.Serialize(val),
+                    Deletable = deletable
+                };
+                if (!deletable)
+                {
+                    var hash = GetHash(key, val);
+                    _databaseHash.Commute((ref ulong h) => h ^= hash);
+                }
                 return VectorRelationship.Less;
             }
         }
 
-        public void Remove(string key)
+        private bool OnChanging(string key, object oldVal, object newVal)
         {
-            Distributed.EnlistBackend(this);
-            RemoveInternal(key);
-        }
-
-        private void RemoveInternal(string key)
-        {
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException();
-            if (_changeLock.GetValueOrDefault())
-                throw new InvalidOperationException("Changes are blocked at this time.");
-            if (!_local.TryGetValue(key, out var current))
-                return;
-            var val = (IHasVersionHash)Serializer.Deserialize(current.Data);
-            if (OnChanging(key, val, null, out var _))
-                return;
-            _local.Remove(key);
-            var hash = GetHash(key, val);
-            _databaseHash.Commute((ref ulong h) => h ^= hash);
-        }
-
-        private bool OnChanging(string key, object oldVal, object newVal, out bool remove)
-        {
-            remove = false;
             var ch = Changing;
             if (ch == null)
                 return false;
             var ev = new ChangingEventArgs(key, oldVal, newVal);
             ch.Invoke(this, ev);
-            remove = ev.Remove;
             return ev.Cancel;
         }
 
@@ -427,6 +440,7 @@ namespace Shielded.Gossip
         {
             Transport.Dispose();
             _gossipTimer.Dispose();
+            _deletableTimer.Dispose();
             _preCommit.Dispose();
         }
     }

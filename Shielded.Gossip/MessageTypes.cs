@@ -64,6 +64,8 @@ namespace Shielded.Gossip
 
         [IgnoreDataMember]
         public long Freshness { get; set; }
+        [IgnoreDataMember]
+        public bool Deletable { get; set; }
 
         [IgnoreDataMember]
         public object Deserialized
@@ -76,7 +78,7 @@ namespace Shielded.Gossip
 
         public override string ToString()
         {
-            return string.Format("{0}{1}: {2}", Key, Freshness != 0 ? " at " + Freshness : "", Deserialized);
+            return $"{Key}{(Deletable ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}: {Deserialized}";
         }
     }
 }

@@ -317,7 +317,7 @@ namespace Shielded.Gossip
         {
             if (e.Key.StartsWith(TransactionPfx))
             {
-                OnTransactionChanging(e);
+                OnTransactionChanging(e.Key, (TransactionInfo)e.OldValue, (TransactionInfo)e.NewValue);
             }
             else if (e.Key.StartsWith(PublicPfx))
             {
@@ -326,26 +326,14 @@ namespace Shielded.Gossip
             }
         }
 
-        private void OnTransactionChanging(ChangingEventArgs ev)
+        private void OnTransactionChanging(string id, TransactionInfo oldVal, TransactionInfo newVal)
         {
-            var id = ev.Key;
-            var oldVal = (TransactionInfo)ev.OldValue;
-            var newVal = (TransactionInfo)ev.NewValue;
             if (oldVal == null && newVal != null)
             {
-                var myState = newVal.State[Transport.OwnId];
-                if (myState != TransactionState.None)
-                {
-                    ev.Remove = true;
-                    if (_transactions.TryGetValue(id, out var curr))
-                        Shield.SideEffect(() => curr.Complete((myState & TransactionState.Prepared) != 0));
-                    return;
-                }
-                if (newVal.Initiator == Transport.OwnId ||
-                    newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0) ||
+                if (newVal.State.Items.Any(s => (s.Value & TransactionState.Done) != 0) ||
                     _transactions.ContainsKey(id))
                 {
-                    ev.Remove = OnStateChange(id, newVal);
+                    OnStateChange(id, newVal);
                     return;
                 }
                 var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
@@ -376,15 +364,7 @@ namespace Shielded.Gossip
             }
             else if (newVal != null)
             {
-                ev.Remove = OnStateChange(id, newVal);
-            }
-            else if (oldVal != null)
-            {
-                if (_transactions.TryGetValue(id, out var ourState))
-                {
-                    bool success = oldVal.State[Transport.OwnId] == TransactionState.Success;
-                    Shield.SideEffect(() => ourState.Complete(success));
-                }
+                OnStateChange(id, newVal);
             }
         }
 
@@ -419,7 +399,7 @@ namespace Shielded.Gossip
             Distributed.RunLocal(() =>
             {
                 if (!_wrapped.TryGet(id, out TransactionInfo current) ||
-                    current.State[Transport.OwnId] != TransactionState.Prepared)
+                    (current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 {
                     res = false;
                     return;
@@ -431,7 +411,7 @@ namespace Shielded.Gossip
             return res;
         }
 
-        private bool OnStateChange(string id, TransactionInfo current)
+        private void OnStateChange(string id, TransactionInfo current)
         {
             _transactions.TryGetValue(id, out var ourState);
             if (current.State.Items.Any(s => s.Value == TransactionState.Fail) &&
@@ -452,7 +432,7 @@ namespace Shielded.Gossip
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
             }
             else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
-                current.State[Transport.OwnId] == TransactionState.Prepared)
+                (current.State[Transport.OwnId] & TransactionState.Done) == 0)
             {
                 Shield.SideEffect(() =>
                 {
@@ -461,16 +441,6 @@ namespace Shielded.Gossip
                         ourState.Complete(true);
                 });
             }
-            else if (current.State.Items.All(s => (s.Value & TransactionState.Done) != 0))
-            {
-                if (ourState != null)
-                {
-                    bool ok = current.State.Items[0].Value == TransactionState.Success;
-                    Shield.SideEffect(() => ourState.Complete(ok));
-                }
-                return true;
-            }
-            return false;
         }
 
         private void Apply(TransactionInfo current)

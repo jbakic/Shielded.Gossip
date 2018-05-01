@@ -7,7 +7,6 @@ namespace Shielded.Gossip
         public readonly string Key;
         public readonly object OldValue;
         public readonly object NewValue;
-        public bool Remove { get; set; }
 
         public ChangingEventArgs(string key, object oldVal, object newVal)
         {

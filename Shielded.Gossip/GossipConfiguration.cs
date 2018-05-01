@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net;
-using System.Text;
-
-namespace Shielded.Gossip
+﻿namespace Shielded.Gossip
 {
     public class GossipConfiguration
     {
@@ -18,6 +13,8 @@ namespace Shielded.Gossip
         // server. flood control.
         public int AntiEntropyIdleTimeout { get; set; } = 2000;
         public int AntiEntropyHuntingLimit { get; set; } = 2;
+
+        public int DeletableCleanUpInterval { get; set; } = 5000;
 
         public (int Min, int Max) ConsistentPrepareTimeoutRange { get; set; } = (10000, 30000);
     }
