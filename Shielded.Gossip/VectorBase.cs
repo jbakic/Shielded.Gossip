@@ -174,12 +174,12 @@ namespace Shielded.Gossip
         public static TVec operator |(VectorBase<TVec, T> first, TVec second) =>
             first?.MergeWith(second) ?? second ?? new TVec();
 
-        public IEnumerable<VectorItem<T>> Without(string ownServerId)
+        public IEnumerable<VectorItem<T>> Without(string serverId)
         {
-            if (string.IsNullOrWhiteSpace(ownServerId))
+            if (string.IsNullOrWhiteSpace(serverId))
                 throw new ArgumentNullException();
             return (Items ?? Enumerable.Empty<VectorItem<T>>())
-                .Where(i => !i.ServerId.Equals(ownServerId, StringComparison.InvariantCultureIgnoreCase));
+                .Where(i => !i.ServerId.Equals(serverId, StringComparison.InvariantCultureIgnoreCase));
         }
 
         public T this[string serverId]
