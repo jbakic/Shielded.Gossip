@@ -77,7 +77,7 @@ namespace Shielded.Gossip.Tests
         public void DodgyConsistent_RaceAsymmetric()
         {
             const int transactions = 60;
-            const int fieldCount = 20;
+            const int fieldCount = 21;
 
             Shield.InTransaction(() =>
             {
