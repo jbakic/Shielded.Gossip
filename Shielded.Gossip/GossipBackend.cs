@@ -392,6 +392,8 @@ namespace Shielded.Gossip
 
                 if (OnChanging(key, oldVal, val))
                     return VectorRelationship.Greater;
+                // we support this only for safety - a CanDelete should never accept any changes, nor switch to !CanDelete.
+                var oldDeletable = oldVal is IDeletable oldDel && oldDel.CanDelete;
                 var deletable = val is IDeletable del && del.CanDelete;
                 _local[key] = new MessageItem
                 {
@@ -399,7 +401,7 @@ namespace Shielded.Gossip
                     Data = Serializer.Serialize(val),
                     Deletable = deletable,
                 };
-                var hash = deletable ? GetHash(key, oldVal) : GetHash(key, oldVal) ^ GetHash(key, val);
+                var hash = (oldDeletable ? 0 : GetHash(key, oldVal)) ^ (deletable ? 0 : GetHash(key, val));
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return cmp;
             }
