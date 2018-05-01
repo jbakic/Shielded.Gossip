@@ -15,6 +15,7 @@ namespace Shielded.Gossip
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
         private readonly Shielded<ulong> _databaseHash = new Shielded<ulong>();
+        private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
 
         private readonly Timer _gossipTimer;
         private readonly IDisposable _preCommit;
@@ -34,6 +35,8 @@ namespace Shielded.Gossip
 
             _preCommit = Shield.PreCommit(() => _local.TryGetValue("any", out MessageItem _) || true, () =>
             {
+                // so nobody sneaks in a PreCommit after this one, and screws up the fresh index.
+                _changeLock.Value = true;
                 SyncIndexes();
             });
         }
@@ -332,6 +335,8 @@ namespace Shielded.Gossip
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException();
+            if (_changeLock.GetValueOrDefault())
+                throw new InvalidOperationException("Changes are blocked at this time.");
             if (_local.TryGetValue(key, out MessageItem oldItem))
             {
                 var oldVal = (TItem)Serializer.Deserialize(oldItem.Data);
@@ -374,6 +379,10 @@ namespace Shielded.Gossip
 
         private void RemoveInternal(string key)
         {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException();
+            if (_changeLock.GetValueOrDefault())
+                throw new InvalidOperationException("Changes are blocked at this time.");
             if (!_local.TryGetValue(key, out var current))
                 return;
             var val = (IHasVersionHash)Serializer.Deserialize(current.Data);
