@@ -39,7 +39,6 @@ namespace Shielded.Gossip.Tests
             {
                 var transport = CreateTransport(kvp.Key, kvp.Value, _addresses.Where(inner => inner.Key != kvp.Key));
                 transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
-                transport.Error += OnListenerError;
 
                 return new KeyValuePair<string, TBackend>(kvp.Key, CreateBackend(transport, new GossipConfiguration
                 {
@@ -59,7 +58,7 @@ namespace Shielded.Gossip.Tests
 
         protected ConcurrentQueue<Exception> _listenerExceptions = new ConcurrentQueue<Exception>();
 
-        private void OnListenerError(object sender, Exception ex)
+        protected void OnListenerError(object sender, Exception ex)
         {
             _listenerExceptions.Enqueue(ex);
         }
@@ -101,6 +100,7 @@ namespace Shielded.Gossip.Tests
         {
             var transport = new TcpTransport(ownId, localEndpoint,
                 new ShieldedDict<string, IPEndPoint>(servers, null, StringComparer.InvariantCultureIgnoreCase));
+            transport.Error += OnListenerError;
             transport.StartListening();
             return transport;
         }

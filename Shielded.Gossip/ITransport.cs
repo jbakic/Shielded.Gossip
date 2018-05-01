@@ -12,6 +12,5 @@ namespace Shielded.Gossip
         void Broadcast(object msg);
         void Send(string server, object msg);
         event EventHandler<object> MessageReceived;
-        event EventHandler<Exception> Error;
     }
 }

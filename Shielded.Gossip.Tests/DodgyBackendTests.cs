@@ -24,6 +24,7 @@ namespace Shielded.Gossip.Tests
         {
             var transport = new TcpTransport(ownId, localEndpoint,
                 new ShieldedDict<string, IPEndPoint>(servers, null, StringComparer.InvariantCultureIgnoreCase));
+            transport.Error += OnListenerError;
             transport.StartListening();
             return new DodgyTransport(transport);
         }
