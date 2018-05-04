@@ -431,7 +431,7 @@ namespace Shielded.Gossip
                     Shield.SideEffect(() =>
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
             }
-            else if (current.State.Items.Any(s => s.Value == TransactionState.Success) &&
+            else if (current.State.Items.All(s => (s.Value & TransactionState.Prepared) != 0) &&
                 (current.State[Transport.OwnId] & TransactionState.Done) == 0)
             {
                 Shield.SideEffect(() =>
