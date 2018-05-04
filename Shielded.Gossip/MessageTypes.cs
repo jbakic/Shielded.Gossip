@@ -3,14 +3,14 @@ using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class DirectMail
     {
         [DataMember]
         public MessageItem[] Items { get; set; }
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class GossipStart
     {
         [DataMember]
@@ -21,7 +21,7 @@ namespace Shielded.Gossip
         public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class GossipReply
     {
         [DataMember]
@@ -45,7 +45,7 @@ namespace Shielded.Gossip
         public DateTimeOffset LastTime { get; set; }
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class GossipEnd
     {
         [DataMember]
@@ -54,7 +54,7 @@ namespace Shielded.Gossip
         public bool Success { get; set; }
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class MessageItem
     {
         [DataMember]
@@ -63,9 +63,22 @@ namespace Shielded.Gossip
         public byte[] Data { get; set; }
 
         [IgnoreDataMember]
-        public long Freshness { get; set; }
+        public long Freshness
+        {
+            get => _freshness;
+            set => _freshness = value;
+        }
+        [NonSerialized]
+        private long _freshness;
+
         [IgnoreDataMember]
-        public bool Deletable { get; set; }
+        public bool Deletable
+        {
+            get => _deletable;
+            set => _deletable = value;
+        }
+        [NonSerialized]
+        private bool _deletable;
 
         [IgnoreDataMember]
         public object Deserialized

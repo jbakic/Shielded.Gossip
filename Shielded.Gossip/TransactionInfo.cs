@@ -17,7 +17,7 @@ namespace Shielded.Gossip
         Fail = Done,
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class TransactionVector : VectorBase<TransactionVector, TransactionState>
     {
         public TransactionVector() : base() { }
@@ -30,7 +30,7 @@ namespace Shielded.Gossip
             left == TransactionState.Fail || right == TransactionState.Fail ? TransactionState.Fail : (left | right);
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class TransactionItem : MessageItem
     {
         [DataMember]
@@ -38,7 +38,7 @@ namespace Shielded.Gossip
     }
 
     // this is an item that contains other items, so it's gonna be a 3-level serialization Matroshka.
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class TransactionInfo : IMergeable<TransactionInfo, TransactionInfo>, IDeletable
     {
         [DataMember]

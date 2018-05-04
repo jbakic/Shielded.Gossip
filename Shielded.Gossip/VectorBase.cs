@@ -6,7 +6,7 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public struct VectorItem<T>
     {
         [DataMember]
@@ -23,7 +23,7 @@ namespace Shielded.Gossip
         }
     }
 
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()
     {

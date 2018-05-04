@@ -4,7 +4,7 @@ using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
-    [DataContract(Namespace = "")]
+    [DataContract(Namespace = ""), Serializable]
     public class VectorClock : VectorBase<VectorClock, int>
     {
         public VectorClock() : base() { }

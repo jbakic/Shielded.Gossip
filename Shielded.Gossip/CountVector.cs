@@ -4,10 +4,10 @@ using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
-    [DataContract(Namespace="")]
+    [DataContract(Namespace=""), Serializable]
     public class CountVector : VectorBase<CountVector, CountVector.Item>
     {
-        [DataContract(Namespace="")]
+        [DataContract(Namespace=""), Serializable]
         public struct Item : IEquatable<Item>
         {
             [DataMember]
