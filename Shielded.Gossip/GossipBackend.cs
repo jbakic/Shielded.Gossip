@@ -110,12 +110,17 @@ namespace Shielded.Gossip
             // actually sending.
             Shield.SideEffect(() =>
             {
+                var time =
+                    clearState ? (DateTimeOffset?)null :
+                    msg is GossipStart start ? start.Time :
+                    msg is GossipReply reply ? reply.Time :
+                    DateTimeOffset.UtcNow;
                 Shield.InTransaction(() =>
                 {
                     if (clearState)
                         _lastSendTime.Remove(server);
                     else
-                        _lastSendTime[server] = DateTimeOffset.UtcNow;
+                        _lastSendTime[server] = time.Value;
                 });
                 Transport.Send(server, msg);
             });
@@ -216,10 +221,20 @@ namespace Shielded.Gossip
             Send(server, new GossipEnd { From = Transport.OwnId, Success = success }, true);
         }
 
+        private bool ShouldKillChain(string server, DateTimeOffset ourLast)
+        {
+            return
+                (DateTimeOffset.UtcNow - ourLast).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout
+                ||
+                StringComparer.InvariantCultureIgnoreCase.Compare(server, Transport.OwnId) < 0 &&
+                _lastSendTime.TryGetValue(server, out var ourLastAny) &&
+                ourLastAny > ourLast;
+        }
+
         private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null)
         {
             var ourLast = reply?.LastTime;
-            if (ourLast != null && (DateTimeOffset.UtcNow - ourLast.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
+            if (ourLast != null && ShouldKillChain(server, ourLast.Value))
                 return;
 
             var ownHash = _databaseHash.Value;
