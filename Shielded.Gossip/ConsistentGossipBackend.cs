@@ -16,19 +16,19 @@ namespace Shielded.Gossip
     /// <see cref="Multiple{T}"/> to make them a CRDT. If a type implements <see cref="IDeletable"/>,
     /// it can be deleted from the storage.
     /// </summary>
-    /// <remarks>The transactions are very simple - for every Set operation you perform in your
+    /// <remarks><para>The transactions are very simple - for every Set operation you perform in your
     /// transaction lambda, we will make a transaction item only if it affects the storage.
     /// The result of such a Set operation will be Less or Conflict. We send this result too, as
     /// the expected result. If Conflict is expected, other servers will accept this Set regardless
     /// of their local result. But if Less is expected, then they will check if the result is also
     /// Less on their local DBs, and fail the transaction if not. This is all that a transaction
-    /// checks!
+    /// checks!</para>
     /// 
-    /// If eventually consistent transactions are changing the same fields in parallel, then the
+    /// <para>If eventually consistent transactions are changing the same fields in parallel, then the
     /// consistent transaction, if successful, guarantees only that on every server at some point
     /// of time in their change history this transaction checked out OK. This is important to
     /// note, because eventual changes get written in immediately, maybe before some transaction has
-    /// fully completed, and can overwrite her effects before they even become visible.</remarks>
+    /// fully completed, and can overwrite her effects before they even become visible.</para></remarks>
     public class ConsistentGossipBackend : IBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
