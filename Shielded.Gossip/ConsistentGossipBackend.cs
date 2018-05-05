@@ -32,13 +32,22 @@ namespace Shielded.Gossip
     public class ConsistentGossipBackend : IBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
+        private readonly IBackend _owner;
 
         public ITransport Transport => _wrapped.Transport;
         public GossipConfiguration Configuration => _wrapped.Configuration;
 
-        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
+        /// <summary>
+        /// Constructor.
+        /// </summary>
+        /// <param name="transport">The message transport to use.</param>
+        /// <param name="configuration">The configuration.</param>
+        /// <param name="owner">If not null, this backend will enlist the owner instead of itself.
+        /// The owner then controls when exactly our IBackend methods get called.</param>
+        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration, IBackend owner = null)
         {
-            _wrapped = new GossipBackend(transport, configuration);
+            _owner = owner ?? this;
+            _wrapped = new GossipBackend(transport, configuration, _owner);
             _wrapped.Changing += _wrapped_Changing;
         }
 
@@ -158,7 +167,7 @@ namespace Shielded.Gossip
 
         private void Enlist()
         {
-            Distributed.EnlistBackend(this);
+            Distributed.EnlistBackend(_owner);
             if (!_state.HasValue)
             {
                 // a hack to keep the transaction open.
@@ -190,9 +199,12 @@ namespace Shielded.Gossip
             BackendState ourState = null;
             cont.InContext(() =>
             {
-                ourState = _state.Value;
-                Shield.SideEffect(null, () => ourState.Complete(false));
+                ourState = _state.GetValueOrDefault();
+                if (ourState != null)
+                    Shield.SideEffect(null, () => ourState.Complete(false));
             });
+            if (ourState == null)
+                return await ((IBackend)_wrapped).Prepare(cont);
             if (ourState.Changes == null || !ourState.Changes.Any())
                 return new PrepareResult(true);
 
@@ -486,11 +498,13 @@ namespace Shielded.Gossip
             _wrapped.ApplyItems(current.Items);
         }
 
-        async Task IBackend.Commit(CommitContinuation cont)
+        Task IBackend.Commit(CommitContinuation cont)
         {
             BackendState ourState = null;
-            cont.InContext(() => ourState = _state.Value);
-            await Distributed.Run(() =>
+            cont.InContext(() => ourState = _state.GetValueOrDefault());
+            if (ourState == null)
+                return ((IBackend)_wrapped).Commit(cont);
+            return Distributed.Run(() =>
             {
                 var id = ourState.TransactionId;
                 if (!_wrapped.TryGet(id, out TransactionInfo current) ||

@@ -30,6 +30,8 @@ namespace Shielded.Gossip
         private readonly Timer _deletableTimer;
         private readonly IDisposable _preCommit;
 
+        private readonly IBackend _owner;
+
         public readonly ITransport Transport;
         public readonly GossipConfiguration Configuration;
 
@@ -39,10 +41,18 @@ namespace Shielded.Gossip
         /// </summary>
         public readonly ShieldedLocal<string> DirectMailRestriction = new ShieldedLocal<string>();
 
-        public GossipBackend(ITransport transport, GossipConfiguration configuration)
+        /// <summary>
+        /// Constructor.
+        /// </summary>
+        /// <param name="transport">The message transport to use.</param>
+        /// <param name="configuration">The configuration.</param>
+        /// <param name="owner">If not null, this backend will enlist the owner instead of itself.
+        /// The owner then controls when exactly our IBackend methods get called.</param>
+        public GossipBackend(ITransport transport, GossipConfiguration configuration, IBackend owner = null)
         {
             Transport = transport;
             Configuration = configuration;
+            _owner = owner ?? this;
             Transport.MessageReceived += Transport_MessageReceived;
 
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
@@ -415,7 +425,7 @@ namespace Shielded.Gossip
 
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem, TItem>
         {
-            Distributed.EnlistBackend(this);
+            Distributed.EnlistBackend(_owner);
             return SetInternalWoEnlist(key, val);
         }
 
