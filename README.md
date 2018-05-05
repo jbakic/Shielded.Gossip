@@ -32,11 +32,7 @@ allowing you to resolve the conflict using any strategy that works best for your
 course, if you only use consistent transactions on a field, you won't have to deal with that.
 
 The library is still a work in progress. I hope it may be useful already, but it would benefit from
-some extra features, like:
-* Ability to replace the DataContractSerializer with an arbitrary serializer (!)
-* Sharding support
-* Adding concept of distance, to influence the frequency of gossiping with certain servers
-* More CRDT types out of the box
+some extra features, and more real-life usage and testing.
 
 ## The protocol
 
