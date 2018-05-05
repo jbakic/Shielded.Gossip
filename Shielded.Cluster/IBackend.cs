@@ -23,7 +23,9 @@ namespace Shielded.Cluster
     }
 
     /// <summary>
-    /// Interface for a backend that takes part in <see cref="Distributed"/> operations.
+    /// Interface for a backend that takes part in <see cref="Distributed"/> operations. Allows extending
+    /// this library to support custom external storage, and may be used to wrap two or more backends in
+    /// one class in order to better control how they interact.
     /// </summary>
     public interface IBackend
     {
