@@ -6,6 +6,9 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// The state of a transaction on one server.
+    /// </summary>
     [Flags]
     public enum TransactionState
     {
@@ -17,6 +20,10 @@ namespace Shielded.Gossip
         Fail = Done,
     }
 
+    /// <summary>
+    /// The vector of <see cref="TransactionState"/>, a CRDT representing the state of a distributed
+    /// transaction.
+    /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public class TransactionVector : VectorBase<TransactionVector, TransactionState>
     {
@@ -37,10 +44,16 @@ namespace Shielded.Gossip
         public VectorRelationship Expected { get; set; }
     }
 
-    // this is an item that contains other items, so it's gonna be a 3-level serialization Matroshka.
+    /// <summary>
+    /// A CRDT containing the state and full meta-data on a distributed transaction. Used by the
+    /// <see cref="ConsistentGossipBackend"/>.
+    /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public class TransactionInfo : IMergeable<TransactionInfo, TransactionInfo>, IDeletable
     {
+        /// <summary>
+        /// ID of the server that started the transaction.
+        /// </summary>
         [DataMember]
         public string Initiator { get; set; }
         [DataMember]
@@ -48,6 +61,11 @@ namespace Shielded.Gossip
         [DataMember]
         public TransactionVector State { get; set; }
 
+        /// <summary>
+        /// True if all servers have reached the Success state or the Fail state. It is safe to
+        /// delete a done transaction, cause even if later revived, it is idempotent - a re-execution
+        /// will simply fail with no effects, and the transaction will become deletable again.
+        /// </summary>
         public bool CanDelete => State.Items.All(s => (s.Value & TransactionState.Done) != 0);
 
         public VersionHash GetVersionHash() => (State ?? new TransactionVector()).GetVersionHash();

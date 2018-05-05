@@ -3,6 +3,9 @@ using System.Linq;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// Type of the hash used by the <see cref="GossipBackend"/>.
+    /// </summary>
     public struct VersionHash
     {
         public ulong Value;
@@ -11,6 +14,9 @@ namespace Shielded.Gossip
         public static implicit operator VersionHash(ulong v) => new VersionHash { Value = v };
     }
 
+    /// <summary>
+    /// FNV1a hash implementation, 64 bits.
+    /// </summary>
     public static class FNV1a64
     {
         public static VersionHash Hash(IEnumerable<byte[]> fields)
@@ -38,6 +44,9 @@ namespace Shielded.Gossip
         }
     }
 
+    /// <summary>
+    /// FNV1a hash implementation, 32 bits.
+    /// </summary>
     public static class FNV1a32
     {
         public static int Hash(IEnumerable<byte[]> fields)

@@ -10,6 +10,15 @@ using System.Threading.Tasks;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// A backend supporting a key/value store which is distributed using a simple gossip protocol
+    /// implementation. Can be used in <see cref="Distributed.Consistent"/> calls, but is always
+    /// only eventually consistent.
+    /// Values should be CRDTs, implementing <see cref="IMergeable{TIn, TOut}"/>,
+    /// or should implement <see cref="IHasVectorClock"/> and then they can be wrapped in a
+    /// <see cref="Multiple{T}"/> to make them a CRDT. If a type implements <see cref="IDeletable"/>,
+    /// it can be deleted from the storage.
+    /// </summary>
     public class GossipBackend : IBackend, IDisposable
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
@@ -24,6 +33,10 @@ namespace Shielded.Gossip
         public readonly ITransport Transport;
         public readonly GossipConfiguration Configuration;
 
+        /// <summary>
+        /// If set inside a distributed transaction, restricts the direct mail message sending
+        /// to only this server. Affects only the current transaction. Does not affect gossip.
+        /// </summary>
         public readonly ShieldedLocal<string> DirectMailRestriction = new ShieldedLocal<string>();
 
         public GossipBackend(ITransport transport, GossipConfiguration configuration)
@@ -166,18 +179,16 @@ namespace Shielded.Gossip
             switch (msg)
             {
                 case DirectMail trans:
-                    Shield.InTransaction(() => ApplyItems(trans.Items));
+                    ApplyItems(trans.Items);
                     break;
 
                 case GossipStart start:
-                    Shield.InTransaction(() =>
-                        SendReply(start.From, start.DatabaseHash, start.Time));
+                    SendReply(start.From, start.DatabaseHash, start.Time);
                     break;
 
                 case GossipReply reply:
-                    Shield.InTransaction(() => ApplyItems(reply.Items));
-                    Shield.InTransaction(() =>
-                        SendReply(reply.From, reply.DatabaseHash, reply.Time, reply));
+                    ApplyItems(reply.Items);
+                    SendReply(reply.From, reply.DatabaseHash, reply.Time, reply);
                     break;
 
                 case GossipEnd end:
@@ -189,7 +200,11 @@ namespace Shielded.Gossip
         private readonly ApplyMethods _applyMethods = new ApplyMethods(typeof(GossipBackend)
             .GetMethod("SetInternalWoEnlist", BindingFlags.Instance | BindingFlags.NonPublic));
 
-        public void ApplyItems(IEnumerable<MessageItem> items)
+        /// <summary>
+        /// Applies the given items internally, does not enlist the backend in any distributed
+        /// transaction.
+        /// </summary>
+        public void ApplyItems(IEnumerable<MessageItem> items) => Shield.InTransaction(() =>
         {
             if (items == null)
                 return;
@@ -201,7 +216,7 @@ namespace Shielded.Gossip
                 var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
             }
-        }
+        });
 
         private static bool IsByteEqual(byte[] one, byte[] two)
         {
@@ -231,7 +246,7 @@ namespace Shielded.Gossip
                 ourLastAny > ourLast;
         }
 
-        private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null)
+        private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null) => Shield.InTransaction(() =>
         {
             var ourLast = reply?.LastTime;
             if (ourLast != null && ShouldKillChain(server, ourLast.Value))
@@ -312,7 +327,7 @@ namespace Shielded.Gossip
                 LastWindowEnd = reply?.WindowEnd,
                 LastTime = hisTime,
             });
-        }
+        });
 
         private IEnumerable<MessageItem> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd)
         {
@@ -359,6 +374,9 @@ namespace Shielded.Gossip
 
         void IBackend.Rollback() { }
 
+        /// <summary>
+        /// Tries to read the value under the given key. Does not involve any network communication.
+        /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
             item = default;
@@ -368,11 +386,21 @@ namespace Shielded.Gossip
             return true;
         }
 
+        /// <summary>
+        /// Sets the given value under the given key, merging it with any already existing value
+        /// there. Returns the result of comparison between the old and new value, or
+        /// <see cref="VectorRelationship.Less"/> if there is no old value. The storage gets affected
+        /// only if the result of comparison is Less or Conflict.
+        /// </summary>
         public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
         {
             return SetInternal(key, item);
         }
 
+        /// <summary>
+        /// Small helper - calls <see cref="Set{TItem}(string, TItem)"/>, but wraps the parameter in a
+        /// <see cref="Multiple{T}"/> container.
+        /// </summary>
         public VectorRelationship SetVersion<TItem>(string key, TItem item) where TItem : IHasVectorClock
         {
             return Set(key, (Multiple<TItem>)item);
@@ -451,6 +479,9 @@ namespace Shielded.Gossip
             return ev.Cancel;
         }
 
+        /// <summary>
+        /// Fired during any change, allowing the change to be cancelled.
+        /// </summary>
         public event EventHandler<ChangingEventArgs> Changing;
 
         public void Dispose()

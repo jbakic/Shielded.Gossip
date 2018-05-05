@@ -5,6 +5,10 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// A serializer that just (de)serializes the bloody object, with no need to explicitly
+    /// specify types. Currently hard-coded to use <see cref="DataContractSerializer"/>.
+    /// </summary>
     public static class Serializer
     {
         public static byte[] Serialize(object msg)

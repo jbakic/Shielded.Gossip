@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// Implementation of <see cref="ITransport"/> using a very simple TCP-based protocol.
+    /// </summary>
     public class TcpTransport : ITransport
     {
         public TcpTransport(string ownId, IPEndPoint localEndpoint, IDictionary<string, IPEndPoint> serverIPs)
@@ -21,10 +24,17 @@ namespace Shielded.Gossip
         public readonly IDictionary<string, IPEndPoint> ServerIPs;
         public ICollection<string> Servers => ServerIPs.Keys;
 
+        /// <summary>
+        /// Timeout for detecting a half-open connection. If we are expecting (more) data,
+        /// and receive nothing for this long, we terminate the connection.
+        /// </summary>
         public int ReceiveTimeout { get; set; } = 5000;
 
         private TcpListener _listener;
 
+        /// <summary>
+        /// Stop the server. Safe to call if already stopped.
+        /// </summary>
         public void StopListening()
         {
             var listener = _listener;
@@ -39,15 +49,21 @@ namespace Shielded.Gossip
             }
         }
 
+        /// <summary>
+        /// Just calls <see cref="StopListening"/>, the object may still be used.
+        /// </summary>
         public void Dispose()
         {
             StopListening();
         }
 
+        /// <summary>
+        /// Start the server. Safe to call if already running, does nothing then.
+        /// </summary>
         public async void StartListening()
         {
             if (_listener != null)
-                throw new InvalidOperationException("Already listening.");
+                return;
             var listener = new TcpListener(LocalEndpoint);
             if (Interlocked.CompareExchange(ref _listener, listener, null) != null)
                 return;
@@ -115,6 +131,10 @@ namespace Shielded.Gossip
         }
 
         public event EventHandler<object> MessageReceived;
+
+        /// <summary>
+        /// Event raised when any error occurs. May be a listener or a sender error.
+        /// </summary>
         public event EventHandler<Exception> Error;
 
         public void Broadcast(object msg)

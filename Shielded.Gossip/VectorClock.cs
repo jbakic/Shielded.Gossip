@@ -4,6 +4,10 @@ using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// CRDT type for versioning data. Each server gets his own int version which they may
+    /// only increment. The CRDT merge operation is simply Max.
+    /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public class VectorClock : VectorBase<VectorClock, int>
     {
@@ -15,6 +19,10 @@ namespace Shielded.Gossip
 
         protected override int Merge(int left, int right) => Math.Max(left, right);
 
+        /// <summary>
+        /// Produce next version for this server, returning the result in a new VectorClock.
+        /// </summary>
+        /// <param name="ownServerId">ID of the local server producing the new version.</param>
         public VectorClock Next(string ownServerId)
         {
             if (string.IsNullOrWhiteSpace(ownServerId))

@@ -1,11 +1,26 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Shielded.Gossip
+﻿namespace Shielded.Gossip
 {
+    /// <summary>
+    /// Interface for classes that have a <see cref="VectorClock"/> property, allowing
+    /// them to be wrapped in a <see cref="Multiple{T}"/> and used as values with the
+    /// gossip backend.
+    /// </summary>
+    /// <remarks>
+    /// Vector clock is a versioning concept used in distributed systems. Every server
+    /// has their own version counter, hence "vector", and may only increment it. The
+    /// type is a CRDT, the merge operation is simply taking the bigger value per server
+    /// thus producing a new vector.
+    /// 
+    /// In case of conflict, the <see cref="Multiple{T}"/> will contain multiple versions
+    /// of the data - the ones which were created independently of each other. The vector
+    /// clock algorithm always correctly recognizes this, and the Multiple allows the
+    /// library user to resolve the conflicts in a way best suited to the use case.
+    /// </remarks>
     public interface IHasVectorClock
     {
+        /// <summary>
+        /// The version of this data item.
+        /// </summary>
         VectorClock Clock { get; set; }
     }
 }

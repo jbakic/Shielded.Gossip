@@ -4,11 +4,31 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// A backend based on <see cref="GossipBackend"/>, extending it with support for
+    /// consistent transactions. Also works in eventually consistent transactions.
+    /// Values should be CRDTs, implementing <see cref="IMergeable{TIn, TOut}"/>,
+    /// or should implement <see cref="IHasVectorClock"/> and then they can be wrapped in a
+    /// <see cref="Multiple{T}"/> to make them a CRDT. If a type implements <see cref="IDeletable"/>,
+    /// it can be deleted from the storage.
+    /// </summary>
+    /// <remarks>The transactions are very simple - for every Set operation you perform in your
+    /// transaction lambda, we will make a transaction item only if it affects the storage.
+    /// The result of such a Set operation will be Less or Conflict. We send this result too, as
+    /// the expected result. If Conflict is expected, other servers will accept this Set regardless
+    /// of their local result. But if Less is expected, then they will check if the result is also
+    /// Less on their local DBs, and fail the transaction if not. This is all that a transaction
+    /// checks!
+    /// 
+    /// If eventually consistent transactions are changing the same fields in parallel, then the
+    /// consistent transaction, if successful, guarantees only that on every server at some point
+    /// of time in their change history this transaction checked out OK. This is important to
+    /// note, because eventual changes get written in immediately, maybe before some transaction has
+    /// fully completed, and can overwrite her effects before they even become visible.</remarks>
     public class ConsistentGossipBackend : IBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
@@ -22,6 +42,9 @@ namespace Shielded.Gossip
             _wrapped.Changing += _wrapped_Changing;
         }
 
+        /// <summary>
+        /// Tries to read the value under the given key. Does not involve any network communication.
+        /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
             key = WrapPublicKey(key);
@@ -57,6 +80,14 @@ namespace Shielded.Gossip
         private const string PublicPfx = "|";
         private const string TransactionPfx = "transaction|";
 
+        /// <summary>
+        /// Sets the given value under the given key, merging it with any already existing value
+        /// there. Returns the result of comparison between the old and new value, or
+        /// <see cref="VectorRelationship.Less"/> if there is no old value. In a consistent
+        /// transaction, only the calls which return Less or Conflict, that actually affect the
+        /// storage, get transmitted to other servers. If the result was Less, we will insist
+        /// that it's Less on all servers.
+        /// </summary>
         public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
         {
             key = WrapPublicKey(key);
@@ -65,6 +96,10 @@ namespace Shielded.Gossip
             return SetInternal(key, item);
         }
 
+        /// <summary>
+        /// Small helper - calls <see cref="Set{TItem}(string, TItem)"/>, but wraps the parameter in a
+        /// <see cref="Multiple{T}"/> container.
+        /// </summary>
         public VectorRelationship SetVersion<TItem>(string key, TItem item) where TItem : IHasVectorClock
         {
             return Set(key, (Multiple<TItem>)item);
@@ -142,6 +177,9 @@ namespace Shielded.Gossip
             return ev.Cancel;
         }
 
+        /// <summary>
+        /// Fired during any change, allowing the change to be cancelled.
+        /// </summary>
         public event EventHandler<ChangingEventArgs> Changing;
 
         private readonly ShieldedDictNc<string, BackendState> _transactions = new ShieldedDictNc<string, BackendState>();

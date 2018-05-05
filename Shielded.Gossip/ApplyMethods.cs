@@ -8,6 +8,10 @@ namespace Shielded.Gossip
 {
     public delegate VectorRelationship ApplyDelegate(string key, object obj);
 
+    /// <summary>
+    /// Helper for generic methods of signature: VectorRelationship SomeMethod&lt;TItem&gt;(string key, TItem item).
+    /// Produces a delegate which receives an object arg, and calls the appropriate version of the generic method.
+    /// </summary>
     public class ApplyMethods
     {
         public ApplyMethods(MethodInfo itemMsgMethod)

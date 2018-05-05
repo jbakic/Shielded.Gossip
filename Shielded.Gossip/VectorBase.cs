@@ -6,6 +6,10 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// The base type for items of a <see cref="VectorBase{TVec, T}"/> inheritor. Contains the
+    /// server ID, and a generic value.
+    /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public struct VectorItem<T>
     {
@@ -23,6 +27,13 @@ namespace Shielded.Gossip
         }
     }
 
+    /// <summary>
+    /// Abstract base class for CRDT vector types - vectors where each server has their own
+    /// value, and which define a merge operation for these values that is
+    /// idempotent, commutative and associative.
+    /// </summary>
+    /// <typeparam name="TVec">The type of the vector, i.e. of the child class itself.</typeparam>
+    /// <typeparam name="T">The type of an individual server's value.</typeparam>
     [DataContract(Namespace = ""), Serializable]
     public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
         where TVec : VectorBase<TVec, T>, new()

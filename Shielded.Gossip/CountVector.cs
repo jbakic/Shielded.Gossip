@@ -4,6 +4,9 @@ using System.Runtime.Serialization;
 
 namespace Shielded.Gossip
 {
+    /// <summary>
+    /// A CRDT counter value, for safe and eventually consistent counters.
+    /// </summary>
     [DataContract(Namespace=""), Serializable]
     public class CountVector : VectorBase<CountVector, CountVector.Item>
     {
