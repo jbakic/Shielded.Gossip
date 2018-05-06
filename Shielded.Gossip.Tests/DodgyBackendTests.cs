@@ -61,7 +61,10 @@ namespace Shielded.Gossip.Tests
                     Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0))
                 .Result;
 
-            Assert.AreEqual(transactions, read);
+            if (read < transactions)
+                Assert.Inconclusive($"Servers did not achieve sync within given time. Expected {transactions}, read {read}");
+            else if (read > transactions)
+                Assert.Fail();
         }
     }
 }
