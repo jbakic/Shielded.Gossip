@@ -18,18 +18,21 @@ project.
 
 All the values the gossip backend works with must be CRDTs -
 [Conflict-free Replicated Data Types](https://en.wikipedia.org/wiki/Conflict-free_replicated_data_type).
-This gives it great guarantees - CRDTs are mergable in an idempotent, commutative and
+If you are wish to use any other types, which are not CRDTs, you can add the IHasVectorClock
+interface to them, and use the Multiple&lt;T&gt; wrapper to make them CRDTs. You can also
+use the Vc&lt;T&gt; wrapper to add a vector clock to any type you cannot modify. The backends
+have helper methods to make this easier.
+
+[Vector clocks](https://en.wikipedia.org/wiki/Vector_clock) reliably detect conflicting edits
+to the same key, and the Multiple keeps the conflicting versions, allowing you to resolve the
+conflict using any strategy that works best for your data type. Of course, if you only use
+consistent transactions on a field, you won't have to deal with that.
+
+Using CRDTs provides great guarantees - CRDTs are mergable in an idempotent, commutative and
 associative way, which means that the servers must eventually agree on the same version of the
 data regardless of the order or number of messages they exchange. Currently included are
 the VectorClock, and a distributed counter implemented in the CountVector class. VectorBase
 can be used as a base class to easily implement many CRDT types.
-
-If you are working with ordinary DTO objects which are not CRDTs, you can add the IHasVectorClock
-interface to them, and use them with the Multiple&lt;T&gt; wrapper. It turns any class that has a
-VectorClock property into a CRDT. [Vector clocks](https://en.wikipedia.org/wiki/Vector_clock)
-reliably detect conflicting edits to the same key, and the Multiple keeps the conflicting versions,
-allowing you to resolve the conflict using any strategy that works best for your data type. Of
-course, if you only use consistent transactions on a field, you won't have to deal with that.
 
 The library is still a work in progress. I hope it may be useful already, but it would benefit from
 some extra features, and more real-life usage and testing.
