@@ -44,7 +44,7 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual(VectorRelationship.Less,
                 Distributed.Run(() => _backend.SetVersion("key", testEntity)).Result);
 
-            var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                 .Result.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);
@@ -64,7 +64,7 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(VectorRelationship.Greater,
                     Distributed.Run(() => _backend.SetVersion("key", testEntity2Fail)).Result);
 
-                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
 
                 Assert.AreEqual(testEntity1.Id, read.Id);
@@ -77,7 +77,7 @@ namespace Shielded.Gossip.Tests
                 Distributed.Run(() => _backend.SetVersion("key", testEntity2Succeed)).Result);
 
             {
-                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
 
                 Assert.AreEqual(testEntity2Succeed.Id, read.Id);
@@ -90,7 +90,7 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(VectorRelationship.Equal,
                     Distributed.Run(() => _backend.SetVersion("key", testEntity2SameClock)).Result);
 
-                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
 
                 // we keep the first entity we see...
@@ -106,7 +106,7 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(VectorRelationship.Conflict,
                     Distributed.Run(() => _backend.SetVersion("key", testEntity3Conflict)).Result);
 
-                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null).Result;
+                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result;
                 mergedClock = read.MergedClock;
 
                 var read2 = read.Single(t => t.Id == 2);
@@ -127,7 +127,7 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(VectorRelationship.Less,
                     Distributed.Run(() => _backend.SetVersion("key", testEntity4Resolve)).Result);
 
-                var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> t) ? t : null)
+                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
 
                 Assert.AreEqual(testEntity4Resolve.Id, read.Id);
@@ -150,8 +150,7 @@ namespace Shielded.Gossip.Tests
                 _backend.Set("key", toSet);
             }).Wait();
 
-            var read = Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> res) ? res : null)
-                .Result;
+            var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result;
 
             var read2 = read.Single(t => t.Id == 2);
             var read3 = read.Single(t => t.Id == 3);

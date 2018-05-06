@@ -52,12 +52,33 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Tries to read the value under the given key. Does not involve any network communication.
+        /// Tries to read the value under the given key. The type of the value must be a CRDT.
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
         {
             key = WrapPublicKey(key);
             return TryGetInternal(key, out item);
+        }
+
+        /// <summary>
+        /// Tries to read the value(s) under the given key. Used with types that implement
+        /// <see cref="IHasVectorClock"/>. In case of conflict we return all conflicting versions.
+        /// If the key is not found, returns an empty Multiple.
+        /// </summary>
+        public Multiple<T> TryGetMultiple<T>(string key) where T : IHasVectorClock
+        {
+            return TryGet(key, out Multiple<T> multi) ? multi : default;
+        }
+
+        /// <summary>
+        /// Tries to read the value(s) under the given key. Can be used with any type - it will get wrapped
+        /// in a <see cref="Vc{T}"/> for vector clock versioning. In case of conflict we return all
+        /// conflicting versions.
+        /// If the key is not found, returns an empty Multiple.
+        /// </summary>
+        public Multiple<Vc<T>> TryGetClocked<T>(string key)
+        {
+            return TryGet(key, out Multiple<Vc<T>> multi) ? multi : default;
         }
 
         private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
@@ -106,8 +127,8 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Small helper - calls <see cref="Set{TItem}(string, TItem)"/>, but wraps the parameter in a
-        /// <see cref="Multiple{T}"/> container.
+        /// Helper for types which implement <see cref="IHasVectorClock"/>, or are wrapped in a <see cref="Vc{T}"/>
+        /// wrapper.
         /// </summary>
         public VectorRelationship SetVersion<TItem>(string key, TItem item) where TItem : IHasVectorClock
         {

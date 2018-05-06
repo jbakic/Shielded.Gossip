@@ -13,12 +13,11 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class ConsistentTests : GossipBackendThreeNodeTestsBase<ConsistentGossipBackend, TcpTransport>
     {
-        public class TestClass : IHasVectorClock
+        public class TestClass
         {
             public int Id { get; set; }
             public string Name { get; set; }
-            public int Value { get; set; }
-            public VectorClock Clock { get; set; }
+            public int Counter { get; set; }
         }
 
         protected override ConsistentGossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
@@ -39,19 +38,19 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void Consistent_Basics()
         {
-            var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
+            var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVersion("key", testEntity); }).Result);
+            Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVersion("key", testEntity.Clock(A)); }).Result);
 
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Distributed.Consistent(() => _backends[B].TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Consistent(() => _backends[B].TryGetClocked<TestClass>("key"))
                 .Result.Value.Single();
 
-            Assert.AreEqual(testEntity.Id, read.Id);
-            Assert.AreEqual(testEntity.Name, read.Name);
-            Assert.AreEqual(testEntity.Clock, read.Clock);
+            Assert.AreEqual(testEntity.Id, read.Value.Id);
+            Assert.AreEqual(testEntity.Name, read.Value.Name);
+            Assert.AreEqual((A, 1), read.Clock);
         }
 
         [TestMethod]
@@ -71,12 +70,12 @@ namespace Shielded.Gossip.Tests
                     var backend = _backends.Values.Skip(i % 3).First();
                     var id = (i % fieldCount);
                     var key = "key" + id;
-                    var val = backend.TryGet(key, out Multiple<TestClass> v) ? v : new TestClass { Id = id, Clock = new VectorClock() };
-                    if (val.Items.Length > 1)
-                        Assert.Fail("Conflict detected.");
-                    var newVal = val.Items[0];
-                    newVal.Value = newVal.Value + 1;
-                    newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
+                    var newVal = backend.TryGetClocked<TestClass>(key)
+                        .SingleOrDefault()
+                        .NextVersion(backend.Transport.OwnId);
+                    if (newVal.Value == null)
+                        newVal.Value = new TestClass { Id = id };
+                    newVal.Value.Counter = newVal.Value.Counter + 1;
                     backend.SetVersion(key, newVal);
                 }))).Result;
             var expected = bools.Count(b => b);
@@ -86,7 +85,8 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out Multiple<TestClass> v) ? v.Single().Value : 0))
+                    Enumerable.Range(0, fieldCount).Sum(i =>
+                        _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter))
                 .Result;
 
             Assert.AreEqual(expected, read);

@@ -115,7 +115,7 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Distributed.Run(() => _backends[B].TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Run(() => _backends[B].TryGetMultiple<TestClass>("key"))
                 .Result.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);
@@ -168,7 +168,7 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(500);
             CheckProtocols();
 
-            var read = Distributed.Run(() => _backends[C].TryGet("key", out Multiple<TestClass> res) ? res : null)
+            var read = Distributed.Run(() => _backends[C].TryGetMultiple<TestClass>("key"))
                 .Result.Single();
 
             Assert.AreEqual(testEntity.Id, read.Id);

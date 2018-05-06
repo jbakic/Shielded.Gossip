@@ -51,10 +51,8 @@ namespace Shielded.Gossip.Tests
                     var backend = _backends.Values.Skip(i % 3).First();
                     var id = (i % fieldCount);
                     var key = "key" + id;
-                    var val = backend.TryGet(key, out Multiple<TestClass> v) ? v : new TestClass { Id = id, Clock = new VectorClock() };
-                    if (val.Items.Length > 1)
-                        Assert.Fail("Conflict detected.");
-                    var newVal = val.Items[0];
+                    var newVal = backend.TryGetMultiple<TestClass>(key).SingleOrDefault() ??
+                        new TestClass { Id = id, Clock = new VectorClock() };
                     newVal.Value = newVal.Value + 1;
                     newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
                     backend.SetVersion(key, newVal);
@@ -67,7 +65,8 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out Multiple<TestClass> v) ? v.Single().Value : 0))
+                    Enumerable.Range(0, fieldCount).Sum(i =>
+                        _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value))
                 .Result;
 
             if (read < expected)
@@ -97,10 +96,8 @@ namespace Shielded.Gossip.Tests
                     var backend = _backends.Skip(i % 2).First().Value;
                     var id = (i % fieldCount);
                     var key = "key" + id;
-                    var val = backend.TryGet(key, out Multiple<TestClass> v) ? v : new TestClass { Id = id, Clock = new VectorClock() };
-                    if (val.Items.Length > 1)
-                        Assert.Fail("Conflict detected.");
-                    var newVal = val.Items[0];
+                    var newVal = backend.TryGetMultiple<TestClass>(key).SingleOrDefault() ??
+                        new TestClass { Id = id, Clock = new VectorClock() };
                     newVal.Value = newVal.Value + 1;
                     newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
                     backend.SetVersion(key, newVal);
@@ -113,7 +110,8 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out Multiple<TestClass> v) ? v.Single().Value : 0))
+                    Enumerable.Range(0, fieldCount).Sum(i =>
+                        _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value))
                 .Result;
 
             if (read < expected)
