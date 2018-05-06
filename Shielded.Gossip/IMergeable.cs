@@ -8,6 +8,7 @@
     {
         /// <summary>
         /// Calculates the version hash. Must guarantee same result on all servers.
+        /// You can use <see cref="FNV1a64"/> when implementing this.
         /// </summary>
         VersionHash GetVersionHash();
     }

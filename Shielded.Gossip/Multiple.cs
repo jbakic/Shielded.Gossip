@@ -9,10 +9,12 @@ namespace Shielded.Gossip
     /// <summary>
     /// A container type which turns <see cref="IHasVectorClock"/> implementors into CRDT types. Vector
     /// clocks are used for versioning, and in case of conflict, all conflicting versions are preserved,
-    /// for the user of the library to resolve the conflict in a way best suited to the use case.
+    /// for the user of the library to resolve the conflict in a way best suited to the use case. If the
+    /// wrapped type implements <see cref="IDeletable"/>, this will become deletable when all contained
+    /// versions are deletable.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>, Multiple<T>>, IEnumerable<T>
+    public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>, Multiple<T>>, IDeletable, IEnumerable<T>
         where T : IHasVectorClock
     {
         [DataMember]
@@ -26,6 +28,11 @@ namespace Shielded.Gossip
         /// </summary>
         public VectorClock MergedClock => Items?.Aggregate((VectorClock)null, (acc, n) => acc | n.Clock) ?? new VectorClock();
 
+        /// <summary>
+        /// True if the Items are empty, of if the wrapped type implements <see cref="IDeletable"/>
+        /// and all the items' CanDelete return true.
+        /// </summary>
+        public bool CanDelete => Items == null || Items.All(i => i is IDeletable del && del.CanDelete);
 
         public Multiple<T> MergeWith(Multiple<T> other) =>
             new Multiple<T>

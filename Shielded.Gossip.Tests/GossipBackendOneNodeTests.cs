@@ -3,17 +3,19 @@ using Shielded.Cluster;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Threading;
 
 namespace Shielded.Gossip.Tests
 {
     [TestClass]
     public class GossipBackendOneNodeTests
     {
-        public class TestClass : IHasVectorClock
+        public class TestClass : IHasVectorClock, IDeletable
         {
             public int Id { get; set; }
             public string Name { get; set; }
             public VectorClock Clock { get; set; }
+            public bool CanDelete { get; set; }
         }
 
         private const string A = "A";
@@ -26,7 +28,7 @@ namespace Shielded.Gossip.Tests
         {
             var transport = new TcpTransport("Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>());
             transport.StartListening();
-            _backend = new GossipBackend(transport, new GossipConfiguration());
+            _backend = new GossipBackend(transport, new GossipConfiguration { DeletableCleanUpInterval = 200 });
         }
 
         [TestCleanup]
@@ -156,6 +158,29 @@ namespace Shielded.Gossip.Tests
             var read3 = read.Single(t => t.Id == 3);
 
             Assert.AreEqual((VectorClock)(A, 2) | (B, 1), read.MergedClock);
+        }
+
+        [TestMethod]
+        public void GossipBackend_MultipleDeletable()
+        {
+            var testEntity = new TestClass { Id = 1, Name = "New entity", Clock = (A, 1) };
+
+            Distributed.Run(() => { _backend.SetVersion("key", testEntity); }).Wait();
+
+            // clean-up is every 200 ms, so this is enough.
+            Thread.Sleep(500);
+
+            var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result.Single();
+            Assert.AreEqual(testEntity.Id, read.Id);
+
+            testEntity.CanDelete = true;
+            testEntity.Clock = testEntity.Clock.Next(_backend.Transport.OwnId);
+            Distributed.Run(() => { _backend.SetVersion("key", testEntity); }).Wait();
+
+            Thread.Sleep(500);
+
+            Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> _)).Result);
+            Assert.IsFalse(Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result.Any());
         }
     }
 }
