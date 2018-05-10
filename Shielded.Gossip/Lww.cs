@@ -7,7 +7,8 @@ namespace Shielded.Gossip
 {
     /// <summary>
     /// Simple but dangerous <see cref="IMergeable{TIn, TOut}"/> implementor with Last Write Wins semantics.
-    /// In non-consistent transactions it can lose writes.
+    /// In non-consistent transactions it can lose writes. In consistent transactions it is better to use
+    /// <see cref="Versioned{T}"/>.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public struct Lww<T> : IMergeable<Lww<T>, Lww<T>>, IDeletable
@@ -48,9 +49,9 @@ namespace Shielded.Gossip
     public static class LwwExtensions
     {
         /// <summary>
-        /// Last Write Wins - wraps the value with the current date and time, making it
-        /// <see cref="IMergeable{TIn, TOut}"/>. In non-consistent transactions it can
-        /// lose writes.
+        /// Simple but dangerous <see cref="IMergeable{TIn, TOut}"/> implementor with Last Write Wins semantics.
+        /// In non-consistent transactions it can lose writes. In consistent transactions it is better to use
+        /// <see cref="Versioned{T}"/>.
         /// </summary>
         public static Lww<T> Lww<T>(this T val, DateTimeOffset? time = null) =>
             new Lww<T> { Value = val, Time = time ?? DateTimeOffset.UtcNow };
