@@ -18,10 +18,10 @@ namespace Shielded.Gossip
     {
         /// <summary>
         /// Helper for types which implement <see cref="IHasVectorClock"/>, or are wrapped in a <see cref="Vc{T}"/>
-        /// wrapper. The value will be readable by <see cref="TryGetMultiple{T}(string)"/> or
-        /// <see cref="TryGetClocked{T}(string)"/>, respectively.
+        /// wrapper. The value will be readable by <see cref="TryGetMultiple{T}(IGossipBackend, string)"/> or
+        /// <see cref="TryGetClocked{T}(IGossipBackend, string)"/>, respectively.
         /// </summary>
-        public static VectorRelationship SetVersion<TItem>(this IGossipBackend backend, string key, TItem item)
+        public static VectorRelationship SetVc<TItem>(this IGossipBackend backend, string key, TItem item)
             where TItem : IHasVectorClock
         {
             return backend.Set(key, (Multiple<TItem>)item);

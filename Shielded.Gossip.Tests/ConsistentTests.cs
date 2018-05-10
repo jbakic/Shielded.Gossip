@@ -40,7 +40,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVersion("key", testEntity.Clock(A)); }).Result);
+            Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
 
             Thread.Sleep(100);
             CheckProtocols();
@@ -76,7 +76,7 @@ namespace Shielded.Gossip.Tests
                     if (newVal.Value == null)
                         newVal.Value = new TestClass { Id = id };
                     newVal.Value.Counter = newVal.Value.Counter + 1;
-                    backend.SetVersion(key, newVal);
+                    backend.SetVc(key, newVal);
                 }))).Result;
             var expected = bools.Count(b => b);
 

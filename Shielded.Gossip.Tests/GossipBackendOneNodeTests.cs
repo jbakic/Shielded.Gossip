@@ -44,7 +44,7 @@ namespace Shielded.Gossip.Tests
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
             Assert.AreEqual(VectorRelationship.Less,
-                Distributed.Run(() => _backend.SetVersion("key", testEntity)).Result);
+                Distributed.Run(() => _backend.SetVc("key", testEntity)).Result);
 
             var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                 .Result.Single();
@@ -59,12 +59,12 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity1 = new TestClass { Id = 1, Name = "One", Clock = (A, 2) };
             Assert.AreEqual(VectorRelationship.Less,
-                Distributed.Run(() => _backend.SetVersion("key", testEntity1)).Result);
+                Distributed.Run(() => _backend.SetVc("key", testEntity1)).Result);
 
             {
                 var testEntity2Fail = new TestClass { Id = 2, Name = "Two", Clock = (A, 1) };
                 Assert.AreEqual(VectorRelationship.Greater,
-                    Distributed.Run(() => _backend.SetVersion("key", testEntity2Fail)).Result);
+                    Distributed.Run(() => _backend.SetVc("key", testEntity2Fail)).Result);
 
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
@@ -76,7 +76,7 @@ namespace Shielded.Gossip.Tests
 
             var testEntity2Succeed = new TestClass { Id = 2, Name = "Two", Clock = (VectorClock)(A, 2) | (B, 1) };
             Assert.AreEqual(VectorRelationship.Less,
-                Distributed.Run(() => _backend.SetVersion("key", testEntity2Succeed)).Result);
+                Distributed.Run(() => _backend.SetVc("key", testEntity2Succeed)).Result);
 
             {
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
@@ -90,7 +90,7 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity2SameClock = new TestClass { Id = 1002, Name = "Another Two", Clock = testEntity2Succeed.Clock };
                 Assert.AreEqual(VectorRelationship.Equal,
-                    Distributed.Run(() => _backend.SetVersion("key", testEntity2SameClock)).Result);
+                    Distributed.Run(() => _backend.SetVc("key", testEntity2SameClock)).Result);
 
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
@@ -106,7 +106,7 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity3Conflict = new TestClass { Id = 3, Name = "Three", Clock = (A, 3) };
                 Assert.AreEqual(VectorRelationship.Conflict,
-                    Distributed.Run(() => _backend.SetVersion("key", testEntity3Conflict)).Result);
+                    Distributed.Run(() => _backend.SetVc("key", testEntity3Conflict)).Result);
 
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result;
                 mergedClock = read.MergedClock;
@@ -127,7 +127,7 @@ namespace Shielded.Gossip.Tests
                 var testEntity4Resolve = new TestClass { Id = 4, Name = "Four", Clock = mergedClock.Next(B) };
                 Assert.AreEqual((VectorClock)(A, 3) | (B, 2), testEntity4Resolve.Clock);
                 Assert.AreEqual(VectorRelationship.Less,
-                    Distributed.Run(() => _backend.SetVersion("key", testEntity4Resolve)).Result);
+                    Distributed.Run(() => _backend.SetVc("key", testEntity4Resolve)).Result);
 
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
                     .Result.Single();
@@ -148,7 +148,7 @@ namespace Shielded.Gossip.Tests
 
             Distributed.Run(() =>
             {
-                _backend.SetVersion("key", testEntity);
+                _backend.SetVc("key", testEntity);
                 _backend.Set("key", toSet);
             }).Wait();
 
@@ -165,7 +165,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "New entity", Clock = (A, 1) };
 
-            Distributed.Run(() => { _backend.SetVersion("key", testEntity); }).Wait();
+            Distributed.Run(() => { _backend.SetVc("key", testEntity); }).Wait();
 
             // clean-up is every 200 ms, so this is enough.
             Thread.Sleep(500);
@@ -175,7 +175,7 @@ namespace Shielded.Gossip.Tests
 
             testEntity.CanDelete = true;
             testEntity.Clock = testEntity.Clock.Next(_backend.Transport.OwnId);
-            Distributed.Run(() => { _backend.SetVersion("key", testEntity); }).Wait();
+            Distributed.Run(() => { _backend.SetVc("key", testEntity); }).Wait();
 
             Thread.Sleep(500);
 

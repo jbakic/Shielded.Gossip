@@ -110,7 +110,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 
-            Distributed.Run(() => _backends[A].SetVersion("key", testEntity)).Wait();
+            Distributed.Run(() => _backends[A].SetVc("key", testEntity)).Wait();
 
             Thread.Sleep(100);
             CheckProtocols();
@@ -163,7 +163,7 @@ namespace Shielded.Gossip.Tests
 
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 
-            Distributed.Run(() => _backends[A].SetVersion("key", testEntity)).Wait();
+            Distributed.Run(() => _backends[A].SetVc("key", testEntity)).Wait();
 
             Thread.Sleep(500);
             CheckProtocols();

@@ -55,7 +55,7 @@ namespace Shielded.Gossip.Tests
                         new TestClass { Id = id, Clock = new VectorClock() };
                     newVal.Value = newVal.Value + 1;
                     newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
-                    backend.SetVersion(key, newVal);
+                    backend.SetVc(key, newVal);
                 }))).Result;
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
@@ -100,7 +100,7 @@ namespace Shielded.Gossip.Tests
                         new TestClass { Id = id, Clock = new VectorClock() };
                     newVal.Value = newVal.Value + 1;
                     newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
-                    backend.SetVersion(key, newVal);
+                    backend.SetVc(key, newVal);
                 }))).Result;
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
