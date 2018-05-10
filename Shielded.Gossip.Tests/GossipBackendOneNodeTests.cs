@@ -182,5 +182,32 @@ namespace Shielded.Gossip.Tests
             Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> _)).Result);
             Assert.IsFalse(Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result.Any());
         }
+
+        [TestMethod]
+        public void GossipBackend_LastWriteWins()
+        {
+            var testEntity = new TestClass { Id = 1, Name = "New entity" };
+
+            Distributed.Run(() => { _backend.Set("key", testEntity.Lww()); }).Wait();
+
+            // also checking IDeletable impl...
+            Thread.Sleep(500);
+
+            var read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww.Value : null).Result;
+            Assert.AreEqual(testEntity.Name, read.Name);
+
+            var testEntityV2 = new TestClass { Id = 1, Name = "Version 2" };
+            Distributed.Run(() => { _backend.Set("key", testEntityV2.Lww()); }).Wait();
+
+            read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww.Value : null).Result;
+            Assert.AreEqual(testEntityV2.Name, read.Name);
+
+            testEntity.CanDelete = true;
+            Distributed.Run(() => { _backend.Set("key", testEntity.Lww()); }).Wait();
+
+            Thread.Sleep(500);
+
+            Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> _)).Result);
+        }
     }
 }

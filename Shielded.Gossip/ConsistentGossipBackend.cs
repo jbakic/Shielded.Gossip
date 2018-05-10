@@ -28,7 +28,7 @@ namespace Shielded.Gossip
     /// of time in their change history this transaction checked out OK. This is important to
     /// note, because eventual changes get written in immediately, maybe before some transaction has
     /// fully completed, and can overwrite her effects before they even become visible.</para></remarks>
-    public class ConsistentGossipBackend : IBackend, IDisposable
+    public class ConsistentGossipBackend : IGossipBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
         private readonly IBackend _owner;
@@ -57,27 +57,6 @@ namespace Shielded.Gossip
         {
             key = WrapPublicKey(key);
             return TryGetInternal(key, out item);
-        }
-
-        /// <summary>
-        /// Tries to read the value(s) under the given key. Used with types that implement
-        /// <see cref="IHasVectorClock"/>. In case of conflict we return all conflicting versions.
-        /// If the key is not found, returns an empty Multiple.
-        /// </summary>
-        public Multiple<T> TryGetMultiple<T>(string key) where T : IHasVectorClock
-        {
-            return TryGet(key, out Multiple<T> multi) ? multi : default;
-        }
-
-        /// <summary>
-        /// Tries to read the value(s) under the given key. Can be used with any type - it will get wrapped
-        /// in a <see cref="Vc{T}"/> for vector clock versioning. In case of conflict we return all
-        /// conflicting versions.
-        /// If the key is not found, returns an empty Multiple.
-        /// </summary>
-        public Multiple<Vc<T>> TryGetClocked<T>(string key)
-        {
-            return TryGet(key, out Multiple<Vc<T>> multi) ? multi : default;
         }
 
         private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
@@ -123,15 +102,6 @@ namespace Shielded.Gossip
             if (!Distributed.IsConsistent)
                 return _wrapped.Set(key, item);
             return SetInternal(key, item);
-        }
-
-        /// <summary>
-        /// Helper for types which implement <see cref="IHasVectorClock"/>, or are wrapped in a <see cref="Vc{T}"/>
-        /// wrapper.
-        /// </summary>
-        public VectorRelationship SetVersion<TItem>(string key, TItem item) where TItem : IHasVectorClock
-        {
-            return Set(key, (Multiple<TItem>)item);
         }
 
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem, TItem>

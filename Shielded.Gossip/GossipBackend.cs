@@ -18,7 +18,7 @@ namespace Shielded.Gossip
     /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT. If a type
     /// implements <see cref="IDeletable"/>, it can be deleted from the storage.
     /// </summary>
-    public class GossipBackend : IBackend, IDisposable
+    public class GossipBackend : IGossipBackend, IDisposable
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
@@ -396,27 +396,6 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Tries to read the value(s) under the given key. Used with types that implement
-        /// <see cref="IHasVectorClock"/>. In case of conflict we return all conflicting versions.
-        /// If the key is not found, returns an empty Multiple.
-        /// </summary>
-        public Multiple<T> TryGetMultiple<T>(string key) where T : IHasVectorClock
-        {
-            return TryGet(key, out Multiple<T> multi) ? multi : default;
-        }
-
-        /// <summary>
-        /// Tries to read the value(s) under the given key. Can be used with any type - it will get wrapped
-        /// in a <see cref="Vc{T}"/> for vector clock versioning. In case of conflict we return all
-        /// conflicting versions.
-        /// If the key is not found, returns an empty Multiple.
-        /// </summary>
-        public Multiple<Vc<T>> TryGetClocked<T>(string key)
-        {
-            return TryGet(key, out Multiple<Vc<T>> multi) ? multi : default;
-        }
-
-        /// <summary>
         /// Sets the given value under the given key, merging it with any already existing value
         /// there. Returns the result of comparison between the old and new value, or
         /// <see cref="VectorRelationship.Less"/> if there is no old value. The storage gets affected
@@ -425,15 +404,6 @@ namespace Shielded.Gossip
         public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
         {
             return SetInternal(key, item);
-        }
-
-        /// <summary>
-        /// Helper for types which implement <see cref="IHasVectorClock"/>, or are wrapped in a <see cref="Vc{T}"/>
-        /// wrapper.
-        /// </summary>
-        public VectorRelationship SetVersion<TItem>(string key, TItem item) where TItem : IHasVectorClock
-        {
-            return Set(key, (Multiple<TItem>)item);
         }
 
         private ulong GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
