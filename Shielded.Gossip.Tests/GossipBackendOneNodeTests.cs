@@ -193,17 +193,19 @@ namespace Shielded.Gossip.Tests
             // also checking IDeletable impl...
             Thread.Sleep(500);
 
-            var read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww.Value : null).Result;
-            Assert.AreEqual(testEntity.Name, read.Name);
+            var read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww : default).Result;
+            Assert.AreEqual(testEntity.Name, read.Value.Name);
 
-            var testEntityV2 = new TestClass { Id = 1, Name = "Version 2" };
-            Distributed.Run(() => { _backend.Set("key", testEntityV2.Lww()); }).Wait();
+            var next = read.NextVersion();
+            next.Value = new TestClass { Id = 1, Name = "Version 2" };
+            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
 
-            read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww.Value : null).Result;
-            Assert.AreEqual(testEntityV2.Name, read.Name);
+            read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww : default).Result;
+            Assert.AreEqual(next.Value.Name, read.Value.Name);
 
-            testEntity.CanDelete = true;
-            Distributed.Run(() => { _backend.Set("key", testEntity.Lww()); }).Wait();
+            next = read.NextVersion();
+            next.Value.CanDelete = true;
+            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
 
             Thread.Sleep(500);
 

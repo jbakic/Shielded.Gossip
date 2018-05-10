@@ -29,6 +29,20 @@ namespace Shielded.Gossip
             return cmp == 0 ? VectorRelationship.Equal :
                 cmp > 0 ? VectorRelationship.Greater : VectorRelationship.Less;
         }
+
+        /// <summary>
+        /// Produces a new wrapper with the same value, and a Time that is definitely greater
+        /// than this wrapper's time. The result will either have the current system time, or this
+        /// wrapper's time plus one tick, whichever is greater.
+        /// </summary>
+        /// <remarks>If one server's clock is ahead, then after he makes a write, other servers
+        /// would, if they just use their own current time, keep failing to write into that
+        /// field. This method should be used to produce successor versions reliably.</remarks>
+        public Lww<T> NextVersion()
+        {
+            var now = DateTimeOffset.UtcNow;
+            return now > Time ? Value.Lww(now) : Value.Lww(Time.AddTicks(1));
+        }
     }
 
     public static class LwwExtensions
