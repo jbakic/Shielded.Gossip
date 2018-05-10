@@ -93,7 +93,7 @@ namespace Shielded.Gossip
             if (Items == null || Items.Length == 0)
                 return "";
             return string.Join(" | ", Items.Select(i =>
-                string.Format("({0}, {1})", i.ServerId, i.Value)));
+                string.Format("(\"{0}\", {1})", i.ServerId, i.Value)));
         }
 
         protected virtual VectorRelationship Compare(T left, T right)

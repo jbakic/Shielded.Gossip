@@ -217,7 +217,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            Distributed.Run(() => { _backend.Set("key", testEntity.Version()); }).Wait();
+            Distributed.Consistent(() => { _backend.Set("key", testEntity.Version()); }).Wait();
 
             // also checking IDeletable impl...
             Thread.Sleep(500);
@@ -227,14 +227,14 @@ namespace Shielded.Gossip.Tests
 
             var next = read.NextVersion();
             next.Value = new TestClass { Id = 1, Name = "Version 2" };
-            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
+            Distributed.Consistent(() => { _backend.Set("key", next); }).Wait();
 
             read = Distributed.Run(() => _backend.TryGet("key", out Versioned<TestClass> v) ? v : default).Result;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
             next = read.NextVersion();
             next.Value.CanDelete = true;
-            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
+            Distributed.Consistent(() => { _backend.Set("key", next); }).Wait();
 
             Thread.Sleep(500);
 

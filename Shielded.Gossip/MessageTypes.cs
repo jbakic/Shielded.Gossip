@@ -91,7 +91,7 @@ namespace Shielded.Gossip
 
         public override string ToString()
         {
-            return $"{Key}{(Deletable ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}: {Deserialized}";
+            return $"\"{Key}\"{(Deletable ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}: {Deserialized}";
         }
     }
 }
