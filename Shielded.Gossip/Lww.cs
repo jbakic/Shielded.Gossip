@@ -19,7 +19,7 @@ namespace Shielded.Gossip
 
         public bool CanDelete => Value is IDeletable del && del.CanDelete;
 
-        public VersionHash GetVersionHash() => FNV1a64.Hash(BitConverter.GetBytes(Time.GetHashCode()));
+        public VersionHash GetVersionHash() => FNV1a64.Hash(BitConverter.GetBytes(Time.UtcDateTime.ToBinary()));
 
         public Lww<T> MergeWith(Lww<T> other) => Time >= other.Time ? this : other;
 
