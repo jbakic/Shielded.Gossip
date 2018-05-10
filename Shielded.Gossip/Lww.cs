@@ -57,7 +57,7 @@ namespace Shielded.Gossip
             new Lww<T> { Value = val, Time = time ?? DateTimeOffset.UtcNow };
 
         /// <summary>
-        /// Tries to read the <see cref="Lww{T}"/> value under the given key. If the key is not
+        /// Tries to read the <see cref="Gossip.Lww{T}"/> value under the given key. If the key is not
         /// found, returns default.
         /// </summary>
         public static Lww<T> TryGetLww<T>(this IGossipBackend backend, string key)
