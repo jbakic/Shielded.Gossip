@@ -1,5 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Shielded.Cluster;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -193,14 +194,14 @@ namespace Shielded.Gossip.Tests
             // also checking IDeletable impl...
             Thread.Sleep(500);
 
-            var read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww : default).Result;
+            var read = Distributed.Run(() => _backend.TryGetLww<TestClass>("key")).Result;
             Assert.AreEqual(testEntity.Name, read.Value.Name);
 
             var next = read.NextVersion();
             next.Value = new TestClass { Id = 1, Name = "Version 2" };
             Distributed.Run(() => { _backend.Set("key", next); }).Wait();
 
-            read = Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> lww) ? lww : default).Result;
+            read = Distributed.Run(() => _backend.TryGetLww<TestClass>("key")).Result;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
             next = read.NextVersion();
@@ -210,35 +211,42 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(500);
 
             Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> _)).Result);
+            read = Distributed.Run(() => _backend.TryGetLww<TestClass>("key")).Result;
+            Assert.IsNull(read.Value);
+            Assert.AreEqual(DateTimeOffset.MinValue, read.Time);
         }
 
         [TestMethod]
         public void GossipBackend_Versioned()
         {
+            // Versioned is not safe to use with a non-consistent backend. we'll just test the basics.
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            Distributed.Consistent(() => { _backend.Set("key", testEntity.Version()); }).Wait();
+            Distributed.Run(() => { _backend.Set("key", testEntity.Version()); }).Wait();
 
             // also checking IDeletable impl...
             Thread.Sleep(500);
 
-            var read = Distributed.Run(() => _backend.TryGet("key", out Versioned<TestClass> v) ? v : default).Result;
+            var read = Distributed.Run(() => _backend.TryGetVersioned<TestClass>("key")).Result;
             Assert.AreEqual(testEntity.Name, read.Value.Name);
 
             var next = read.NextVersion();
             next.Value = new TestClass { Id = 1, Name = "Version 2" };
-            Distributed.Consistent(() => { _backend.Set("key", next); }).Wait();
+            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
 
-            read = Distributed.Run(() => _backend.TryGet("key", out Versioned<TestClass> v) ? v : default).Result;
+            read = Distributed.Run(() => _backend.TryGetVersioned<TestClass>("key")).Result;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
             next = read.NextVersion();
             next.Value.CanDelete = true;
-            Distributed.Consistent(() => { _backend.Set("key", next); }).Wait();
+            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
 
             Thread.Sleep(500);
 
             Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Versioned<TestClass> _)).Result);
+            read = Distributed.Run(() => _backend.TryGetVersioned<TestClass>("key")).Result;
+            Assert.IsNull(read.Value);
+            Assert.AreEqual(0, read.Version);
         }
     }
 }

@@ -92,5 +92,31 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual(expected, read);
             Assert.AreEqual(transactions, read);
         }
+
+        [TestMethod]
+        public void Consistent_Versioned()
+        {
+            var testEntity = new TestClass { Id = 1, Name = "New entity" };
+
+            Distributed.Consistent(() => { _backends[A].Set("key", testEntity.Version()); }).Wait();
+
+            Thread.Sleep(100);
+
+            Versioned<TestClass> read = default, next = default;
+            Distributed.Consistent(() =>
+            {
+                read = _backends[B].TryGetVersioned<TestClass>("key");
+                Assert.AreEqual(testEntity.Name, read.Value.Name);
+
+                next = read.NextVersion();
+                next.Value = new TestClass { Id = 1, Name = "Version 2" };
+                _backends[B].Set("key", next);
+            }).Wait();
+
+            Thread.Sleep(100);
+
+            read = Distributed.Run(() => _backends[C].TryGetVersioned<TestClass>("key")).Result;
+            Assert.AreEqual(next.Value.Name, read.Value.Name);
+        }
     }
 }

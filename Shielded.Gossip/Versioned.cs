@@ -48,5 +48,14 @@ namespace Shielded.Gossip
         /// </summary>
         public static Versioned<T> Version<T>(this T val, int version = 1) =>
             new Versioned<T> { Value = val, Version = version };
+
+        /// <summary>
+        /// Tries to read the <see cref="Versioned{T}"/> value under the given key. If the key is not
+        /// found, returns default.
+        /// </summary>
+        public static Versioned<T> TryGetVersioned<T>(this IGossipBackend backend, string key)
+        {
+            return backend.TryGet(key, out Versioned<T> v) ? v : default;
+        }
     }
 }
