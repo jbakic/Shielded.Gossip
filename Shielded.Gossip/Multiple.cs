@@ -14,7 +14,7 @@ namespace Shielded.Gossip
     /// versions are deletable.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>, Multiple<T>>, IDeletable, IEnumerable<T>
+    public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>>, IDeletable, IEnumerable<T>
         where T : IHasVectorClock
     {
         [DataMember]

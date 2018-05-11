@@ -12,7 +12,7 @@ namespace Shielded.Gossip
     /// values for one key. 
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Versioned<T> : IMergeable<Versioned<T>, Versioned<T>>, IDeletable
+    public struct Versioned<T> : IMergeable<Versioned<T>>, IDeletable
     {
         [DataMember]
         public T Value { get; set; }

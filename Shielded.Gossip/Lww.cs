@@ -6,12 +6,12 @@ using System.Text;
 namespace Shielded.Gossip
 {
     /// <summary>
-    /// Simple but dangerous <see cref="IMergeable{TIn, TOut}"/> implementor with Last Write Wins semantics.
+    /// Simple but dangerous <see cref="IMergeable{T}"/> implementor with Last Write Wins semantics.
     /// In non-consistent transactions it can lose writes. In consistent transactions it is better to use
     /// <see cref="Versioned{T}"/>.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Lww<T> : IMergeable<Lww<T>, Lww<T>>, IDeletable
+    public struct Lww<T> : IMergeable<Lww<T>>, IDeletable
     {
         [DataMember]
         public T Value { get; set; }
@@ -49,7 +49,7 @@ namespace Shielded.Gossip
     public static class LwwExtensions
     {
         /// <summary>
-        /// Simple but dangerous <see cref="IMergeable{TIn, TOut}"/> implementor with Last Write Wins semantics.
+        /// Simple but dangerous <see cref="IMergeable{T}"/> implementor with Last Write Wins semantics.
         /// In non-consistent transactions it can lose writes. In consistent transactions it is better to use
         /// <see cref="Versioned{T}"/>.
         /// </summary>

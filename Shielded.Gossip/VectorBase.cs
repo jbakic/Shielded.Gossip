@@ -35,7 +35,7 @@ namespace Shielded.Gossip
     /// <typeparam name="TVec">The type of the vector, i.e. of the child class itself.</typeparam>
     /// <typeparam name="T">The type of an individual server's value.</typeparam>
     [DataContract(Namespace = ""), Serializable]
-    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec, TVec>
+    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec>
         where TVec : VectorBase<TVec, T>, new()
     {
         public VectorBase() { }

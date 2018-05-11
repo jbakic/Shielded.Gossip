@@ -39,4 +39,14 @@
         /// </summary>
         VectorRelationship VectorCompare(TIn other);
     }
+
+    /// <summary>
+    /// Interface for CRDTs - types which have a merge operation that is idempotent,
+    /// commutative and associative. Such an operation allows multiple servers to eventually
+    /// reach the same state regardless of the order or the number of messages which they
+    /// exchange.
+    /// </summary>
+    public interface IMergeable<T> : IMergeable<T, T>
+        where T : IMergeable<T, T>
+    { }
 }

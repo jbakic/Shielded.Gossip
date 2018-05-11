@@ -11,7 +11,7 @@ namespace Shielded.Gossip
     /// <summary>
     /// A backend based on <see cref="GossipBackend"/>, extending it with support for
     /// consistent transactions. Also works in eventually consistent transactions.
-    /// Values should be CRDTs, implementing <see cref="IMergeable{TIn, TOut}"/>, or you can use the
+    /// Values should be CRDTs, implementing <see cref="IMergeable{T}"/>, or you can use the
     /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT. If a type
     /// implements <see cref="IDeletable"/>, it can be deleted from the storage.
     /// </summary>

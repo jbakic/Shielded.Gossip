@@ -49,7 +49,7 @@ namespace Shielded.Gossip
     /// <see cref="ConsistentGossipBackend"/>.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public class TransactionInfo : IMergeable<TransactionInfo, TransactionInfo>, IDeletable
+    public class TransactionInfo : IMergeable<TransactionInfo>, IDeletable
     {
         /// <summary>
         /// ID of the server that started the transaction.
