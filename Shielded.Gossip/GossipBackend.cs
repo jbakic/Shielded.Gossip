@@ -450,21 +450,18 @@ namespace Shielded.Gossip
             }
             else
             {
+                if (val is IDeletable del && del.CanDelete)
+                    return VectorRelationship.Equal;
                 if (OnChanging(key, default(TItem), val))
                     return VectorRelationship.Greater;
 
-                var deletable = val is IDeletable del && del.CanDelete;
                 _local[key] = new MessageItem
                 {
                     Key = key,
-                    Data = Serializer.Serialize(val),
-                    Deletable = deletable
+                    Data = Serializer.Serialize(val)
                 };
-                if (!deletable)
-                {
-                    var hash = GetHash(key, val);
-                    _databaseHash.Commute((ref ulong h) => h ^= hash);
-                }
+                var hash = GetHash(key, val);
+                _databaseHash.Commute((ref ulong h) => h ^= hash);
                 return VectorRelationship.Less;
             }
         }
