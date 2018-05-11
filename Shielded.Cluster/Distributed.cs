@@ -45,8 +45,6 @@ namespace Shielded.Cluster
         /// <summary>
         /// Runs a non-consistent distributed transaction. The lambda is executed in a Shielded
         /// transaction.
-        /// WARNING: Does not nest! Awaiting on this inside a running transaction might switch
-        /// you to another thread, and Shielded does not support that.
         /// </summary>
         /// <param name="act">The operation to run.</param>
         public static async Task Run(Action act)
@@ -81,8 +79,6 @@ namespace Shielded.Cluster
         /// <summary>
         /// Runs a non-consistent distributed transaction. The lambda is executed in a Shielded
         /// transaction.
-        /// WARNING: Does not nest! Awaiting on this inside a running transaction might switch
-        /// you to another thread, and Shielded does not support that.
         /// </summary>
         /// <param name="act">The operation to run.</param>
         public static async Task<T> Run<T>(Func<T> func)
@@ -113,9 +109,7 @@ namespace Shielded.Cluster
 
         /// <summary>
         /// Runs a consistent distributed transaction. The lambda is executed in a Shielded
-        /// transaction. Makes only one attempt. 
-        /// WARNING: Does not nest! Awaiting on this inside a running transaction might switch
-        /// you to another thread, and Shielded does not support that.
+        /// transaction. Makes only one attempt.
         /// </summary>
         /// <param name="act">The operation to run.</param>
         /// <returns>True if we succeeded to perform the transaction.</returns>
@@ -127,8 +121,6 @@ namespace Shielded.Cluster
         /// <summary>
         /// Runs a consistent distributed transaction. The lambda is executed in a Shielded
         /// transaction.
-        /// WARNING: Does not nest! Awaiting on this inside a running transaction might switch
-        /// you to another thread, and Shielded does not support that.
         /// </summary>
         /// <param name="attempts">The max number of attempts to perform before failing.</param>
         /// <param name="act">The operation to run.</param>
@@ -185,8 +177,6 @@ namespace Shielded.Cluster
         /// <summary>
         /// Runs a consistent distributed transaction. The lambda is executed in a Shielded
         /// transaction. Makes only one attempt.
-        /// WARNING: Does not nest! Awaiting on this inside a running transaction might switch
-        /// you to another thread, and Shielded does not support that.
         /// </summary>
         /// <param name="func">The operation to run.</param>
         /// <returns>True if we succeeded to perform the transaction, and if so, also returns
@@ -199,8 +189,6 @@ namespace Shielded.Cluster
         /// <summary>
         /// Runs a consistent distributed transaction. The lambda is executed in a Shielded
         /// transaction.
-        /// WARNING: Does not nest! Awaiting on this inside a running transaction might switch
-        /// you to another thread, and Shielded does not support that.
         /// </summary>
         /// <param name="attempts">The max number of attempts to perform before failing.</param>
         /// <param name="func">The operation to run.</param>

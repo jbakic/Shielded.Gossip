@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Linq;
+using System.Reflection;
 
 namespace Shielded.Standard
 {
@@ -461,13 +462,21 @@ namespace Shielded.Standard
                     }
                     _context.DoCheckFailed();
                 }
-                catch (TransException) { }
+                catch (Exception ex) when (IsTransException(ex)) { }
                 finally
                 {
                     if (_context != null)
                         _context.DoRollback();
                 }
             }
+        }
+
+        private static bool IsTransException(Exception ex)
+        {
+            return
+                ex is TransException ||
+                ex is TargetInvocationException ti && IsTransException(ti.InnerException) ||
+                ex is AggregateException aggr && aggr.InnerExceptions.Any(IsTransException);
         }
 
         private static readonly ShieldedLocal<bool> _rollback = new ShieldedLocal<bool>();
