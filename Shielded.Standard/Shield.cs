@@ -471,7 +471,14 @@ namespace Shielded.Standard
             }
         }
 
-        private static bool IsTransException(Exception ex)
+        /// <summary>
+        /// Helper for checking if an exception is <see cref="TransException"/>, or an
+        /// aggregate or target invocation exception which contain a TransException. Checks
+        /// them recursively. Such an exception causes a retry of the current transaction.
+        /// </summary>
+        /// <param name="ex">Exception to check.</param>
+        /// <returns>True if the exception is or contains a <see cref="TransException"/>.</returns>
+        public static bool IsTransException(Exception ex)
         {
             return
                 ex is TransException ||
