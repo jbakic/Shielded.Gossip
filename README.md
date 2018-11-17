@@ -65,5 +65,5 @@ data, we will then insist that the result is Greater on all machines. If however
 returned Conflict, which means conflicting changes have already occurred elsewhere, then the
 transaction will transmit and apply that field too, but without checking it in any way.
 (Calls to Set which return Less or Equal do not actually change anything, and are never
-included in the transaction.) By checking the responses of your Set and SetVersion calls,
-you can control which level of protection is employed.
+included in the transaction.) By checking the responses of your Set calls, you can control
+which level of protection is employed.
