@@ -386,7 +386,7 @@ namespace Shielded.Gossip
         /// <summary>
         /// Tries to read the value under the given key. The type of the value must be a CRDT.
         /// </summary>
-        public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
+        public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
             item = default;
             if (!_local.TryGetValue(key, out MessageItem i))
@@ -397,29 +397,29 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// Sets the given value under the given key, merging it with any already existing value
-        /// there. Returns the result of comparison between the old and new value, or
-        /// <see cref="VectorRelationship.Less"/> if there is no old value. The storage gets affected
-        /// only if the result of comparison is Less or Conflict.
+        /// there. Returns the relationship of the new to the old value, or
+        /// <see cref="VectorRelationship.Greater"/> if there is no old value. The storage gets affected
+        /// only if the result of comparison is Greater or Conflict.
         /// </summary>
-        public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
+        public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
         {
             return SetInternal(key, item);
         }
 
-        private ulong GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
+        private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
         {
             return FNV1a64.Hash(
                 Encoding.UTF8.GetBytes(key),
                 BitConverter.GetBytes(i.GetVersionHash()));
         }
 
-        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem, TItem>
+        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
             Distributed.EnlistBackend(_owner);
             return SetInternalWoEnlist(key, val);
         }
 
-        private VectorRelationship SetInternalWoEnlist<TItem>(string key, TItem val) where TItem : IMergeable<TItem, TItem>
+        private VectorRelationship SetInternalWoEnlist<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException();
@@ -428,13 +428,13 @@ namespace Shielded.Gossip
             if (_local.TryGetValue(key, out MessageItem oldItem))
             {
                 var oldVal = (TItem)Serializer.Deserialize(oldItem.Data);
-                var cmp = oldVal.VectorCompare(val);
-                if (cmp == VectorRelationship.Greater || cmp == VectorRelationship.Equal)
+                var cmp = val.VectorCompare(oldVal);
+                if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
                 val = oldVal.MergeWith(val);
 
                 if (OnChanging(key, oldVal, val))
-                    return VectorRelationship.Greater;
+                    return VectorRelationship.Less;
                 // we support this only for safety - a CanDelete should never accept any changes, nor switch to !CanDelete.
                 var oldDeletable = oldVal is IDeletable oldDel && oldDel.CanDelete;
                 var deletable = val is IDeletable del && del.CanDelete;
@@ -453,7 +453,7 @@ namespace Shielded.Gossip
                 if (val is IDeletable del && del.CanDelete)
                     return VectorRelationship.Equal;
                 if (OnChanging(key, default(TItem), val))
-                    return VectorRelationship.Greater;
+                    return VectorRelationship.Less;
 
                 _local[key] = new MessageItem
                 {
@@ -462,7 +462,7 @@ namespace Shielded.Gossip
                 };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
-                return VectorRelationship.Less;
+                return VectorRelationship.Greater;
             }
         }
 

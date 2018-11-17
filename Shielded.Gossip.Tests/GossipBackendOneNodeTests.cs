@@ -44,7 +44,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.AreEqual(VectorRelationship.Less,
+            Assert.AreEqual(VectorRelationship.Greater,
                 Distributed.Run(() => _backend.SetVc("key", testEntity)).Result);
 
             var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
@@ -59,12 +59,12 @@ namespace Shielded.Gossip.Tests
         public void GossipBackend_Merge()
         {
             var testEntity1 = new TestClass { Id = 1, Name = "One", Clock = (A, 2) };
-            Assert.AreEqual(VectorRelationship.Less,
+            Assert.AreEqual(VectorRelationship.Greater,
                 Distributed.Run(() => _backend.SetVc("key", testEntity1)).Result);
 
             {
                 var testEntity2Fail = new TestClass { Id = 2, Name = "Two", Clock = (A, 1) };
-                Assert.AreEqual(VectorRelationship.Greater,
+                Assert.AreEqual(VectorRelationship.Less,
                     Distributed.Run(() => _backend.SetVc("key", testEntity2Fail)).Result);
 
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
@@ -76,7 +76,7 @@ namespace Shielded.Gossip.Tests
             }
 
             var testEntity2Succeed = new TestClass { Id = 2, Name = "Two", Clock = (VectorClock)(A, 2) | (B, 1) };
-            Assert.AreEqual(VectorRelationship.Less,
+            Assert.AreEqual(VectorRelationship.Greater,
                 Distributed.Run(() => _backend.SetVc("key", testEntity2Succeed)).Result);
 
             {
@@ -127,7 +127,7 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity4Resolve = new TestClass { Id = 4, Name = "Four", Clock = mergedClock.Next(B) };
                 Assert.AreEqual((VectorClock)(A, 3) | (B, 2), testEntity4Resolve.Clock);
-                Assert.AreEqual(VectorRelationship.Less,
+                Assert.AreEqual(VectorRelationship.Greater,
                     Distributed.Run(() => _backend.SetVc("key", testEntity4Resolve)).Result);
 
                 var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))

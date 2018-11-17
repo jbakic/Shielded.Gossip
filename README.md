@@ -60,10 +60,10 @@ as well.
 
 An important thing to note is that the only thing a transaction checks is the outcome of
 comparing the version of your data item, and whatever it finds on each server. If the outcome
-locally was Less, which means your version of the data was strictly higher than the existing
-data, we will then insist that the result is Less on all machines. If however your Set call
+locally was Greater, which means your version of the data was strictly higher than the existing
+data, we will then insist that the result is Greater on all machines. If however your Set call
 returned Conflict, which means conflicting changes have already occurred elsewhere, then the
 transaction will transmit and apply that field too, but without checking it in any way.
-(Calls to Set which return Greater or Equal do not actually change anything, and are never
+(Calls to Set which return Less or Equal do not actually change anything, and are never
 included in the transaction.) By checking the responses of your Set and SetVersion calls,
 you can control which level of protection is employed.

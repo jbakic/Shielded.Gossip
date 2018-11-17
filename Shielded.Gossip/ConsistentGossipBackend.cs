@@ -17,10 +17,10 @@ namespace Shielded.Gossip
     /// </summary>
     /// <remarks><para>The transactions are very simple - for every Set operation you perform in your
     /// transaction lambda, we will make a transaction item only if it affects the storage.
-    /// The result of such a Set operation will be Less or Conflict. We send this result too, as
+    /// The result of such a Set operation will be Greater or Conflict. We send this result too, as
     /// the expected result. If Conflict is expected, other servers will accept this Set regardless
-    /// of their local result. But if Less is expected, then they will check if the result is also
-    /// Less on their local DBs, and fail the transaction if not. This is all that a transaction
+    /// of their local result. But if Greater is expected, then they will check if your new value is
+    /// also Greater on their local DBs, and fail the transaction if not. This is all that a transaction
     /// checks!</para>
     /// 
     /// <para>If eventually consistent transactions are changing the same fields in parallel, then the
@@ -53,13 +53,13 @@ namespace Shielded.Gossip
         /// <summary>
         /// Tries to read the value under the given key. The type of the value must be a CRDT.
         /// </summary>
-        public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
+        public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
             key = WrapPublicKey(key);
             return TryGetInternal(key, out item);
         }
 
-        private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>
+        private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
             if (!Distributed.IsConsistent)
                 return _wrapped.TryGet(key, out item);
@@ -90,13 +90,13 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// Sets the given value under the given key, merging it with any already existing value
-        /// there. Returns the result of comparison between the old and new value, or
-        /// <see cref="VectorRelationship.Less"/> if there is no old value. In a consistent
-        /// transaction, only the calls which return Less or Conflict, that actually affect the
-        /// storage, get transmitted to other servers. If the result was Less, we will insist
-        /// that it's Less on all servers.
+        /// there. Returns the relationship of the new to the old value, or
+        /// <see cref="VectorRelationship.Greater"/> if there is no old value. In a consistent
+        /// transaction, only the calls which return Greater or Conflict, that actually affect the
+        /// storage, get transmitted to other servers. If the result was Greater, we will insist
+        /// that it's Greater on all servers.
         /// </summary>
-        public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
+        public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
         {
             key = WrapPublicKey(key);
             if (!Distributed.IsConsistent)
@@ -104,23 +104,23 @@ namespace Shielded.Gossip
             return SetInternal(key, item);
         }
 
-        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem, TItem>
+        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
             Enlist();
-            var cmp = VectorRelationship.Less;
+            var cmp = VectorRelationship.Greater;
             if (TryGetInternal(key, out TItem oldVal))
             {
-                cmp = oldVal.VectorCompare(val);
-                if (cmp == VectorRelationship.Greater || cmp == VectorRelationship.Equal)
+                cmp = val.VectorCompare(oldVal);
+                if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
                 val = oldVal.MergeWith(val);
             }
 
             if (OnChanging(key, oldVal, val))
-                return VectorRelationship.Greater;
+                return VectorRelationship.Less;
 
             var local = _state.Value.Changes;
-            // cmp and Expected can both be either Less or Conflict, and Less & Conflict == Less.
+            // cmp and Expected can both be either Greater or Conflict, and Greater & Conflict == Greater.
             var expected = local.TryGetValue(key, out var oldItem) ? oldItem.Expected & cmp : cmp;
             local[key] = new TransactionItem { Key = key, Data = Serializer.Serialize(val), Expected = expected };
             return cmp;
@@ -319,11 +319,11 @@ namespace Shielded.Gossip
         private readonly ApplyMethods _compareMethods = new ApplyMethods(
             typeof(ConsistentGossipBackend).GetMethod("CheckOne", BindingFlags.NonPublic | BindingFlags.Instance));
 
-        private VectorRelationship CheckOne<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>
+        private VectorRelationship CheckOne<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
         {
             if (!_wrapped.TryGet(key, out TItem current))
-                return VectorRelationship.Less;
-            return current.VectorCompare(item);
+                return VectorRelationship.Greater;
+            return item.VectorCompare(current);
         }
 
         private bool Check(string id, TransactionInfo newInfo = null)

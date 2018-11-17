@@ -10,8 +10,8 @@ namespace Shielded.Gossip
     /// </summary>
     public interface IGossipBackend : IBackend
     {
-        bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem, TItem>;
-        VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem, TItem>;
+        bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>;
+        VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>;
     }
 
     public static class GossipBackendExtensions
