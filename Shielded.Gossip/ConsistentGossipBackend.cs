@@ -67,7 +67,7 @@ namespace Shielded.Gossip
             var local = _state.GetValueOrDefault()?.Changes;
             if (local != null && local.TryGetValue(key, out TransactionItem i))
             {
-                item = (TItem)Serializer.Deserialize(i.Data);
+                item = (TItem)i.Value;
                 return true;
             }
             return _wrapped.TryGet(key, out item);
@@ -122,7 +122,7 @@ namespace Shielded.Gossip
             var local = _state.Value.Changes;
             // cmp and Expected can both be either Greater or Conflict, and Greater & Conflict == Greater.
             var expected = local.TryGetValue(key, out var oldItem) ? oldItem.Expected & cmp : cmp;
-            local[key] = new TransactionItem { Key = key, Data = Serializer.Serialize(val), Expected = expected };
+            local[key] = new TransactionItem { Key = key, Value = val, Expected = expected };
             return cmp;
         }
 
@@ -339,7 +339,7 @@ namespace Shielded.Gossip
                     {
                         if (item.Expected == VectorRelationship.Conflict)
                             continue;
-                        var obj = Serializer.Deserialize(item.Data);
+                        var obj = item.Value;
                         var comparer = _compareMethods.Get(this, obj.GetType());
                         if (item.Expected != comparer(item.Key, obj))
                             return false;

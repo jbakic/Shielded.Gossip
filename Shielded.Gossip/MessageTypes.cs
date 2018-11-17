@@ -63,6 +63,13 @@ namespace Shielded.Gossip
         public byte[] Data { get; set; }
 
         [IgnoreDataMember]
+        public object Value
+        {
+            get => Serializer.Deserialize(Data);
+            set => Data = Serializer.Serialize(value);
+        }
+
+        [IgnoreDataMember]
         public long Freshness
         {
             get => _freshness;
@@ -80,18 +87,9 @@ namespace Shielded.Gossip
         [NonSerialized]
         private bool _deletable;
 
-        [IgnoreDataMember]
-        public object Deserialized
-        {
-            get
-            {
-                return Serializer.Deserialize(Data);
-            }
-        }
-
         public override string ToString()
         {
-            return $"\"{Key}\"{(Deletable ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}: {Deserialized}";
+            return $"\"{Key}\"{(Deletable ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}: {Value}";
         }
     }
 }

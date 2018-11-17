@@ -221,7 +221,7 @@ namespace Shielded.Gossip
             {
                 if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
                     continue;
-                var obj = Serializer.Deserialize(item.Data);
+                var obj = item.Value;
                 var method = _applyMethods.Get(this, obj.GetType());
                 method(item.Key, obj);
             }
@@ -391,7 +391,7 @@ namespace Shielded.Gossip
             item = default;
             if (!_local.TryGetValue(key, out MessageItem i))
                 return false;
-            item = (TItem)Serializer.Deserialize(i.Data);
+            item = (TItem)i.Value;
             return true;
         }
 
@@ -427,7 +427,7 @@ namespace Shielded.Gossip
                 throw new InvalidOperationException("Changes are blocked at this time.");
             if (_local.TryGetValue(key, out MessageItem oldItem))
             {
-                var oldVal = (TItem)Serializer.Deserialize(oldItem.Data);
+                var oldVal = (TItem)oldItem.Value;
                 var cmp = val.VectorCompare(oldVal);
                 if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
@@ -441,7 +441,7 @@ namespace Shielded.Gossip
                 _local[key] = new MessageItem
                 {
                     Key = key,
-                    Data = Serializer.Serialize(val),
+                    Value = val,
                     Deletable = deletable,
                 };
                 var hash = (oldDeletable ? 0 : GetHash(key, oldVal)) ^ (deletable ? 0 : GetHash(key, val));
@@ -458,7 +458,7 @@ namespace Shielded.Gossip
                 _local[key] = new MessageItem
                 {
                     Key = key,
-                    Data = Serializer.Serialize(val)
+                    Value = val
                 };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
