@@ -238,14 +238,14 @@ namespace Shielded.Gossip
             });
         }
 
-        private bool ShouldKillChain(string server, DateTimeOffset ourLast)
+        private bool ShouldKillChain(string server, DateTimeOffset? ourLast)
         {
             return
-                (DateTimeOffset.UtcNow - ourLast).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout
+                ourLast != null && (DateTimeOffset.UtcNow - ourLast.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout
                 ||
                 StringComparer.InvariantCultureIgnoreCase.Compare(server, Transport.OwnId) < 0 &&
                 _lastSendTime.TryGetValue(server, out var ourLastAny) &&
-                ourLastAny > ourLast;
+                ourLastAny > (ourLast ?? DateTimeOffset.UtcNow.AddMilliseconds(-Configuration.AntiEntropyIdleTimeout));
         }
 
         private void SendReply(GossipMessage replyTo) => Shield.InTransaction(() =>
@@ -255,7 +255,7 @@ namespace Shielded.Gossip
             var hisPackage = replyTo as GossipPackage;
 
             var ourLast = hisReply?.LastTime;
-            if (ourLast != null && ShouldKillChain(replyTo.From, ourLast.Value))
+            if (ShouldKillChain(replyTo.From, ourLast))
                 return;
 
             var ownHash = _databaseHash.Value;
