@@ -16,17 +16,24 @@
         public int GossipInterval { get; set; } = 1000;
 
         /// <summary>
-        /// Number of transactions to add to each gossip reply. Every new reply will include all
-        /// new writes since the last one, and this many older writes from the reverse time index.
+        /// Number of transactions to send in the opening message when beginning a new gossip exchange.
+        /// May be 0.
         /// </summary>
-        public int AntiEntropyPackageSize { get; set; } = 20;
+        public int AntiEntropyPushPackages { get; set; } = 5;
 
         /// <summary>
-        /// Limit on the size, in key/value pairs, of messages. A message may grow bigger than this
+        /// Number of transactions to add to each gossip reply. Every new reply will include all
+        /// new writes since the last one, and this many older transactions from the reverse time index.
+        /// This must be > 0.
+        /// </summary>
+        public int AntiEntropyReplyPackages { get; set; } = 20;
+
+        /// <summary>
+        /// Limit on the size, in key/value pairs, of any message. A message may grow bigger than this
         /// now and then, particularly if you perform transactions which change a large number of
         /// fields, because we transmit only whole transactions.
         /// </summary>
-        public int AntiEntropyPackageCutoff { get; set; } = 1000;
+        public int AntiEntropyCutoff { get; set; } = 1000;
 
         /// <summary>
         /// If we hear no reply in this many milliseconds, we may start another gossip session with

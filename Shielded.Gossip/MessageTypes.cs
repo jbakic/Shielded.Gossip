@@ -11,7 +11,7 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class GossipStart
+    public abstract class GossipMessage
     {
         [DataMember]
         public string From { get; set; }
@@ -22,21 +22,26 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class GossipReply
+    public class GossipPackage : GossipMessage
     {
-        [DataMember]
-        public string From { get; set; }
-        [DataMember]
-        public ulong DatabaseHash { get; set; }
         [DataMember]
         public MessageItem[] Items { get; set; }
         [DataMember]
-        public long WindowStart { get; set; }
+        public long? WindowStart { get; set; }
         [DataMember]
-        public long WindowEnd { get; set; }
-        [DataMember]
-        public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
+        public long? WindowEnd { get; set; }
+    }
 
+    public interface IGossipReply
+    {
+        long? LastWindowStart { get; }
+        long? LastWindowEnd { get; }
+        DateTimeOffset LastTime { get; }
+    }
+
+    [DataContract(Namespace = ""), Serializable]
+    public class GossipReply : GossipPackage, IGossipReply
+    {
         [DataMember]
         public long? LastWindowStart { get; set; }
         [DataMember]
@@ -46,12 +51,17 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class GossipEnd
+    public class GossipEnd : GossipMessage, IGossipReply
     {
         [DataMember]
-        public string From { get; set; }
-        [DataMember]
         public bool Success { get; set; }
+
+        [DataMember]
+        public long? LastWindowStart { get; set; }
+        [DataMember]
+        public long? LastWindowEnd { get; set; }
+        [DataMember]
+        public DateTimeOffset LastTime { get; set; }
     }
 
     [DataContract(Namespace = ""), Serializable]

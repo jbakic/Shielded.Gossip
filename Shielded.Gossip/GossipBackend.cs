@@ -125,24 +125,19 @@ namespace Shielded.Gossip
 
         private ShieldedDictNc<string, DateTimeOffset> _lastSendTime = new ShieldedDictNc<string, DateTimeOffset>(StringComparer.InvariantCultureIgnoreCase);
 
-        private void Send(string server, object msg, bool clearState = false)
+        private void Send(string server, GossipMessage msg)
         {
             // to keep the reply Shielded transaction read-only, so that it never conflicts and
             // gets repeated, we run the change in _lastSendTime as a side-effect too, just before
             // actually sending.
             Shield.SideEffect(() =>
             {
-                var time =
-                    clearState ? (DateTimeOffset?)null :
-                    msg is GossipStart start ? start.Time :
-                    msg is GossipReply reply ? reply.Time :
-                    DateTimeOffset.UtcNow;
                 Shield.InTransaction(() =>
                 {
-                    if (clearState)
+                    if (msg is GossipEnd)
                         _lastSendTime.Remove(server);
                     else
-                        _lastSendTime[server] = time.Value;
+                        _lastSendTime[server] = msg.Time;
                 });
                 Transport.Send(server, msg);
             });
@@ -173,10 +168,15 @@ namespace Shielded.Gossip
 
                     // here, we want a conflict.
                     _lastSendTime[server] = DateTimeOffset.UtcNow;
-                    Shield.SideEffect(() => Transport.Send(server, new GossipStart
+                    var toSend = GetPackage(Configuration.AntiEntropyPushPackages, null, null, out var _);
+
+                    Shield.SideEffect(() => Transport.Send(server, new GossipPackage
                     {
                         From = Transport.OwnId,
-                        DatabaseHash = _databaseHash
+                        DatabaseHash = _databaseHash,
+                        Items = toSend,
+                        WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
+                        WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
                     }));
                 });
             }
@@ -191,17 +191,13 @@ namespace Shielded.Gossip
                     ApplyItems(trans.Items);
                     break;
 
-                case GossipStart start:
-                    SendReply(start.From, start.DatabaseHash, start.Time);
-                    break;
-
-                case GossipReply reply:
-                    ApplyItems(reply.Items);
-                    SendReply(reply.From, reply.DatabaseHash, reply.Time, reply);
+                case GossipPackage pkg:
+                    ApplyItems(pkg.Items);
+                    SendReply(pkg);
                     break;
 
                 case GossipEnd end:
-                    Shield.InTransaction(() => _lastSendTime.Remove(end.From));
+                    SendReply(end);
                     break;
             }
         }
@@ -240,9 +236,17 @@ namespace Shielded.Gossip
             return true;
         }
 
-        private void SendEnd(string server, bool success)
+        private void SendEnd(GossipPackage hisPackage, bool success)
         {
-            Send(server, new GossipEnd { From = Transport.OwnId, Success = success }, true);
+            Send(hisPackage.From, new GossipEnd
+            {
+                From = Transport.OwnId,
+                Success = success,
+                DatabaseHash = _databaseHash.Value,
+                LastWindowStart = hisPackage.WindowStart,
+                LastWindowEnd = hisPackage.WindowEnd,
+                LastTime = hisPackage.Time,
+            });
         }
 
         private bool ShouldKillChain(string server, DateTimeOffset ourLast)
@@ -255,73 +259,54 @@ namespace Shielded.Gossip
                 ourLastAny > ourLast;
         }
 
-        private void SendReply(string server, ulong hisHash, DateTimeOffset hisTime, GossipReply reply = null) => Shield.InTransaction(() =>
+        private void SendReply(GossipMessage replyTo) => Shield.InTransaction(() =>
         {
-            var ourLast = reply?.LastTime;
-            if (ourLast != null && ShouldKillChain(server, ourLast.Value))
+            var server = replyTo.From;
+            var hisReply = replyTo as IGossipReply;
+            var hisPackage = replyTo as GossipPackage;
+
+            var ourLast = hisReply?.LastTime;
+            if (ourLast != null && ShouldKillChain(replyTo.From, ourLast.Value))
                 return;
 
             var ownHash = _databaseHash.Value;
-            if (ownHash == hisHash)
+            if (ownHash == replyTo.DatabaseHash)
             {
-                SendEnd(server, true);
+                // hisPackage == null means his message was already a GossipEnd.
+                if (hisPackage == null)
+                    _lastSendTime.Remove(server);
+                else
+                    SendEnd(hisPackage, true);
                 return;
             }
 
-            bool allNewIncluded = false;
-            int cutoff = Configuration.AntiEntropyPackageCutoff;
-            int packageSize = Configuration.AntiEntropyPackageSize;
-            long? prevFreshness = null;
-            var toSend = YieldReplyItems(reply?.LastWindowStart, reply?.LastWindowEnd)
-                .TakeWhile(item =>
-                {
-                    if (item == null)
-                    {
-                        allNewIncluded = true;
-                        return true;
-                    }
-                    --cutoff;
-                    if (prevFreshness == null || prevFreshness.Value != item.Freshness)
-                    {
-                        if (cutoff < 0 || (allNewIncluded && --packageSize < 0))
-                            return false;
-                        prevFreshness = item.Freshness;
-                    }
-                    return true;
-                })
-                .Where(i => i != null)
-                .ToArray();
-            // if crossed the cutoff, remove the last package, except if it is the only one.
-            // this forces any package > cutoff to be sent alone.
-            if (cutoff < 0 && toSend[0].Freshness != toSend[toSend.Length - 1].Freshness)
-            {
-                var removeFreshness = toSend[toSend.Length - 1].Freshness;
-                toSend = toSend.TakeWhile(item => item.Freshness > removeFreshness).ToArray();
-            }
+            var toSend = GetPackage(Configuration.AntiEntropyReplyPackages,
+                hisReply?.LastWindowStart, hisReply?.LastWindowEnd, out var connectedWithLast);
 
             if (toSend.Length == 0)
             {
-                // we reached our end of time, but maybe the other side has more.
-                if (reply != null && (reply.Items == null || reply.Items.Length == 0))
-                    SendEnd(server, false);
+                if (hisPackage == null)
+                    _lastSendTime.Remove(server);
+                else if (hisPackage.Items == null || hisPackage.Items.Length == 0)
+                    SendEnd(hisPackage, false);
                 else
                     Send(server, new GossipReply
                     {
                         From = Transport.OwnId,
                         DatabaseHash = ownHash,
                         Items = null,
-                        WindowStart = reply?.LastWindowStart ?? 0,
-                        WindowEnd = GetMaxFreshness(),
-                        LastWindowStart = reply?.WindowStart,
-                        LastWindowEnd = reply?.WindowEnd,
-                        LastTime = hisTime,
+                        WindowStart = hisReply?.LastWindowStart,
+                        WindowEnd = hisReply?.LastWindowEnd,
+                        LastWindowStart = hisPackage.WindowStart,
+                        LastWindowEnd = hisPackage.WindowEnd,
+                        LastTime = replyTo.Time,
                     });
                 return;
             }
 
             var windowStart = toSend[toSend.Length - 1].Freshness;
-            if (allNewIncluded && reply?.LastWindowStart != null && reply.LastWindowStart < windowStart)
-                windowStart = reply.LastWindowStart.Value;
+            if (connectedWithLast && hisReply?.LastWindowStart != null && hisReply.LastWindowStart < windowStart)
+                windowStart = hisReply.LastWindowStart.Value;
 
             var windowEnd = GetMaxFreshness();
 
@@ -332,13 +317,52 @@ namespace Shielded.Gossip
                 Items = toSend,
                 WindowStart = windowStart,
                 WindowEnd = windowEnd,
-                LastWindowStart = reply?.WindowStart,
-                LastWindowEnd = reply?.WindowEnd,
-                LastTime = hisTime,
+                LastWindowStart = hisPackage?.WindowStart,
+                LastWindowEnd = hisPackage?.WindowEnd,
+                LastTime = replyTo.Time,
             });
         });
 
-        private IEnumerable<MessageItem> YieldReplyItems(long? prevWindowStart, long? prevWindowEnd)
+        private MessageItem[] GetPackage(int packageSize, long? lastWindowStart, long? lastWindowEnd, out bool connectedWithLast)
+        {
+            int cutoff = Configuration.AntiEntropyCutoff;
+            long? prevFreshness = null;
+            var connected = false;
+            long? connectedAt = null;
+            var toSend = YieldItems(lastWindowStart, lastWindowEnd)
+                .TakeWhile(item =>
+                {
+                    if (item == null)
+                    {
+                        connected = true;
+                        connectedAt = prevFreshness;
+                        return true;
+                    }
+                    if (prevFreshness == null || prevFreshness.Value != item.Freshness)
+                    {
+                        if (cutoff <= 0 || (connected && --packageSize < 0))
+                            return false;
+                        prevFreshness = item.Freshness;
+                    }
+                    --cutoff;
+                    return true;
+                })
+                .Where(i => i != null)
+                .ToArray();
+            // if crossed the cutoff, remove the last package, except if it is the only one.
+            // this forces any package > cutoff to be sent alone.
+            if (cutoff < 0 && toSend[0].Freshness != toSend[toSend.Length - 1].Freshness)
+            {
+                var removeFreshness = toSend[toSend.Length - 1].Freshness;
+                if (removeFreshness == connectedAt)
+                    connected = false;
+                toSend = toSend.TakeWhile(item => item.Freshness > removeFreshness).ToArray();
+            }
+            connectedWithLast = connected;
+            return toSend;
+        }
+
+        private IEnumerable<MessageItem> YieldItems(long? prevWindowStart, long? prevWindowEnd)
         {
             var startFrom = long.MaxValue;
             if (prevWindowEnd != null)
