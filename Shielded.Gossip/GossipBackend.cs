@@ -127,20 +127,11 @@ namespace Shielded.Gossip
 
         private void Send(string server, GossipMessage msg)
         {
-            // to keep the reply Shielded transaction read-only, so that it never conflicts and
-            // gets repeated, we run the change in _lastSendTime as a side-effect too, just before
-            // actually sending.
-            Shield.SideEffect(() =>
-            {
-                Shield.InTransaction(() =>
-                {
-                    if (msg is GossipEnd)
-                        _lastSendTime.Remove(server);
-                    else
-                        _lastSendTime[server] = msg.Time;
-                });
-                Transport.Send(server, msg);
-            });
+            if (msg is GossipEnd)
+                _lastSendTime.Remove(server);
+            else
+                _lastSendTime[server] = msg.Time;
+            Shield.SideEffect(() => Transport.Send(server, msg));
         }
 
         private void SpreadRumors()
@@ -166,18 +157,15 @@ namespace Shielded.Gossip
                     if (limit < 0)
                         return;
 
-                    // here, we want a conflict.
-                    _lastSendTime[server] = DateTimeOffset.UtcNow;
                     var toSend = GetPackage(Configuration.AntiEntropyPushPackages, null, null, out var _);
-
-                    Shield.SideEffect(() => Transport.Send(server, new GossipPackage
+                    Send(server, new GossipPackage
                     {
                         From = Transport.OwnId,
                         DatabaseHash = _databaseHash,
                         Items = toSend,
                         WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
                         WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
-                    }));
+                    });
                 });
             }
             catch { } // TODO
@@ -192,7 +180,8 @@ namespace Shielded.Gossip
                     break;
 
                 case GossipPackage pkg:
-                    ApplyItems(pkg.Items);
+                    if (pkg.DatabaseHash != _databaseHash)
+                        ApplyItems(pkg.Items);
                     SendReply(pkg);
                     break;
 
