@@ -127,11 +127,20 @@ namespace Shielded.Gossip
 
         private void Send(string server, GossipMessage msg)
         {
-            if (msg is GossipEnd)
-                _lastSendTime.Remove(server);
-            else
-                _lastSendTime[server] = msg.Time;
-            Shield.SideEffect(() => Transport.Send(server, msg));
+            Shield.SideEffect(() =>
+            {
+                // the transactions which prepare messages need to be read-only, otherwise
+                // because of reading the _freshIndex they conflict with almost anything.
+                // this is why _lastSendTime is only changed in this side-effect.
+                Shield.InTransaction(() =>
+                {
+                    if (msg is GossipEnd)
+                        _lastSendTime.Remove(server);
+                    else
+                        _lastSendTime[server] = msg.Time;
+                });
+                Transport.Send(server, msg);
+            });
         }
 
         private void SpreadRumors()
