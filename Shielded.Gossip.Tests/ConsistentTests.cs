@@ -61,7 +61,7 @@ namespace Shielded.Gossip.Tests
 
             foreach (var back in _backends.Values)
             {
-                back.Configuration.DirectMail = false;
+                back.Configuration.DirectMail = DirectMailType.StartGossip;
             }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>

@@ -130,7 +130,7 @@ namespace Shielded.Gossip.Tests
             const int fieldCount = 50;
 
             foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
+                back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
                 Task.Run(() => Distributed.Run(() =>
@@ -188,7 +188,7 @@ namespace Shielded.Gossip.Tests
                 ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
             });
             foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
+                back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
                 Task.Run(() => Distributed.Run(() =>
@@ -222,7 +222,7 @@ namespace Shielded.Gossip.Tests
                 ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
             });
             foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
+                back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
                 Task.Run(() => Distributed.Run(() =>

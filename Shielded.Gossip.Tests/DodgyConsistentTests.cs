@@ -43,7 +43,7 @@ namespace Shielded.Gossip.Tests
             const int fieldCount = 20;
 
             foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
+                back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
                 Distributed.Consistent(100, () =>
@@ -87,7 +87,7 @@ namespace Shielded.Gossip.Tests
                 ((DodgyTransport)_backends[C].Transport).ServerIPs.Remove(A);
             });
             foreach (var back in _backends.Values)
-                back.Configuration.DirectMail = false;
+                back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
                 Distributed.Consistent(100, () =>

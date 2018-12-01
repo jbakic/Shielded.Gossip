@@ -36,7 +36,7 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// If set inside a distributed transaction, restricts the direct mail message sending
-        /// to only this server. Affects only the current transaction. Does not affect gossip.
+        /// to only this server. Affects only the current transaction.
         /// </summary>
         public readonly ShieldedLocal<string> DirectMailRestriction = new ShieldedLocal<string>();
 
@@ -125,23 +125,9 @@ namespace Shielded.Gossip
 
         private ShieldedDictNc<string, DateTimeOffset> _lastSendTime = new ShieldedDictNc<string, DateTimeOffset>(StringComparer.InvariantCultureIgnoreCase);
 
-        private void Send(string server, GossipMessage msg)
-        {
-            Shield.SideEffect(() =>
-            {
-                // the transactions which prepare messages need to be read-only, otherwise
-                // because of reading the _freshIndex they conflict with almost anything.
-                // this is why _lastSendTime is only changed in this side-effect.
-                Shield.InTransaction(() =>
-                {
-                    if (msg is GossipEnd)
-                        _lastSendTime.Remove(server);
-                    else
-                        _lastSendTime[server] = msg.Time;
-                });
-                Transport.Send(server, msg);
-            });
-        }
+        private bool IsGossipActive(string server) =>
+            _lastSendTime.TryGetValue(server, out var last) &&
+            (DateTimeOffset.UtcNow - last).TotalMilliseconds < Configuration.AntiEntropyIdleTimeout;
 
         private void SpreadRumors()
         {
@@ -159,26 +145,31 @@ namespace Shielded.Gossip
                     {
                         server = servers.Skip(rand.Next(servers.Count)).First();
                     }
-                    while (
-                        _lastSendTime.TryGetValue(server, out var lastTime) &&
-                        (DateTimeOffset.UtcNow - lastTime).TotalMilliseconds < Configuration.AntiEntropyIdleTimeout &&
-                        --limit >= 0);
-                    if (limit < 0)
-                        return;
-
-                    var toSend = GetPackage(Configuration.AntiEntropyPushPackages, null, null, out var _);
-                    Send(server, new GossipPackage
-                    {
-                        From = Transport.OwnId,
-                        DatabaseHash = _databaseHash,
-                        Items = toSend,
-                        WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
-                        WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
-                    });
+                    while (!StartGossip(server) && --limit >= 0);
                 });
             }
             catch { } // TODO
         }
+
+        private bool StartGossip(string server) => Shield.InTransaction(() =>
+        {
+            if (IsGossipActive(server))
+                return false;
+            _lastSendTime[server] = DateTimeOffset.UtcNow;
+            var toSend = GetPackage(Configuration.AntiEntropyPushPackages, null, null, out var _);
+            Shield.SideEffect(() =>
+            {
+                Transport.Send(server, new GossipPackage
+                {
+                    From = Transport.OwnId,
+                    DatabaseHash = _databaseHash,
+                    Items = toSend,
+                    WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
+                    WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
+                });
+            });
+            return true;
+        });
 
         private void Transport_MessageReceived(object sender, object msg)
         {
@@ -232,19 +223,6 @@ namespace Shielded.Gossip
                 if (one[i] != two[i])
                     return false;
             return true;
-        }
-
-        private void SendEnd(GossipPackage hisPackage, bool success)
-        {
-            Send(hisPackage.From, new GossipEnd
-            {
-                From = Transport.OwnId,
-                Success = success,
-                DatabaseHash = _databaseHash.Value,
-                LastWindowStart = hisPackage.WindowStart,
-                LastWindowEnd = hisPackage.WindowEnd,
-                LastTime = hisPackage.Time,
-            });
         }
 
         private bool ShouldKillChain(string server, DateTimeOffset? ourLast)
@@ -321,6 +299,37 @@ namespace Shielded.Gossip
             });
         });
 
+        private void SendEnd(GossipPackage hisPackage, bool success)
+        {
+            Send(hisPackage.From, new GossipEnd
+            {
+                From = Transport.OwnId,
+                Success = success,
+                DatabaseHash = _databaseHash.Value,
+                LastWindowStart = hisPackage.WindowStart,
+                LastWindowEnd = hisPackage.WindowEnd,
+                LastTime = hisPackage.Time,
+            });
+        }
+
+        private void Send(string server, GossipMessage msg)
+        {
+            Shield.SideEffect(() =>
+            {
+                // the transactions which prepare messages need to be read-only, otherwise
+                // because of reading the _freshIndex they conflict with almost anything.
+                // this is why _lastSendTime is only changed in this side-effect.
+                Shield.InTransaction(() =>
+                {
+                    if (msg is GossipEnd)
+                        _lastSendTime.Remove(server);
+                    else
+                        _lastSendTime[server] = msg.Time;
+                });
+                Transport.Send(server, msg);
+            });
+        }
+
         private MessageItem[] GetPackage(int packageSize, long? lastWindowStart, long? lastWindowEnd, out bool connectedWithLast)
         {
             int cutoff = Configuration.AntiEntropyCutoff;
@@ -379,9 +388,9 @@ namespace Shielded.Gossip
 
         Task IBackend.Commit(CommitContinuation cont)
         {
-            if (!Configuration.DirectMail)
+            if (Configuration.DirectMail == DirectMailType.Off)
                 return Task.FromResult<object>(null);
-            var package = new DirectMail();
+            MessageItem[] package = null;
             bool hasRestriction = false;
             string restriction = null;
             cont.InContext(() =>
@@ -389,18 +398,36 @@ namespace Shielded.Gossip
                 hasRestriction = DirectMailRestriction.HasValue;
                 if (hasRestriction)
                     restriction = DirectMailRestriction.Value;
-                package.Items = _local.Changes
+                package = _local.Changes
                     .Select(key => _local.TryGetValue(key, out var mi) ? mi : new MessageItem { Key = key })
                     .ToArray();
             });
-            if (package.Items.Any())
+            if (!package.Any())
+                return Task.FromResult<object>(null);
+            if (!hasRestriction)
             {
-                if (!hasRestriction)
+                if (Configuration.DirectMail == DirectMailType.Always)
+                {
                     Transport.Broadcast(package);
-                else if (!string.IsNullOrWhiteSpace(restriction))
-                    Transport.Send(restriction, package);
+                }
+                else
+                {
+                    foreach (var server in Transport.Servers)
+                        SendMail(server, package, cont);
+                }
             }
+            else if (!string.IsNullOrWhiteSpace(restriction))
+                SendMail(restriction, package, cont);
             return Task.FromResult<object>(null);
+        }
+
+        private void SendMail(string server, MessageItem[] package, CommitContinuation cont)
+        {
+            if (Configuration.DirectMail == DirectMailType.Always ||
+                Configuration.DirectMail == DirectMailType.GossipSupressed && !IsGossipActive(server))
+                Transport.Send(server, new DirectMail { Items = package });
+            else if (Configuration.DirectMail == DirectMailType.StartGossip)
+                cont.InContext(() => Shield.SideEffect(() => StartGossip(server)));
         }
 
         void IBackend.Rollback() { }

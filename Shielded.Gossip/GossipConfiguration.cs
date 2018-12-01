@@ -1,13 +1,32 @@
 ﻿namespace Shielded.Gossip
 {
+    public enum DirectMailType
+    {
+        /// <summary>
+        /// Send direct mail on every transaction.
+        /// </summary>
+        Always,
+        /// <summary>
+        /// Send direct mail on every transaction, but only to servers who we're not
+        /// gossipping with right now.
+        /// </summary>
+        GossipSupressed,
+        /// <summary>
+        /// Push changes by starting gossip with servers on every transaction.
+        /// </summary>
+        StartGossip,
+        /// <summary>
+        /// Direct mail is off.
+        /// </summary>
+        Off
+    }
+
     public class GossipConfiguration
     {
         /// <summary>
-        /// Whether to send direct mail, true by default. Direct mail is sent on every transaction
-        /// to every server, informing them of the new writes immediately. This propagates updates
-        /// faster, but causes a lot of messages, and should maybe be off if you have a lot of load.
+        /// Whether to send direct mail, and how. Default is <see cref="DirectMailType.GossipSupressed"/>.
         /// </summary>
-        public bool DirectMail { get; set; } = true;
+        public DirectMailType DirectMail { get; set; } = DirectMailType.GossipSupressed;
 
         /// <summary>
         /// Every this many milliseconds, the backend will try to start a new gossip session with a
