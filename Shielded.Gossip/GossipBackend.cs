@@ -314,18 +314,17 @@ namespace Shielded.Gossip
 
         private void Send(string server, GossipMessage msg)
         {
+            // if we're sending GossipEnd, we clear this in transaction, to make sure
+            // IsGossipActive is correct, and to guarantee that we actually are done.
+            if (msg is GossipEnd)
+                _lastSendTime.Remove(server);
             Shield.SideEffect(() =>
             {
-                // the transactions which prepare messages need to be read-only, otherwise
-                // because of reading the _freshIndex they conflict with almost anything.
-                // this is why _lastSendTime is only changed in this side-effect.
-                Shield.InTransaction(() =>
-                {
-                    if (msg is GossipEnd)
-                        _lastSendTime.Remove(server);
-                    else
-                        _lastSendTime[server] = msg.Time;
-                });
+                // reply transactions are kept read-only since they conflict too easily,
+                // and it really makes no difference, whatever we skipped now, we'll see
+                // in the next reply.
+                if (!(msg is GossipEnd))
+                    Shield.InTransaction(() => _lastSendTime[server] = msg.Time);
                 Transport.Send(server, msg);
             });
         }
