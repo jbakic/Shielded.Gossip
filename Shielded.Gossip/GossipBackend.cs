@@ -266,7 +266,7 @@ namespace Shielded.Gossip
                 else if (hisPackage.Items == null || hisPackage.Items.Length == 0)
                     SendEnd(hisPackage, false);
                 else
-                    Send(server, new GossipReply
+                    SendReply(server, new GossipReply
                     {
                         From = Transport.OwnId,
                         DatabaseHash = ownHash,
@@ -286,7 +286,7 @@ namespace Shielded.Gossip
 
             var windowEnd = GetMaxFreshness();
 
-            Send(server, new GossipReply
+            SendReply(server, new GossipReply
             {
                 From = Transport.OwnId,
                 DatabaseHash = ownHash,
@@ -301,30 +301,29 @@ namespace Shielded.Gossip
 
         private void SendEnd(GossipPackage hisPackage, bool success)
         {
-            Send(hisPackage.From, new GossipEnd
+            // if we're sending GossipEnd, we clear this in transaction, to make sure
+            // IsGossipActive is correct, and to guarantee that we actually are done.
+            _lastSendTime.Remove(hisPackage.From);
+            var ourHash = _databaseHash.Value;
+            Shield.SideEffect(() => Transport.Send(hisPackage.From, new GossipEnd
             {
                 From = Transport.OwnId,
                 Success = success,
-                DatabaseHash = _databaseHash.Value,
+                DatabaseHash = ourHash,
                 LastWindowStart = hisPackage.WindowStart,
                 LastWindowEnd = hisPackage.WindowEnd,
                 LastTime = hisPackage.Time,
-            });
+            }));
         }
 
-        private void Send(string server, GossipMessage msg)
+        private void SendReply(string server, GossipReply msg)
         {
-            // if we're sending GossipEnd, we clear this in transaction, to make sure
-            // IsGossipActive is correct, and to guarantee that we actually are done.
-            if (msg is GossipEnd)
-                _lastSendTime.Remove(server);
             Shield.SideEffect(() =>
             {
                 // reply transactions are kept read-only since they conflict too easily,
                 // and it really makes no difference, whatever we skipped now, we'll see
-                // in the next reply.
-                if (!(msg is GossipEnd))
-                    Shield.InTransaction(() => _lastSendTime[server] = msg.Time);
+                // in the next reply. so we change this only in the side-effect.
+                Shield.InTransaction(() => _lastSendTime[server] = msg.Time);
                 Transport.Send(server, msg);
             });
         }
