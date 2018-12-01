@@ -515,18 +515,15 @@ namespace Shielded.Gossip
 
         private bool OnChanging(string key, object oldVal, object newVal)
         {
-            var ch = Changing;
-            if (ch == null)
-                return false;
             var ev = new ChangingEventArgs(key, oldVal, newVal);
-            ch.Invoke(this, ev);
+            Changing.Raise(this, ev);
             return ev.Cancel;
         }
 
         /// <summary>
         /// Fired during any change, allowing the change to be cancelled.
         /// </summary>
-        public event EventHandler<ChangingEventArgs> Changing;
+        public readonly ShieldedEvent<ChangingEventArgs> Changing = new ShieldedEvent<ChangingEventArgs>();
 
         public void Dispose()
         {

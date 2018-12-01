@@ -47,7 +47,8 @@ namespace Shielded.Gossip
         {
             _owner = owner ?? this;
             _wrapped = new GossipBackend(transport, configuration, _owner);
-            _wrapped.Changing += _wrapped_Changing;
+            Shield.InTransaction(() =>
+                _wrapped.Changing.Subscribe(_wrapped_Changing));
         }
 
         /// <summary>
@@ -168,18 +169,15 @@ namespace Shielded.Gossip
 
         private bool OnChanging(string key, object oldVal, object newVal)
         {
-            var ch = Changing;
-            if (ch == null)
-                return false;
             var ev = new ChangingEventArgs(key, oldVal, newVal);
-            ch.Invoke(this, ev);
+            Changing.Raise(this, ev);
             return ev.Cancel;
         }
 
         /// <summary>
         /// Fired during any change, allowing the change to be cancelled.
         /// </summary>
-        public event EventHandler<ChangingEventArgs> Changing;
+        public readonly ShieldedEvent<ChangingEventArgs> Changing = new ShieldedEvent<ChangingEventArgs>();
 
         private readonly ShieldedDictNc<string, BackendState> _transactions = new ShieldedDictNc<string, BackendState>();
         private readonly ShieldedDictNc<string, BackendState> _fieldBlockers = new ShieldedDictNc<string, BackendState>();
