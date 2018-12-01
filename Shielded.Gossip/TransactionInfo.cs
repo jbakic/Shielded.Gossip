@@ -14,10 +14,11 @@ namespace Shielded.Gossip
     {
         None = 0,
         Prepared = 1,
-        Done = 2,
+        Rejected = 2,
+        Done = 4,
 
         Success = Prepared | Done,
-        Fail = Done,
+        Fail = Rejected | Done,
     }
 
     /// <summary>
@@ -35,6 +36,12 @@ namespace Shielded.Gossip
 
         protected override TransactionState Merge(TransactionState left, TransactionState right) =>
             left == TransactionState.Fail || right == TransactionState.Fail ? TransactionState.Fail : (left | right);
+
+        public bool IsPrepared => Items.Count(i => (i.Value & TransactionState.Prepared) != 0) > (Items.Length / 2);
+        public bool IsRejected => Items.Count(i => (i.Value & TransactionState.Rejected) != 0) > (Items.Length / 2);
+        public bool IsDone => Items.Any(i => (i.Value & TransactionState.Done) != 0);
+        public bool IsSuccess => Items.Any(i => i.Value == TransactionState.Success);
+        public bool IsFail => Items.Any(i => i.Value == TransactionState.Fail);
     }
 
     [DataContract(Namespace = ""), Serializable]
