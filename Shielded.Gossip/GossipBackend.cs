@@ -159,7 +159,7 @@ namespace Shielded.Gossip
             var toSend = GetPackage(Configuration.AntiEntropyPushPackages, null, null, out var _);
             Shield.SideEffect(() =>
             {
-                Transport.Send(server, new GossipPackage
+                Transport.Send(server, new NewGossip
                 {
                     From = Transport.OwnId,
                     DatabaseHash = _databaseHash,
@@ -179,7 +179,7 @@ namespace Shielded.Gossip
                     ApplyItems(trans.Items);
                     break;
 
-                case GossipPackage pkg:
+                case NewGossip pkg:
                     if (pkg.DatabaseHash != _databaseHash)
                         ApplyItems(pkg.Items);
                     SendReply(pkg);
@@ -239,7 +239,7 @@ namespace Shielded.Gossip
         {
             var server = replyTo.From;
             var hisReply = replyTo as IGossipReply;
-            var hisPackage = replyTo as GossipPackage;
+            var hisNews = replyTo as NewGossip;
 
             var ourLast = hisReply?.LastTime;
             if (ShouldKillChain(replyTo.From, ourLast))
@@ -248,11 +248,11 @@ namespace Shielded.Gossip
             var ownHash = _databaseHash.Value;
             if (ownHash == replyTo.DatabaseHash)
             {
-                // hisPackage == null means his message was already a GossipEnd.
-                if (hisPackage == null)
+                // hisNews == null means his message was already a GossipEnd.
+                if (hisNews == null)
                     _lastSendTime.Remove(server);
                 else
-                    SendEnd(hisPackage, true);
+                    SendEnd(hisNews, true);
                 return;
             }
 
@@ -261,10 +261,10 @@ namespace Shielded.Gossip
 
             if (toSend.Length == 0)
             {
-                if (hisPackage == null)
+                if (hisNews == null)
                     _lastSendTime.Remove(server);
-                else if (hisPackage.Items == null || hisPackage.Items.Length == 0)
-                    SendEnd(hisPackage, false);
+                else if (hisNews.Items == null || hisNews.Items.Length == 0)
+                    SendEnd(hisNews, false);
                 else
                     SendReply(server, new GossipReply
                     {
@@ -273,8 +273,8 @@ namespace Shielded.Gossip
                         Items = null,
                         WindowStart = hisReply?.LastWindowStart,
                         WindowEnd = hisReply?.LastWindowEnd,
-                        LastWindowStart = hisPackage.WindowStart,
-                        LastWindowEnd = hisPackage.WindowEnd,
+                        LastWindowStart = hisNews.WindowStart,
+                        LastWindowEnd = hisNews.WindowEnd,
                         LastTime = replyTo.Time,
                     });
                 return;
@@ -293,26 +293,26 @@ namespace Shielded.Gossip
                 Items = toSend,
                 WindowStart = windowStart,
                 WindowEnd = windowEnd,
-                LastWindowStart = hisPackage?.WindowStart,
-                LastWindowEnd = hisPackage?.WindowEnd,
+                LastWindowStart = hisNews?.WindowStart,
+                LastWindowEnd = hisNews?.WindowEnd,
                 LastTime = replyTo.Time,
             });
         });
 
-        private void SendEnd(GossipPackage hisPackage, bool success)
+        private void SendEnd(NewGossip hisNews, bool success)
         {
             // if we're sending GossipEnd, we clear this in transaction, to make sure
             // IsGossipActive is correct, and to guarantee that we actually are done.
-            _lastSendTime.Remove(hisPackage.From);
+            _lastSendTime.Remove(hisNews.From);
             var ourHash = _databaseHash.Value;
-            Shield.SideEffect(() => Transport.Send(hisPackage.From, new GossipEnd
+            Shield.SideEffect(() => Transport.Send(hisNews.From, new GossipEnd
             {
                 From = Transport.OwnId,
                 Success = success,
                 DatabaseHash = ourHash,
-                LastWindowStart = hisPackage.WindowStart,
-                LastWindowEnd = hisPackage.WindowEnd,
-                LastTime = hisPackage.Time,
+                LastWindowStart = hisNews.WindowStart,
+                LastWindowEnd = hisNews.WindowEnd,
+                LastTime = hisNews.Time,
             }));
         }
 

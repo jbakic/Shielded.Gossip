@@ -22,7 +22,7 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class GossipPackage : GossipMessage
+    public class NewGossip : GossipMessage
     {
         [DataMember]
         public MessageItem[] Items { get; set; }
@@ -40,7 +40,7 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class GossipReply : GossipPackage, IGossipReply
+    public class GossipReply : NewGossip, IGossipReply
     {
         [DataMember]
         public long? LastWindowStart { get; set; }
