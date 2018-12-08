@@ -64,10 +64,9 @@ namespace Shielded.Gossip.Tests
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i =>
-                        _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i =>
+                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value));
 
             if (read < expected)
                 Assert.Inconclusive($"Servers did not achieve sync within given time. Expected {expected}, read {read}");
@@ -109,10 +108,9 @@ namespace Shielded.Gossip.Tests
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i =>
-                        _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i =>
+                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value));
 
             if (read < expected)
                 Assert.Inconclusive($"Servers did not achieve sync within given time. Expected {expected}, read {read}");

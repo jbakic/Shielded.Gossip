@@ -28,13 +28,14 @@ namespace Shielded.Gossip
     /// of time in their change history this transaction checked out OK. This is important to
     /// note, because eventual changes get written in immediately, maybe before some transaction has
     /// fully completed, and can overwrite her effects before they even become visible.</para></remarks>
-    public class ConsistentGossipBackend : IGossipBackend, IDisposable
+    public class ConsistentGossipBackend : IGossipBackend, IBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
         private readonly IBackend _owner;
 
         public ITransport Transport => _wrapped.Transport;
         public GossipConfiguration Configuration => _wrapped.Configuration;
+        public ShieldedLocal<string> DirectMailRestriction => _wrapped.DirectMailRestriction;
 
         /// <summary>
         /// Constructor.
@@ -46,9 +47,9 @@ namespace Shielded.Gossip
         public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration, IBackend owner = null)
         {
             _owner = owner ?? this;
-            _wrapped = new GossipBackend(transport, configuration, _owner);
+            _wrapped = new GossipBackend(transport, configuration);
             Shield.InTransaction(() =>
-                _wrapped.Changing.Subscribe(_wrapped_Changing));
+                _wrapped.Changed.Subscribe(_wrapped_Changed));
         }
 
         /// <summary>
@@ -117,13 +118,12 @@ namespace Shielded.Gossip
                 val = oldVal.MergeWith(val);
             }
 
-            if (OnChanging(key, oldVal, val))
-                return VectorRelationship.Less;
-
             var local = _state.Value.Changes;
             // cmp and Expected can both be either Greater or Conflict, and Greater & Conflict == Greater.
             var expected = local.TryGetValue(key, out var oldItem) ? oldItem.Expected & cmp : cmp;
             local[key] = new TransactionItem { Key = key, Value = val, Expected = expected };
+
+            OnChanged(key, val);
             return cmp;
         }
 
@@ -167,17 +167,16 @@ namespace Shielded.Gossip
             }
         }
 
-        private bool OnChanging(string key, object oldVal, object newVal)
+        private void OnChanged(string key, object newVal)
         {
-            var ev = new ChangingEventArgs(key, oldVal, newVal);
-            Changing.Raise(this, ev);
-            return ev.Cancel;
+            var ev = new ChangedEventArgs(key, newVal);
+            Changed.Raise(this, ev);
         }
 
         /// <summary>
         /// Fired during any change, allowing the change to be cancelled.
         /// </summary>
-        public readonly ShieldedEvent<ChangingEventArgs> Changing = new ShieldedEvent<ChangingEventArgs>();
+        public readonly ShieldedEvent<ChangedEventArgs> Changed = new ShieldedEvent<ChangedEventArgs>();
 
         private readonly ShieldedDictNc<string, BackendState> _transactions = new ShieldedDictNc<string, BackendState>();
         private readonly ShieldedDictNc<string, BackendState> _fieldBlockers = new ShieldedDictNc<string, BackendState>();
@@ -212,7 +211,7 @@ namespace Shielded.Gossip
                 var prepare = await Task.WhenAny(PrepareInternal(id, ourState, transaction), ourState.PrepareCompleter.Task);
                 if (!prepare.Result.Success)
                     return prepare.Result;
-                await Distributed.Run(() =>
+                Shield.InTransaction(() =>
                 {
                     if (_transactions.ContainsKey(id))
                         _wrapped.Set(id, transaction);
@@ -224,7 +223,7 @@ namespace Shielded.Gossip
             if (resTask != prepTask || !prepTask.Result.Success)
             {
                 ourState.Complete(false);
-                await SetFail(ourState.TransactionId);
+                SetFail(ourState.TransactionId);
                 if (resTask != prepTask)
                     return new PrepareResult(false, null);
             }
@@ -306,7 +305,7 @@ namespace Shielded.Gossip
 
         private void UnlockFields(BackendState ourState)
         {
-            Distributed.RunLocal(() =>
+            Shield.InTransaction(() =>
             {
                 foreach (var key in ourState.Changes.Keys)
                     if (_fieldBlockers.TryGetValue(key, out BackendState state) && state == ourState)
@@ -351,122 +350,103 @@ namespace Shielded.Gossip
             }
         }
 
-        private void _wrapped_Changing(object sender, ChangingEventArgs e)
+        private void _wrapped_Changed(object sender, ChangedEventArgs e)
         {
             if (e.Key.StartsWith(TransactionPfx))
             {
-                OnTransactionChanging(e.Key, (TransactionInfo)e.OldValue, (TransactionInfo)e.NewValue);
+                OnTransactionChanged(e.Key, (TransactionInfo)e.NewValue);
             }
             else if (e.Key.StartsWith(PublicPfx))
             {
-                if (OnChanging(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue))
-                    e.Cancel = true;
+                OnChanged(e.Key.Substring(PublicPfx.Length), e.NewValue);
             }
         }
 
-        private void OnTransactionChanging(string id, TransactionInfo oldVal, TransactionInfo newVal)
+        private void OnTransactionChanged(string id, TransactionInfo newVal)
         {
-            if (oldVal == null && newVal != null)
-            {
-                if (newVal.State[Transport.OwnId] != TransactionState.None || newVal.State.IsDone || _transactions.ContainsKey(id))
-                {
-                    OnStateChange(id, newVal);
-                    return;
-                }
-                if (StringComparer.InvariantCultureIgnoreCase.Equals(newVal.Initiator, Transport.OwnId))
-                    Shield.SideEffect(async () => await SetFail(id));
-                var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
-                _transactions.Add(id, ourState);
-                Shield.SideEffect(async () =>
-                {
-                    try
-                    {
-                        if (!(await Task.WhenAny(PrepareInternal(id, ourState), ourState.PrepareCompleter.Task)).Result.Success)
-                        {
-                            await SetRejected(id);
-                            ourState.Complete(false);
-                            return;
-                        }
-                        if (!await SetPrepared(id))
-                        {
-                            ourState.Complete(false);
-                            return;
-                        }
-                        ourState.PrepareCompleter.TrySetResult(new PrepareResult(true));
-                    }
-                    catch
-                    {
-                        await SetRejected(id);
-                        ourState.Complete(false);
-                    }
-                });
-            }
-            else if (newVal != null)
+            if (newVal == null)
+                return;
+
+            if (newVal.State[Transport.OwnId] != TransactionState.None || newVal.State.IsDone || _transactions.ContainsKey(id))
             {
                 OnStateChange(id, newVal);
+                return;
             }
-        }
-
-        private async Task<bool> SetPrepared(string id)
-        {
-            return await Distributed.Run(() =>
+            if (StringComparer.InvariantCultureIgnoreCase.Equals(newVal.Initiator, Transport.OwnId))
             {
-                if (!_wrapped.TryGet(id, out TransactionInfo current) ||
-                    current.State[Transport.OwnId] != TransactionState.None ||
-                    current.State.IsDone)
-                    return false;
-                _wrapped.DirectMailRestriction.Value = current.Initiator;
-                _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
-                return true;
-            });
-        }
-
-        private async Task<bool> SetRejected(string id)
-        {
-            return await Distributed.Run(() =>
+                Shield.SideEffect(() => SetFail(id));
+                return;
+            }
+            var ourState = new BackendState(id, newVal.Initiator, this, newVal.Items);
+            _transactions.Add(id, ourState);
+            Shield.SideEffect(async () =>
             {
-                if (!_wrapped.TryGet(id, out TransactionInfo current) ||
-                    current.State[Transport.OwnId] != TransactionState.None ||
-                    current.State.IsDone)
-                    return false;
-                _wrapped.DirectMailRestriction.Value = current.Initiator;
-                _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Rejected));
-                return true;
-            });
-        }
-
-        private async Task SetFail(string id)
-        {
-            await Distributed.Run(() =>
-            {
-                if (!_wrapped.TryGet(id, out TransactionInfo current) ||
-                    (current.State[Transport.OwnId] & TransactionState.Done) != 0)
-                    return;
-                if (!StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
-                    _wrapped.DirectMailRestriction.Value = null;
-                _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Fail));
-            });
-        }
-
-        private bool ApplyAndSetSuccess(string id)
-        {
-            bool res = false;
-            Distributed.RunLocal(() =>
-            {
-                if (!_wrapped.TryGet(id, out TransactionInfo current) ||
-                    (current.State[Transport.OwnId] & TransactionState.Done) != 0)
+                try
                 {
-                    res = false;
-                    return;
+                    if (!(await Task.WhenAny(PrepareInternal(id, ourState), ourState.PrepareCompleter.Task)).Result.Success)
+                    {
+                        SetRejected(id);
+                        ourState.Complete(false);
+                        return;
+                    }
+                    if (!SetPrepared(id))
+                    {
+                        ourState.Complete(false);
+                        return;
+                    }
+                    ourState.PrepareCompleter.TrySetResult(new PrepareResult(true));
                 }
-                if (!StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
-                    _wrapped.DirectMailRestriction.Value = null;
-                Apply(current);
-                _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-                res = true;
+                catch
+                {
+                    SetRejected(id);
+                    ourState.Complete(false);
+                }
             });
-            return res;
         }
+
+        private bool SetPrepared(string id) => Shield.InTransaction(() =>
+        {
+            if (!_wrapped.TryGet(id, out TransactionInfo current) ||
+                current.State[Transport.OwnId] != TransactionState.None ||
+                current.State.IsDone)
+                return false;
+            _wrapped.DirectMailRestriction.Value = current.Initiator;
+            _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
+            return true;
+        });
+
+        private bool SetRejected(string id) => Shield.InTransaction(() =>
+        {
+            if (!_wrapped.TryGet(id, out TransactionInfo current) ||
+                current.State[Transport.OwnId] != TransactionState.None ||
+                current.State.IsDone)
+                return false;
+            _wrapped.DirectMailRestriction.Value = current.Initiator;
+            _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Rejected));
+            return true;
+        });
+
+        private void SetFail(string id) => Shield.InTransaction(() =>
+        {
+            if (!_wrapped.TryGet(id, out TransactionInfo current) ||
+                (current.State[Transport.OwnId] & TransactionState.Done) != 0)
+                return;
+            if (!StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
+                _wrapped.DirectMailRestriction.Value = null;
+            _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Fail));
+        });
+
+        private bool ApplyAndSetSuccess(string id) => Shield.InTransaction(() =>
+        {
+            if (!_wrapped.TryGet(id, out TransactionInfo current) ||
+                (current.State[Transport.OwnId] & TransactionState.Done) != 0)
+                return false;
+            if (!StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
+                _wrapped.DirectMailRestriction.Value = null;
+            Apply(current);
+            _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
+            return true;
+        });
 
         private void OnStateChange(string id, TransactionInfo current)
         {
@@ -474,9 +454,9 @@ namespace Shielded.Gossip
             var meNotDone = (current.State[Transport.OwnId] & TransactionState.Done) == 0;
             if ((current.State.IsFail || current.State.IsRejected) && meNotDone)
             {
-                Shield.SideEffect(async () =>
+                Shield.SideEffect(() =>
                 {
-                    await SetFail(id);
+                    SetFail(id);
                     if (ourState != null)
                         ourState.Complete(false);
                 });
@@ -497,7 +477,7 @@ namespace Shielded.Gossip
                     Shield.SideEffect(() =>
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
                 else
-                    Shield.SideEffect(async () => await SetFail(id));
+                    Shield.SideEffect(() => SetFail(id));
             }
         }
 
@@ -511,8 +491,8 @@ namespace Shielded.Gossip
             BackendState ourState = null;
             cont.InContext(() => ourState = _state.GetValueOrDefault());
             if (ourState == null)
-                return ((IBackend)_wrapped).Commit(cont);
-            return Distributed.Run(() =>
+                return Task.FromResult<object>(null);
+            Shield.InTransaction(() =>
             {
                 var id = ourState.TransactionId;
                 if (!_wrapped.TryGet(id, out TransactionInfo current) ||
@@ -522,6 +502,7 @@ namespace Shielded.Gossip
                 _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
                 Shield.SideEffect(() => ourState.Complete(true));
             });
+            return Task.FromResult<object>(null);
         }
 
         void IBackend.Rollback() { }

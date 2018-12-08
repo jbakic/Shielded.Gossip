@@ -8,7 +8,7 @@ namespace Shielded.Gossip
     /// <summary>
     /// The basic common interface provided by both gossip backends.
     /// </summary>
-    public interface IGossipBackend : IBackend
+    public interface IGossipBackend
     {
         bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>;
         VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>;

@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 namespace Shielded.Gossip.Tests
 {
     public abstract class GossipBackendThreeNodeTestsBase<TBackend, TTransport>
-        where TBackend : IBackend, IDisposable
+        where TBackend : IGossipBackend, IDisposable
         where TTransport : ITransport
     {
         protected const string A = "A";
@@ -110,13 +110,12 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 
-            Distributed.Run(() => _backends[A].SetVc("key", testEntity)).Wait();
+            Shield.InTransaction(() => _backends[A].SetVc("key", testEntity));
 
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Distributed.Run(() => _backends[B].TryGetMultiple<TestClass>("key"))
-                .Result.Single();
+            var read = Shield.InTransaction(() => _backends[B].TryGetMultiple<TestClass>("key").Single());
 
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
@@ -133,21 +132,20 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
-                Task.Run(() => Distributed.Run(() =>
+                Task.Run(() => Shield.InTransaction(() =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }).Wait())).ToArray());
+                }))).ToArray());
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0));
 
             Assert.AreEqual(transactions, read);
         }
@@ -163,13 +161,12 @@ namespace Shielded.Gossip.Tests
 
             var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
 
-            Distributed.Run(() => _backends[A].SetVc("key", testEntity)).Wait();
+            Shield.InTransaction(() => _backends[A].SetVc("key", testEntity));
 
             Thread.Sleep(500);
             CheckProtocols();
 
-            var read = Distributed.Run(() => _backends[C].TryGetMultiple<TestClass>("key"))
-                .Result.Single();
+            var read = Shield.InTransaction(() => _backends[C].TryGetMultiple<TestClass>("key").Single());
 
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
@@ -191,21 +188,20 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
-                Task.Run(() => Distributed.Run(() =>
+                Task.Run(() => Shield.InTransaction(() =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }).Wait())).ToArray());
+                }))).ToArray());
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0));
 
             Assert.AreEqual(transactions, read);
         }
@@ -225,22 +221,21 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
-                Task.Run(() => Distributed.Run(() =>
+                Task.Run(() => Shield.InTransaction(() =>
                 {
                     // run all updates on A, to cause asymmetry in the amount of data they have to gossip about.
                     var backend = _backends[A];
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }).Wait())).ToArray());
+                }))).ToArray());
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i => _backends[C].TryGet("key" + i, out CountVector v) ? v.Value : 0));
 
             Assert.AreEqual(transactions, read);
         }

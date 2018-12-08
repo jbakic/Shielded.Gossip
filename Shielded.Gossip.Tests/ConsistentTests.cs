@@ -84,10 +84,9 @@ namespace Shielded.Gossip.Tests
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i =>
-                        _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i =>
+                    _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter));
 
             Assert.AreEqual(expected, read);
             Assert.AreEqual(transactions, read);
@@ -115,7 +114,7 @@ namespace Shielded.Gossip.Tests
 
             Thread.Sleep(100);
 
-            read = Distributed.Run(() => _backends[C].TryGetVersioned<TestClass>("key")).Result;
+            read = Shield.InTransaction(() => _backends[C].TryGetVersioned<TestClass>("key"));
             Assert.AreEqual(next.Value.Name, read.Value.Name);
         }
     }

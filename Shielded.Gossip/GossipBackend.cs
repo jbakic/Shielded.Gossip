@@ -12,8 +12,7 @@ namespace Shielded.Gossip
 {
     /// <summary>
     /// A backend supporting a key/value store which is distributed using a simple gossip protocol
-    /// implementation. Can be used in <see cref="Distributed.Consistent"/> calls, but is always
-    /// only eventually consistent.
+    /// implementation. Use it in ordinary <see cref="Shield"/> transactions.
     /// Values should be CRDTs, implementing <see cref="IMergeable{T}"/>, or you can use the
     /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT. If a type
     /// implements <see cref="IDeletable"/>, it can be deleted from the storage.
@@ -24,19 +23,19 @@ namespace Shielded.Gossip
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
         private readonly Shielded<ulong> _databaseHash = new Shielded<ulong>();
         private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
+        private readonly ShieldedLocal<HashSet<string>> _keysToMail = new ShieldedLocal<HashSet<string>>();
 
         private readonly Timer _gossipTimer;
         private readonly Timer _deletableTimer;
         private readonly IDisposable _preCommit;
-
-        private readonly IBackend _owner;
 
         public readonly ITransport Transport;
         public readonly GossipConfiguration Configuration;
 
         /// <summary>
         /// If set inside a distributed transaction, restricts the direct mail message sending
-        /// to only this server. Affects only the current transaction.
+        /// to only this server. Affects only the current transaction. If set to null, no
+        /// direct mail will be sent.
         /// </summary>
         public readonly ShieldedLocal<string> DirectMailRestriction = new ShieldedLocal<string>();
 
@@ -45,13 +44,10 @@ namespace Shielded.Gossip
         /// </summary>
         /// <param name="transport">The message transport to use.</param>
         /// <param name="configuration">The configuration.</param>
-        /// <param name="owner">If not null, this backend will enlist the owner instead of itself.
-        /// The owner then controls when exactly our IBackend methods get called.</param>
-        public GossipBackend(ITransport transport, GossipConfiguration configuration, IBackend owner = null)
+        public GossipBackend(ITransport transport, GossipConfiguration configuration)
         {
             Transport = transport;
             Configuration = configuration;
-            _owner = owner ?? this;
             Transport.MessageReceived += Transport_MessageReceived;
 
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
@@ -62,6 +58,16 @@ namespace Shielded.Gossip
                 // so nobody sneaks in a PreCommit after this one, and screws up the fresh index.
                 _changeLock.Value = true;
                 SyncIndexes();
+                if (_keysToMail.HasValue && _keysToMail.Value.Count > 0)
+                {
+                    var hasRestriction = DirectMailRestriction.HasValue;
+                    var restriction = hasRestriction ? DirectMailRestriction.Value : null;
+                    var items = _keysToMail.Value
+                        .Select(key => _local.TryGetValue(key, out var mi) ? mi : null)
+                        .Where(mi => mi != null)
+                        .ToArray();
+                    Shield.SideEffect(() => DoDirectMail(items, hasRestriction, restriction));
+                }
             });
         }
 
@@ -98,7 +104,7 @@ namespace Shielded.Gossip
 
         private void SyncIndexes()
         {
-            long newFresh = GetNextFreshness();
+            var newFresh = GetNextFreshness();
             foreach (var key in _local.Changes)
             {
                 var oldItem = Shield.ReadOldState(() => _local.TryGetValue(key, out MessageItem o) ? o : null);
@@ -121,6 +127,36 @@ namespace Shielded.Gossip
         private long GetMaxFreshness()
         {
             return _freshIndex.Descending.FirstOrDefault().Key;
+        }
+
+        private void DoDirectMail(MessageItem[] items, bool hasRestriction, string restriction)
+        {
+            if (Configuration.DirectMail == DirectMailType.Off || items.Length == 0)
+                return;
+            var package = new DirectMail { Items = items };
+            if (hasRestriction)
+            {
+                if (!string.IsNullOrWhiteSpace(restriction))
+                    SendMail(restriction, package);
+            }
+            else if (Configuration.DirectMail == DirectMailType.Always)
+            {
+                Transport.Broadcast(package);
+            }
+            else
+            {
+                foreach (var server in Transport.Servers)
+                    SendMail(server, package);
+            }
+        }
+
+        private void SendMail(string server, DirectMail package)
+        {
+            if (Configuration.DirectMail == DirectMailType.Always ||
+                Configuration.DirectMail == DirectMailType.GossipSupressed && !IsGossipActive(server))
+                Transport.Send(server, package);
+            else if (Configuration.DirectMail == DirectMailType.StartGossip)
+                StartGossip(server);
         }
 
         private ShieldedDictNc<string, DateTimeOffset> _lastSendTime = new ShieldedDictNc<string, DateTimeOffset>(StringComparer.InvariantCultureIgnoreCase);
@@ -192,11 +228,10 @@ namespace Shielded.Gossip
         }
 
         private readonly ApplyMethods _applyMethods = new ApplyMethods(typeof(GossipBackend)
-            .GetMethod("SetInternalWoEnlist", BindingFlags.Instance | BindingFlags.NonPublic));
+            .GetMethod("SetInternal", BindingFlags.Instance | BindingFlags.NonPublic));
 
         /// <summary>
-        /// Applies the given items internally, does not enlist the backend in any distributed
-        /// transaction.
+        /// Applies the given items internally, does not cause any direct mail.
         /// </summary>
         public void ApplyItems(IEnumerable<MessageItem> items) => Shield.InTransaction(() =>
         {
@@ -382,54 +417,6 @@ namespace Shielded.Gossip
                 yield return _local[kvp.Value];
         }
 
-        Task<PrepareResult> IBackend.Prepare(CommitContinuation cont) => Task.FromResult(new PrepareResult(true));
-
-        Task IBackend.Commit(CommitContinuation cont)
-        {
-            if (Configuration.DirectMail == DirectMailType.Off)
-                return Task.FromResult<object>(null);
-            MessageItem[] package = null;
-            bool hasRestriction = false;
-            string restriction = null;
-            cont.InContext(() =>
-            {
-                hasRestriction = DirectMailRestriction.HasValue;
-                if (hasRestriction)
-                    restriction = DirectMailRestriction.Value;
-                package = _local.Changes
-                    .Select(key => _local.TryGetValue(key, out var mi) ? mi : new MessageItem { Key = key })
-                    .ToArray();
-            });
-            if (!package.Any())
-                return Task.FromResult<object>(null);
-            if (!hasRestriction)
-            {
-                if (Configuration.DirectMail == DirectMailType.Always)
-                {
-                    Transport.Broadcast(package);
-                }
-                else
-                {
-                    foreach (var server in Transport.Servers)
-                        SendMail(server, package, cont);
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(restriction))
-                SendMail(restriction, package, cont);
-            return Task.FromResult<object>(null);
-        }
-
-        private void SendMail(string server, MessageItem[] package, CommitContinuation cont)
-        {
-            if (Configuration.DirectMail == DirectMailType.Always ||
-                Configuration.DirectMail == DirectMailType.GossipSupressed && !IsGossipActive(server))
-                Transport.Send(server, new DirectMail { Items = package });
-            else if (Configuration.DirectMail == DirectMailType.StartGossip)
-                cont.InContext(() => Shield.SideEffect(() => StartGossip(server)));
-        }
-
-        void IBackend.Rollback() { }
-
         /// <summary>
         /// Tries to read the value under the given key. The type of the value must be a CRDT.
         /// </summary>
@@ -442,17 +429,6 @@ namespace Shielded.Gossip
             return true;
         }
 
-        /// <summary>
-        /// Sets the given value under the given key, merging it with any already existing value
-        /// there. Returns the relationship of the new to the old value, or
-        /// <see cref="VectorRelationship.Greater"/> if there is no old value. The storage gets affected
-        /// only if the result of comparison is Greater or Conflict.
-        /// </summary>
-        public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
-        {
-            return SetInternal(key, item);
-        }
-
         private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
         {
             return FNV1a64.Hash(
@@ -460,13 +436,23 @@ namespace Shielded.Gossip
                 BitConverter.GetBytes(i.GetVersionHash()));
         }
 
-        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+        /// <summary>
+        /// Sets the given value under the given key, merging it with any already existing value
+        /// there. Returns the relationship of the new to the old value, or
+        /// <see cref="VectorRelationship.Greater"/> if there is no old value. The storage gets affected
+        /// only if the result of comparison is Greater or Conflict.
+        /// </summary>
+        public VectorRelationship Set<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
-            Distributed.EnlistBackend(_owner);
-            return SetInternalWoEnlist(key, val);
+            var res = SetInternal(key, val);
+            if ((res & VectorRelationship.Greater) == 0)
+                return res;
+            var set = _keysToMail.HasValue ? _keysToMail.Value : (_keysToMail.Value = new HashSet<string>());
+            set.Add(key);
+            return res;
         }
 
-        private VectorRelationship SetInternalWoEnlist<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException();
@@ -480,8 +466,6 @@ namespace Shielded.Gossip
                     return cmp;
                 val = oldVal.MergeWith(val);
 
-                if (OnChanging(key, oldVal, val))
-                    return VectorRelationship.Less;
                 // we support this only for safety - a CanDelete should never accept any changes, nor switch to !CanDelete.
                 var oldDeletable = oldVal is IDeletable oldDel && oldDel.CanDelete;
                 var deletable = val is IDeletable del && del.CanDelete;
@@ -493,15 +477,14 @@ namespace Shielded.Gossip
                 };
                 var hash = (oldDeletable ? 0 : GetHash(key, oldVal)) ^ (deletable ? 0 : GetHash(key, val));
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
+
+                OnChanged(key, val);
                 return cmp;
             }
             else
             {
                 if (val is IDeletable del && del.CanDelete)
                     return VectorRelationship.Equal;
-                if (OnChanging(key, default(TItem), val))
-                    return VectorRelationship.Less;
-
                 _local[key] = new MessageItem
                 {
                     Key = key,
@@ -509,21 +492,22 @@ namespace Shielded.Gossip
                 };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref ulong h) => h ^= hash);
+
+                OnChanged(key, val);
                 return VectorRelationship.Greater;
             }
         }
 
-        private bool OnChanging(string key, object oldVal, object newVal)
+        private void OnChanged(string key, object newVal)
         {
-            var ev = new ChangingEventArgs(key, oldVal, newVal);
-            Changing.Raise(this, ev);
-            return ev.Cancel;
+            var ev = new ChangedEventArgs(key, newVal);
+            Changed.Raise(this, ev);
         }
 
         /// <summary>
-        /// Fired during any change, allowing the change to be cancelled.
+        /// Fired when any key changes.
         /// </summary>
-        public readonly ShieldedEvent<ChangingEventArgs> Changing = new ShieldedEvent<ChangingEventArgs>();
+        public readonly ShieldedEvent<ChangedEventArgs> Changed = new ShieldedEvent<ChangedEventArgs>();
 
         public void Dispose()
         {

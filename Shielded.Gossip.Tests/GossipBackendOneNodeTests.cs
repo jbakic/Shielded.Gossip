@@ -1,5 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Shielded.Cluster;
+using Shielded.Standard;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -45,10 +46,9 @@ namespace Shielded.Gossip.Tests
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
             Assert.AreEqual(VectorRelationship.Greater,
-                Distributed.Run(() => _backend.SetVc("key", testEntity)).Result);
+                Shield.InTransaction(() => _backend.SetVc("key", testEntity)));
 
-            var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
-                .Result.Single();
+            var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Single());
 
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
@@ -60,15 +60,14 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity1 = new TestClass { Id = 1, Name = "One", Clock = (A, 2) };
             Assert.AreEqual(VectorRelationship.Greater,
-                Distributed.Run(() => _backend.SetVc("key", testEntity1)).Result);
+                Shield.InTransaction(() => _backend.SetVc("key", testEntity1)));
 
             {
                 var testEntity2Fail = new TestClass { Id = 2, Name = "Two", Clock = (A, 1) };
                 Assert.AreEqual(VectorRelationship.Less,
-                    Distributed.Run(() => _backend.SetVc("key", testEntity2Fail)).Result);
+                    Shield.InTransaction(() => _backend.SetVc("key", testEntity2Fail)));
 
-                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
-                    .Result.Single();
+                var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Single());
 
                 Assert.AreEqual(testEntity1.Id, read.Id);
                 Assert.AreEqual(testEntity1.Name, read.Name);
@@ -77,11 +76,10 @@ namespace Shielded.Gossip.Tests
 
             var testEntity2Succeed = new TestClass { Id = 2, Name = "Two", Clock = (VectorClock)(A, 2) | (B, 1) };
             Assert.AreEqual(VectorRelationship.Greater,
-                Distributed.Run(() => _backend.SetVc("key", testEntity2Succeed)).Result);
+                Shield.InTransaction(() => _backend.SetVc("key", testEntity2Succeed)));
 
             {
-                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
-                    .Result.Single();
+                var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Single());
 
                 Assert.AreEqual(testEntity2Succeed.Id, read.Id);
                 Assert.AreEqual(testEntity2Succeed.Name, read.Name);
@@ -91,10 +89,9 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity2SameClock = new TestClass { Id = 1002, Name = "Another Two", Clock = testEntity2Succeed.Clock };
                 Assert.AreEqual(VectorRelationship.Equal,
-                    Distributed.Run(() => _backend.SetVc("key", testEntity2SameClock)).Result);
+                    Shield.InTransaction(() => _backend.SetVc("key", testEntity2SameClock)));
 
-                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
-                    .Result.Single();
+                var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Single());
 
                 // we keep the first entity we see...
                 Assert.AreEqual(testEntity2Succeed.Id, read.Id);
@@ -107,9 +104,9 @@ namespace Shielded.Gossip.Tests
             {
                 var testEntity3Conflict = new TestClass { Id = 3, Name = "Three", Clock = (A, 3) };
                 Assert.AreEqual(VectorRelationship.Conflict,
-                    Distributed.Run(() => _backend.SetVc("key", testEntity3Conflict)).Result);
+                    Shield.InTransaction(() => _backend.SetVc("key", testEntity3Conflict)));
 
-                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result;
+                var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key"));
                 mergedClock = read.MergedClock;
 
                 var read2 = read.Single(t => t.Id == 2);
@@ -128,10 +125,9 @@ namespace Shielded.Gossip.Tests
                 var testEntity4Resolve = new TestClass { Id = 4, Name = "Four", Clock = mergedClock.Next(B) };
                 Assert.AreEqual((VectorClock)(A, 3) | (B, 2), testEntity4Resolve.Clock);
                 Assert.AreEqual(VectorRelationship.Greater,
-                    Distributed.Run(() => _backend.SetVc("key", testEntity4Resolve)).Result);
+                    Shield.InTransaction(() => _backend.SetVc("key", testEntity4Resolve)));
 
-                var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key"))
-                    .Result.Single();
+                var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Single());
 
                 Assert.AreEqual(testEntity4Resolve.Id, read.Id);
                 Assert.AreEqual(testEntity4Resolve.Name, read.Name);
@@ -147,13 +143,13 @@ namespace Shielded.Gossip.Tests
                 new TestClass { Id = 2, Name = "Two", Clock = (A, 2) } |
                 new TestClass { Id = 3, Name = "Three", Clock = (VectorClock)(A, 1) | (B, 1) };
 
-            Distributed.Run(() =>
+            Shield.InTransaction(() =>
             {
                 _backend.SetVc("key", testEntity);
                 _backend.Set("key", toSet);
-            }).Wait();
+            });
 
-            var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result;
+            var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key"));
 
             var read2 = read.Single(t => t.Id == 2);
             var read3 = read.Single(t => t.Id == 3);
@@ -166,22 +162,22 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "New entity", Clock = (A, 1) };
 
-            Distributed.Run(() => { _backend.SetVc("key", testEntity); }).Wait();
+            Shield.InTransaction(() => { _backend.SetVc("key", testEntity); });
 
             // clean-up is every 200 ms, so this is enough.
             Thread.Sleep(500);
 
-            var read = Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result.Single();
+            var read = Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Single());
             Assert.AreEqual(testEntity.Id, read.Id);
 
             testEntity.CanDelete = true;
             testEntity.Clock = testEntity.Clock.Next(_backend.Transport.OwnId);
-            Distributed.Run(() => { _backend.SetVc("key", testEntity); }).Wait();
+            Shield.InTransaction(() => { _backend.SetVc("key", testEntity); });
 
             Thread.Sleep(500);
 
-            Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Multiple<TestClass> _)).Result);
-            Assert.IsFalse(Distributed.Run(() => _backend.TryGetMultiple<TestClass>("key")).Result.Any());
+            Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Multiple<TestClass> _)));
+            Assert.IsFalse(Shield.InTransaction(() => _backend.TryGetMultiple<TestClass>("key").Any()));
         }
 
         [TestMethod]
@@ -189,29 +185,29 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            Distributed.Run(() => { _backend.Set("key", testEntity.Lww()); }).Wait();
+            Shield.InTransaction(() => { _backend.Set("key", testEntity.Lww()); });
 
             // also checking IDeletable impl...
             Thread.Sleep(500);
 
-            var read = Distributed.Run(() => _backend.TryGetLww<TestClass>("key")).Result;
+            var read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.AreEqual(testEntity.Name, read.Value.Name);
 
             var next = read.NextVersion();
             next.Value = new TestClass { Id = 1, Name = "Version 2" };
-            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
+            Shield.InTransaction(() => { _backend.Set("key", next); });
 
-            read = Distributed.Run(() => _backend.TryGetLww<TestClass>("key")).Result;
+            read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
             next = read.NextVersion();
             next.Value.CanDelete = true;
-            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
+            Shield.InTransaction(() => { _backend.Set("key", next); });
 
             Thread.Sleep(500);
 
-            Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Lww<TestClass> _)).Result);
-            read = Distributed.Run(() => _backend.TryGetLww<TestClass>("key")).Result;
+            Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Lww<TestClass> _)));
+            read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.IsNull(read.Value);
             Assert.AreEqual(DateTimeOffset.MinValue, read.Time);
         }
@@ -222,29 +218,29 @@ namespace Shielded.Gossip.Tests
             // Versioned is not safe to use with a non-consistent backend. we'll just test the basics.
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            Distributed.Run(() => { _backend.Set("key", testEntity.Version()); }).Wait();
+            Shield.InTransaction(() => { _backend.Set("key", testEntity.Version()); });
 
             // also checking IDeletable impl...
             Thread.Sleep(500);
 
-            var read = Distributed.Run(() => _backend.TryGetVersioned<TestClass>("key")).Result;
+            var read = Shield.InTransaction(() => _backend.TryGetVersioned<TestClass>("key"));
             Assert.AreEqual(testEntity.Name, read.Value.Name);
 
             var next = read.NextVersion();
             next.Value = new TestClass { Id = 1, Name = "Version 2" };
-            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
+            Shield.InTransaction(() => { _backend.Set("key", next); });
 
-            read = Distributed.Run(() => _backend.TryGetVersioned<TestClass>("key")).Result;
+            read = Shield.InTransaction(() => _backend.TryGetVersioned<TestClass>("key"));
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
             next = read.NextVersion();
             next.Value.CanDelete = true;
-            Distributed.Run(() => { _backend.Set("key", next); }).Wait();
+            Shield.InTransaction(() => { _backend.Set("key", next); });
 
             Thread.Sleep(500);
 
-            Assert.IsFalse(Distributed.Run(() => _backend.TryGet("key", out Versioned<TestClass> _)).Result);
-            read = Distributed.Run(() => _backend.TryGetVersioned<TestClass>("key")).Result;
+            Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Versioned<TestClass> _)));
+            read = Shield.InTransaction(() => _backend.TryGetVersioned<TestClass>("key"));
             Assert.IsNull(read.Value);
             Assert.AreEqual(0, read.Version);
         }

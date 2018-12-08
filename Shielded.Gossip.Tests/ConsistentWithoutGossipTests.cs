@@ -16,8 +16,7 @@ namespace Shielded.Gossip.Tests
     {
         protected override ConsistentGossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
-            // basically, disabling the gossip.
-            configuration.GossipInterval = 1_000_000;
+            configuration.GossipInterval = Timeout.Infinite;
             return new ConsistentGossipBackend(transport, configuration);
         }
 
@@ -37,24 +36,22 @@ namespace Shielded.Gossip.Tests
             const int transactions = 50;
             const int fieldCount = 20;
 
-            // we use Run, and the gossip is disabled (see above), to check that the consistent
-            // backend correctly passes IBackend calls to the wrapped backend, when needed.
-            Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Run(() =>
+            // test non-consistent transactions to confirm the consistent backend correctly works with the wrapped backend.
+            ParallelEnumerable.Range(1, transactions).ForAll(i =>
+                Shield.InTransaction(() =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).Wait();
+                }));
 
             Thread.Sleep(500);
             OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Distributed.Run(() =>
-                    Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0))
-                .Result;
+            var read = Shield.InTransaction(() =>
+                Enumerable.Range(0, fieldCount).Sum(i => _backends[B].TryGet("key" + i, out CountVector v) ? v.Value : 0));
 
             Assert.AreEqual(transactions, read);
         }
@@ -64,7 +61,11 @@ namespace Shielded.Gossip.Tests
         {
             // we'll set a version on one server, but only locally. he will reject the transaction, but will
             // be in a minority, and the transaction will go through.
-            Distributed.RunLocal(() => { _backends[C].SetVc("key", "rejected".Clock(C)); });
+            Shield.InTransaction(() =>
+            {
+                _backends[C].DirectMailRestriction.Value = null;
+                _backends[C].SetVc("key", "rejected".Clock(C));
+            });
 
             Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
@@ -92,8 +93,16 @@ namespace Shielded.Gossip.Tests
         {
             // we'll set a version on two servers, but only locally. the A server will try to run the
             // transaction and B and C will reject it.
-            Distributed.RunLocal(() => { _backends[B].SetVc("key", "rejected".Clock(B)); });
-            Distributed.RunLocal(() => { _backends[C].SetVc("key", "rejected".Clock(B)); });
+            Shield.InTransaction(() =>
+            {
+                _backends[B].DirectMailRestriction.Value = null;
+                _backends[B].SetVc("key", "rejected".Clock(B));
+            });
+            Shield.InTransaction(() =>
+            {
+                _backends[C].DirectMailRestriction.Value = null;
+                _backends[C].SetVc("key", "rejected".Clock(B));
+            });
 
             Assert.IsFalse(Distributed.Consistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
