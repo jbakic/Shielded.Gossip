@@ -1,5 +1,4 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Shielded.Cluster;
 using Shielded.Standard;
 using System;
 using System.Collections.Concurrent;

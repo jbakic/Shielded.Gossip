@@ -1,19 +1,18 @@
-﻿using Shielded.Cluster;
-using Shielded.Standard;
+﻿using Shielded.Standard;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Shielded.Gossip
 {
     /// <summary>
     /// A backend based on <see cref="GossipBackend"/>, extending it with support for
-    /// consistent transactions. Also works in eventually consistent transactions.
-    /// Values should be CRDTs, implementing <see cref="IMergeable{T}"/>, or you can use the
-    /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT. If a type
-    /// implements <see cref="IDeletable"/>, it can be deleted from the storage.
+    /// consistent transactions. If used in ordinary <see cref="Shield"/> transactions, it
+    /// works the same as the GossipBackend - eventually consistent. To run consistent
+    /// transactions use <see cref="RunConsistent(Action, int)"/> or <see cref="Prepare(Action, int)"/>.
     /// </summary>
     /// <remarks><para>The transactions are very simple - for every Set operation you perform in your
     /// transaction lambda, we will make a transaction item only if it affects the storage.
@@ -28,10 +27,9 @@ namespace Shielded.Gossip
     /// of time in their change history this transaction checked out OK. This is important to
     /// note, because eventual changes get written in immediately, maybe before some transaction has
     /// fully completed, and can overwrite her effects before they even become visible.</para></remarks>
-    public class ConsistentGossipBackend : IGossipBackend, IBackend, IDisposable
+    public class ConsistentGossipBackend : IGossipBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
-        private readonly IBackend _owner;
 
         public ITransport Transport => _wrapped.Transport;
         public GossipConfiguration Configuration => _wrapped.Configuration;
@@ -42,11 +40,8 @@ namespace Shielded.Gossip
         /// </summary>
         /// <param name="transport">The message transport to use.</param>
         /// <param name="configuration">The configuration.</param>
-        /// <param name="owner">If not null, this backend will enlist the owner instead of itself.
-        /// The owner then controls when exactly our IBackend methods get called.</param>
-        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration, IBackend owner = null)
+        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
         {
-            _owner = owner ?? this;
             _wrapped = new GossipBackend(transport, configuration);
             Shield.InTransaction(() =>
                 _wrapped.Changed.Subscribe(_wrapped_Changed));
@@ -63,7 +58,7 @@ namespace Shielded.Gossip
 
         private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
-            if (!Distributed.IsConsistent)
+            if (!IsInConsistentTransaction)
                 return _wrapped.TryGet(key, out item);
             item = default;
             var local = _state.GetValueOrDefault()?.Changes;
@@ -101,7 +96,7 @@ namespace Shielded.Gossip
         public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
         {
             key = WrapPublicKey(key);
-            if (!Distributed.IsConsistent)
+            if (!IsInConsistentTransaction)
                 return _wrapped.Set(key, item);
             return SetInternal(key, item);
         }
@@ -131,14 +126,26 @@ namespace Shielded.Gossip
             return cmp;
         }
 
+        private struct PrepareResult
+        {
+            public readonly bool Success;
+            public readonly Task WaitBeforeRetry;
+
+            public PrepareResult(bool success, Task wait = null)
+            {
+                Success = success;
+                WaitBeforeRetry = wait;
+            }
+        }
+
         private class BackendState
         {
-            public ConsistentGossipBackend Self;
-            public string Initiator;
-            public string TransactionId;
-            public Dictionary<string, TransactionItem> Changes;
-            public TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>();
-            public TaskCompletionSource<object> Committer = new TaskCompletionSource<object>();
+            public readonly ConsistentGossipBackend Self;
+            public readonly string Initiator;
+            public readonly string TransactionId;
+            public readonly Dictionary<string, TransactionItem> Changes;
+            public readonly TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>();
+            public readonly TaskCompletionSource<object> Committer = new TaskCompletionSource<object>();
 
             public BackendState(string id, string initiator, ConsistentGossipBackend self, IEnumerable<TransactionItem> changes = null)
             {
@@ -162,7 +169,6 @@ namespace Shielded.Gossip
 
         private void Enlist()
         {
-            Distributed.EnlistBackend(_owner);
             if (!_state.HasValue)
             {
                 // a hack to keep the transaction open.
@@ -185,53 +191,131 @@ namespace Shielded.Gossip
         private readonly ShieldedDictNc<string, BackendState> _transactions = new ShieldedDictNc<string, BackendState>();
         private readonly ShieldedDictNc<string, BackendState> _fieldBlockers = new ShieldedDictNc<string, BackendState>();
 
-        async Task<PrepareResult> IBackend.Prepare(CommitContinuation cont)
-        {
-            BackendState ourState = null;
-            cont.InContext(() =>
-            {
-                ourState = _state.GetValueOrDefault();
-                if (ourState != null)
-                    Shield.SideEffect(null, () => ourState.Complete(false));
-            });
-            if (ourState == null)
-                return await ((IBackend)_wrapped).Prepare(cont);
-            if (ourState.Changes == null || !ourState.Changes.Any())
-                return new PrepareResult(true);
+        private readonly ShieldedLocal<bool> _isInConsistentTransaction = new ShieldedLocal<bool>();
 
-            var transaction = new TransactionInfo
+        /// <summary>
+        /// True if we're in a consistent transaction.
+        /// </summary>
+        public bool IsInConsistentTransaction => Shield.IsInTransaction && _isInConsistentTransaction.GetValueOrDefault();
+
+        /// <summary>
+        /// Prepares a distributed consistent transaction. The task will return a continuation with
+        /// which you may commit or rollback the transaction when you wish. If the task returns null,
+        /// then we failed to prepare the transaction in the given number of attempts. May only be
+        /// called outside of transactions!
+        /// </summary>
+        /// <param name="trans">The lambda to run as a distributed transaction.</param>
+        /// <param name="attempts">The number of attempts to make.</param>
+        /// <returns>Result of the task is a continuation for later committing/rolling back, or null if
+        /// preparation failed.</returns>
+        public async Task<CommitContinuation> Prepare(Action trans, int attempts = 1)
+        {
+            if (trans == null)
+                throw new ArgumentNullException("trans");
+            if (attempts <= 0)
+                throw new ArgumentOutOfRangeException();
+            if (Shield.IsInTransaction)
+                throw new InvalidOperationException("Prepare cannot be called within a transaction.");
+
+            CommitContinuation cont = null;
+            try
             {
-                Initiator = Transport.OwnId,
-                Items = ourState.Changes.Values.ToArray(),
-                State = new TransactionVector(
-                    new[] { new VectorItem<TransactionState>(Transport.OwnId, TransactionState.Prepared) }
-                    .Concat(Transport.Servers.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
-                    .ToArray()),
-            };
-            var id = ourState.TransactionId;
-            Shield.InTransaction(() => _transactions.Add(id, ourState));
-            async Task<PrepareResult> PreparationProcess()
-            {
-                var prepare = await Task.WhenAny(PrepareInternal(id, ourState, transaction), ourState.PrepareCompleter.Task);
-                if (!prepare.Result.Success)
-                    return prepare.Result;
-                Shield.InTransaction(() =>
+                while (attempts --> 0)
                 {
-                    if (_transactions.ContainsKey(id))
-                        _wrapped.Set(id, transaction);
-                });
-                return await ourState.PrepareCompleter.Task;
+                    BackendState ourState = null;
+                    cont = Shield.RunToCommit(Timeout.Infinite, () =>
+                    {
+                        _isInConsistentTransaction.Value = true;
+                        trans();
+
+                        ourState = _state.GetValueOrDefault();
+                        if (ourState != null)
+                            Shield.SideEffect(() => Commit(ourState), () => ourState.Complete(false));
+                    });
+
+                    if (ourState == null)
+                        return cont;
+                    var transaction = new TransactionInfo
+                    {
+                        Initiator = Transport.OwnId,
+                        Items = ourState.Changes.Values.ToArray(),
+                        State = new TransactionVector(
+                            new[] { new VectorItem<TransactionState>(Transport.OwnId, TransactionState.Prepared) }
+                            .Concat(Transport.Servers.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
+                            .ToArray()),
+                    };
+                    var id = ourState.TransactionId;
+                    Shield.InTransaction(() => _transactions.Add(id, ourState));
+                    async Task<PrepareResult> PreparationProcess()
+                    {
+                        var prepare = await Task.WhenAny(PrepareInternal(id, ourState, transaction), ourState.PrepareCompleter.Task);
+                        if (!prepare.Result.Success)
+                            return prepare.Result;
+                        Shield.InTransaction(() =>
+                        {
+                            if (_transactions.ContainsKey(id))
+                                _wrapped.Set(id, transaction);
+                        });
+                        return await ourState.PrepareCompleter.Task;
+                    }
+                    var prepTask = PreparationProcess();
+                    var resTask = await Task.WhenAny(prepTask, Task.Delay(GetNewTimeout()));
+                    if (resTask == prepTask && prepTask.Result.Success)
+                        return cont;
+
+                    cont.Rollback();
+                    ourState.Complete(false);
+                    SetFail(ourState.TransactionId);
+                    if (resTask == prepTask && prepTask.Result.WaitBeforeRetry != null)
+                        await prepTask.Result.WaitBeforeRetry;
+                }
+                return null;
             }
-            var prepTask = PreparationProcess();
-            var resTask = await Task.WhenAny(prepTask, Task.Delay(GetNewTimeout()));
-            if (resTask != prepTask || !prepTask.Result.Success)
+            catch
             {
-                ourState.Complete(false);
-                SetFail(ourState.TransactionId);
-                if (resTask != prepTask)
-                    return new PrepareResult(false, null);
+                if (cont != null && !cont.Completed)
+                    cont.TryRollback();
+                throw;
             }
-            return prepTask.Result;
+        }
+
+        /// <summary>
+        /// Runs a distributed consistent transaction. May be called from within another consistent
+        /// transaction, but not from a non-consistent one.
+        /// </summary>
+        /// <param name="trans">The lambda to run as a distributed transaction.</param>
+        /// <param name="attempts">The number of attempts to make.</param>
+        /// <returns>Result indicates if we succeeded in the given number of attempts.</returns>
+        public async Task<bool> RunConsistent(Action trans, int attempts = 1)
+        {
+            if (IsInConsistentTransaction)
+            {
+                trans();
+                return true;
+            }
+
+            using (var cont = await Prepare(trans, attempts))
+            {
+                if (cont == null)
+                    return false;
+                cont.TryCommit();
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Runs a distributed consistent transaction. May be called from within another consistent
+        /// transaction, but not from a non-consistent one.
+        /// </summary>
+        /// <param name="trans">The lambda to run as a distributed transaction.</param>
+        /// <param name="attempts">The number of attempts to make.</param>
+        /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
+        /// the result that the lambda returned.</returns>
+        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 1)
+        {
+            T res = default;
+            var success = await RunConsistent(() => { res = trans(); }, attempts);
+            return (success, res);
         }
 
         int GetNewTimeout()
@@ -453,27 +537,26 @@ namespace Shielded.Gossip
 
         private void OnStateChange(string id, TransactionInfo current)
         {
+            if ((current.State[Transport.OwnId] & TransactionState.Done) != 0)
+                return;
             _transactions.TryGetValue(id, out var ourState);
-            var meNotDone = (current.State[Transport.OwnId] & TransactionState.Done) == 0;
             if (current.State.IsFail || current.State.IsRejected)
             {
-                if (meNotDone)
-                    Shield.SideEffect(() =>
-                    {
-                        SetFail(id);
-                        if (ourState != null)
-                            ourState.Complete(false);
-                    });
+                Shield.SideEffect(() =>
+                {
+                    SetFail(id);
+                    if (ourState != null)
+                        ourState.Complete(false);
+                });
             }
             else if (current.State.IsSuccess)
             {
-                if (meNotDone)
-                    Shield.SideEffect(() =>
-                    {
-                        ApplyAndSetSuccess(id);
-                        if (ourState != null)
-                            ourState.Complete(true);
-                    });
+                Shield.SideEffect(() =>
+                {
+                    ApplyAndSetSuccess(id);
+                    if (ourState != null)
+                        ourState.Complete(true);
+                });
             }
             else if (current.State.IsPrepared &&
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
@@ -491,26 +574,16 @@ namespace Shielded.Gossip
             _wrapped.ApplyItems(current.Items);
         }
 
-        Task IBackend.Commit(CommitContinuation cont)
+        private void Commit(BackendState ourState) => Shield.InTransaction(() =>
         {
-            BackendState ourState = null;
-            cont.InContext(() => ourState = _state.GetValueOrDefault());
-            if (ourState == null)
-                return Task.FromResult<object>(null);
-            Shield.InTransaction(() =>
-            {
-                var id = ourState.TransactionId;
-                if (!_wrapped.TryGet(id, out TransactionInfo current) ||
-                    (current.State[Transport.OwnId] & TransactionState.Done) != 0)
-                    throw new ApplicationException("Critical error - unexpected commit failure.");
-                Apply(current);
-                _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-                Shield.SideEffect(() => ourState.Complete(true));
-            });
-            return Task.FromResult<object>(null);
-        }
-
-        void IBackend.Rollback() { }
+            var id = ourState.TransactionId;
+            if (!_wrapped.TryGet(id, out TransactionInfo current) ||
+                (current.State[Transport.OwnId] & TransactionState.Done) != 0)
+                throw new ApplicationException("Critical error - unexpected commit failure.");
+            Apply(current);
+            _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
+            Shield.SideEffect(() => ourState.Complete(true));
+        });
 
         public void Dispose()
         {

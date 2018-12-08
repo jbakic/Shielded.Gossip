@@ -19,7 +19,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Shielded.Cluster\Shielded.Cluster.csproj" />
     <ProjectReference Include="..\Shielded.Standard\Shielded.Standard.csproj" />
   </ItemGroup>
 

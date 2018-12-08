@@ -1,9 +1,4 @@
-﻿using Shielded.Cluster;
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Shielded.Gossip
+﻿namespace Shielded.Gossip
 {
     /// <summary>
     /// The basic common interface provided by both gossip backends.

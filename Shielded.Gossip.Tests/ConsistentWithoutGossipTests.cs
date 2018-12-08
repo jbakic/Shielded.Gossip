@@ -1,5 +1,4 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Shielded.Cluster;
 using Shielded.Standard;
 using System;
 using System.Collections.Generic;
@@ -67,12 +66,12 @@ namespace Shielded.Gossip.Tests
                 _backends[C].SetVc("key", "rejected".Clock(C));
             });
 
-            Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Distributed.Consistent(() => _backends[B].TryGetClocked<string>("key"))
+            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"))
                 .Result.Value.Single();
 
             Assert.AreEqual("accepted", read.Value);
@@ -82,7 +81,7 @@ namespace Shielded.Gossip.Tests
             // it makes sense. the only way he could have accepted that "rejected" version is
             // if someone wrote it in non-consistently. and consistent transactions never block
             // non-consistent ones.
-            var readCMulti = Distributed.Consistent(() => _backends[C].TryGetClocked<string>("key"))
+            var readCMulti = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"))
                 .Result.Value;
 
             Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readCMulti.MergedClock);
@@ -104,13 +103,13 @@ namespace Shielded.Gossip.Tests
                 _backends[C].SetVc("key", "rejected".Clock(B));
             });
 
-            Assert.IsFalse(Distributed.Consistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
+            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
             Thread.Sleep(100);
             CheckProtocols();
 
             // NB we still cannot read the value on A, because gossip is disabled.
-            var read = Distributed.Consistent(() => _backends[B].TryGetClocked<string>("key"))
+            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"))
                 .Result.Value.Single();
 
             Assert.AreEqual("rejected", read.Value);

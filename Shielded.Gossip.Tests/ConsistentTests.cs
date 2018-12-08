@@ -1,5 +1,4 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Shielded.Cluster;
 using Shielded.Standard;
 using System;
 using System.Collections.Generic;
@@ -40,12 +39,12 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(Distributed.Consistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
 
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Distributed.Consistent(() => _backends[B].TryGetClocked<TestClass>("key"))
+            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
                 .Result.Value.Single();
 
             Assert.AreEqual(testEntity.Id, read.Value.Id);
@@ -65,11 +64,12 @@ namespace Shielded.Gossip.Tests
             }
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Consistent(100, () =>
+            {
+                var backend = _backends.Values.Skip(i % 3).First();
+                var id = (i % fieldCount);
+                var key = "key" + id;
+                return backend.RunConsistent(() =>
                 {
-                    var backend = _backends.Values.Skip(i % 3).First();
-                    var id = (i % fieldCount);
-                    var key = "key" + id;
                     var newVal = backend.TryGetClocked<TestClass>(key)
                         .SingleOrDefault()
                         .NextVersion(backend.Transport.OwnId);
@@ -77,7 +77,8 @@ namespace Shielded.Gossip.Tests
                         newVal.Value = new TestClass { Id = id };
                     newVal.Value.Counter = newVal.Value.Counter + 1;
                     backend.SetVc(key, newVal);
-                }))).Result;
+                }, 100);
+            })).Result;
             var expected = bools.Count(b => b);
 
             Thread.Sleep(300);
@@ -97,12 +98,12 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            Distributed.Consistent(() => { _backends[A].Set("key", testEntity.Version()); }).Wait();
+            _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version()); }).Wait();
 
             Thread.Sleep(100);
 
             Versioned<TestClass> read = default, next = default;
-            Distributed.Consistent(() =>
+            _backends[B].RunConsistent(() =>
             {
                 read = _backends[B].TryGetVersioned<TestClass>("key");
                 Assert.AreEqual(testEntity.Name, read.Value.Name);

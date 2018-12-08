@@ -1,5 +1,4 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Shielded.Cluster;
 using Shielded.Standard;
 using System;
 using System.Collections.Generic;
@@ -46,17 +45,19 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Consistent(100, () =>
+            {
+                var backend = _backends.Values.Skip(i % 3).First();
+                var id = (i % fieldCount);
+                var key = "key" + id;
+                return backend.RunConsistent(() =>
                 {
-                    var backend = _backends.Values.Skip(i % 3).First();
-                    var id = (i % fieldCount);
-                    var key = "key" + id;
                     var newVal = backend.TryGetMultiple<TestClass>(key).SingleOrDefault() ??
                         new TestClass { Id = id, Clock = new VectorClock() };
                     newVal.Value = newVal.Value + 1;
                     newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
                     backend.SetVc(key, newVal);
-                }))).Result;
+                }, 100);
+            })).Result;
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
 
@@ -89,18 +90,20 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
-                Distributed.Consistent(100, () =>
+            {
+                // updates only on A and B
+                var backend = _backends.Skip(i % 2).First().Value;
+                var id = (i % fieldCount);
+                var key = "key" + id;
+                return backend.RunConsistent(() =>
                 {
-                    // updates only on A and B
-                    var backend = _backends.Skip(i % 2).First().Value;
-                    var id = (i % fieldCount);
-                    var key = "key" + id;
                     var newVal = backend.TryGetMultiple<TestClass>(key).SingleOrDefault() ??
                         new TestClass { Id = id, Clock = new VectorClock() };
                     newVal.Value = newVal.Value + 1;
                     newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
                     backend.SetVc(key, newVal);
-                }))).Result;
+                }, 100);
+            })).Result;
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
 
