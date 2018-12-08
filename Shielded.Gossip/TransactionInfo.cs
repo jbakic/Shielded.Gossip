@@ -69,11 +69,11 @@ namespace Shielded.Gossip
         public TransactionVector State { get; set; }
 
         /// <summary>
-        /// True if all servers have reached the Success state or the Fail state. It is safe to
+        /// True if a majority of servers has reached the Success or the Fail state. It is safe to
         /// delete a done transaction, cause even if later revived, it is idempotent - a re-execution
         /// will simply fail with no effects, and the transaction will become deletable again.
         /// </summary>
-        public bool CanDelete => State.Items.All(s => (s.Value & TransactionState.Done) != 0);
+        public bool CanDelete => State.Items.Count(s => (s.Value & TransactionState.Done) != 0) > (State.Items.Length / 2);
 
         public VersionHash GetVersionHash() => (State ?? new TransactionVector()).GetVersionHash();
 
