@@ -108,6 +108,10 @@ namespace Shielded.Gossip
 
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException("key");
+            if (val == null)
+                throw new ArgumentNullException("val");
             Enlist();
             var cmp = VectorRelationship.Greater;
             if (TryGetInternal(key, out TItem oldVal))
@@ -123,7 +127,7 @@ namespace Shielded.Gossip
             var expected = local.TryGetValue(key, out var oldItem) ? oldItem.Expected & cmp : cmp;
             local[key] = new TransactionItem { Key = key, Value = val, Expected = expected };
 
-            OnChanged(key, val);
+            OnChanged(key, oldVal, val);
             return cmp;
         }
 
@@ -167,9 +171,9 @@ namespace Shielded.Gossip
             }
         }
 
-        private void OnChanged(string key, object newVal)
+        private void OnChanged(string key, object oldVal, object newVal)
         {
-            var ev = new ChangedEventArgs(key, newVal);
+            var ev = new ChangedEventArgs(key, oldVal, newVal);
             Changed.Raise(this, ev);
         }
 
@@ -358,15 +362,14 @@ namespace Shielded.Gossip
             }
             else if (e.Key.StartsWith(PublicPfx))
             {
-                OnChanged(e.Key.Substring(PublicPfx.Length), e.NewValue);
+                OnChanged(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue);
             }
         }
 
         private void OnTransactionChanged(string id, TransactionInfo newVal)
         {
-            if (newVal == null)
+            if (!newVal.State.Items.Any(i => StringComparer.InvariantCultureIgnoreCase.Equals(i.ServerId, Transport.OwnId)))
                 return;
-
             if (newVal.State[Transport.OwnId] != TransactionState.None || newVal.State.IsDone || _transactions.ContainsKey(id))
             {
                 OnStateChange(id, newVal);
@@ -452,23 +455,25 @@ namespace Shielded.Gossip
         {
             _transactions.TryGetValue(id, out var ourState);
             var meNotDone = (current.State[Transport.OwnId] & TransactionState.Done) == 0;
-            if ((current.State.IsFail || current.State.IsRejected) && meNotDone)
+            if (current.State.IsFail || current.State.IsRejected)
             {
-                Shield.SideEffect(() =>
-                {
-                    SetFail(id);
-                    if (ourState != null)
-                        ourState.Complete(false);
-                });
+                if (meNotDone)
+                    Shield.SideEffect(() =>
+                    {
+                        SetFail(id);
+                        if (ourState != null)
+                            ourState.Complete(false);
+                    });
             }
-            else if (current.State.IsSuccess && meNotDone)
+            else if (current.State.IsSuccess)
             {
-                Shield.SideEffect(() =>
-                {
-                    ApplyAndSetSuccess(id);
-                    if (ourState != null)
-                        ourState.Complete(true);
-                });
+                if (meNotDone)
+                    Shield.SideEffect(() =>
+                    {
+                        ApplyAndSetSuccess(id);
+                        if (ourState != null)
+                            ourState.Complete(true);
+                    });
             }
             else if (current.State.IsPrepared &&
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))

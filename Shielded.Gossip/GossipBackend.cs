@@ -21,7 +21,7 @@ namespace Shielded.Gossip
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
-        private readonly Shielded<ulong> _databaseHash = new Shielded<ulong>();
+        private readonly Shielded<VersionHash> _databaseHash = new Shielded<VersionHash>();
         private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
         private readonly ShieldedLocal<HashSet<string>> _keysToMail = new ShieldedLocal<HashSet<string>>();
 
@@ -42,7 +42,7 @@ namespace Shielded.Gossip
         /// <summary>
         /// Constructor.
         /// </summary>
-        /// <param name="transport">The message transport to use.</param>
+        /// <param name="transport">The message transport to use. The backend will dispose it when it gets disposed.</param>
         /// <param name="configuration">The configuration.</param>
         public GossipBackend(ITransport transport, GossipConfiguration configuration)
         {
@@ -198,7 +198,7 @@ namespace Shielded.Gossip
                 Transport.Send(server, new NewGossip
                 {
                     From = Transport.OwnId,
-                    DatabaseHash = _databaseHash,
+                    DatabaseHash = _databaseHash.Value,
                     Items = toSend,
                     WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
                     WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
@@ -216,7 +216,7 @@ namespace Shielded.Gossip
                     break;
 
                 case NewGossip pkg:
-                    if (pkg.DatabaseHash != _databaseHash)
+                    if (pkg.DatabaseHash != _databaseHash.Value)
                         ApplyItems(pkg.Items);
                     SendReply(pkg);
                     break;
@@ -455,7 +455,9 @@ namespace Shielded.Gossip
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException();
+                throw new ArgumentNullException("key");
+            if (val == null)
+                throw new ArgumentNullException("val");
             if (_changeLock.GetValueOrDefault())
                 throw new InvalidOperationException("Changes are blocked at this time.");
             if (_local.TryGetValue(key, out MessageItem oldItem))
@@ -464,10 +466,12 @@ namespace Shielded.Gossip
                 var cmp = val.VectorCompare(oldVal);
                 if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
-                val = oldVal.MergeWith(val);
-
                 // we support this only for safety - a CanDelete should never accept any changes, nor switch to !CanDelete.
                 var oldDeletable = oldVal is IDeletable oldDel && oldDel.CanDelete;
+                var oldHash = oldDeletable ? 0 : GetHash(key, oldVal);
+                // in case someone screws up the MergeWith impl, we call it after extracting the critical info above.
+                val = oldVal.MergeWith(val);
+
                 var deletable = val is IDeletable del && del.CanDelete;
                 _local[key] = new MessageItem
                 {
@@ -475,10 +479,10 @@ namespace Shielded.Gossip
                     Value = val,
                     Deletable = deletable,
                 };
-                var hash = (oldDeletable ? 0 : GetHash(key, oldVal)) ^ (deletable ? 0 : GetHash(key, val));
-                _databaseHash.Commute((ref ulong h) => h ^= hash);
+                var hash = oldHash ^ (deletable ? 0 : GetHash(key, val));
+                _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, val);
+                OnChanged(key, oldVal, val);
                 return cmp;
             }
             else
@@ -491,16 +495,16 @@ namespace Shielded.Gossip
                     Value = val
                 };
                 var hash = GetHash(key, val);
-                _databaseHash.Commute((ref ulong h) => h ^= hash);
+                _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, val);
+                OnChanged(key, null, val);
                 return VectorRelationship.Greater;
             }
         }
 
-        private void OnChanged(string key, object newVal)
+        private void OnChanged(string key, object oldVal, object newVal)
         {
-            var ev = new ChangedEventArgs(key, newVal);
+            var ev = new ChangedEventArgs(key, oldVal, newVal);
             Changed.Raise(this, ev);
         }
 

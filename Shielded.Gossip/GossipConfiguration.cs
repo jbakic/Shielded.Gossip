@@ -12,7 +12,7 @@
         /// </summary>
         GossipSupressed,
         /// <summary>
-        /// Push changes by starting gossip with servers on every transaction.
+        /// Push changes by starting gossip with servers.
         /// </summary>
         StartGossip,
         /// <summary>

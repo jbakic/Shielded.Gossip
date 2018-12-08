@@ -35,7 +35,7 @@ namespace Shielded.Gossip
         public static implicit operator TransactionVector((string, TransactionState) t) => new TransactionVector(t.Item1, t.Item2);
 
         protected override TransactionState Merge(TransactionState left, TransactionState right) =>
-            left == TransactionState.Fail || right == TransactionState.Fail ? TransactionState.Fail : (left | right);
+            right > left ? right : left;
 
         public bool IsPrepared => Items.Count(i => (i.Value & TransactionState.Prepared) != 0) > (Items.Length / 2);
         public bool IsRejected => Items.Count(i => (i.Value & TransactionState.Rejected) != 0) > (Items.Length / 2);

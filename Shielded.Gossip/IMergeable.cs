@@ -28,7 +28,7 @@
     {
         /// <summary>
         /// Merge the value with another, returning the result. Must be idempotent, commutative
-        /// and associative.
+        /// and associative. Should not change the current object!
         /// </summary>
         TOut MergeWith(TIn other);
 
