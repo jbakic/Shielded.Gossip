@@ -31,7 +31,7 @@ namespace Shielded.Gossip
         public readonly GossipConfiguration Configuration;
 
         /// <summary>
-        /// If set inside a distributed transaction, restricts the direct mail message sending
+        /// If set inside a transaction, restricts the direct mail message sending
         /// to only this server. Affects only the current transaction. If set to null, no
         /// direct mail will be sent.
         /// </summary>

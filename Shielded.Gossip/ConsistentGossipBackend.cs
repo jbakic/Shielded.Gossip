@@ -205,10 +205,10 @@ namespace Shielded.Gossip
         /// called outside of transactions!
         /// </summary>
         /// <param name="trans">The lambda to run as a distributed transaction.</param>
-        /// <param name="attempts">The number of attempts to make.</param>
+        /// <param name="attempts">The number of attempts to make, default 10.</param>
         /// <returns>Result of the task is a continuation for later committing/rolling back, or null if
         /// preparation failed.</returns>
-        public async Task<CommitContinuation> Prepare(Action trans, int attempts = 1)
+        public async Task<CommitContinuation> Prepare(Action trans, int attempts = 10)
         {
             if (trans == null)
                 throw new ArgumentNullException("trans");
@@ -284,9 +284,10 @@ namespace Shielded.Gossip
         /// transaction, but not from a non-consistent one.
         /// </summary>
         /// <param name="trans">The lambda to run as a distributed transaction.</param>
-        /// <param name="attempts">The number of attempts to make.</param>
+        /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
+        /// transaction, this argument is ignored.</param>
         /// <returns>Result indicates if we succeeded in the given number of attempts.</returns>
-        public async Task<bool> RunConsistent(Action trans, int attempts = 1)
+        public async Task<bool> RunConsistent(Action trans, int attempts = 10)
         {
             if (IsInConsistentTransaction)
             {
