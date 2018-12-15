@@ -316,7 +316,7 @@ namespace Shielded.Gossip
         {
             T res = default;
             var success = await RunConsistent(() => { res = trans(); }, attempts);
-            return (success, res);
+            return (success, success ? res : default);
         }
 
         int GetNewTimeout()
