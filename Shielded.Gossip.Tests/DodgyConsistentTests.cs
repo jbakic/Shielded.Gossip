@@ -61,18 +61,15 @@ namespace Shielded.Gossip.Tests
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
 
-            Thread.Sleep(1000);
-            OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Shield.InTransaction(() =>
+            var (success, value) = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value));
+                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value),
+                100).Result;
 
-            if (read < expected)
-                Assert.Inconclusive($"Servers did not achieve sync within given time. Expected {expected}, read {read}");
-            else if (read > expected)
-                Assert.Fail();
+            Assert.IsTrue(success);
+            Assert.AreEqual(expected, value);
         }
 
         [TestMethod]
@@ -107,18 +104,15 @@ namespace Shielded.Gossip.Tests
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
 
-            Thread.Sleep(3000);
-            OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Shield.InTransaction(() =>
+            var (success, value) = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value));
+                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value),
+                100).Result;
 
-            if (read < expected)
-                Assert.Inconclusive($"Servers did not achieve sync within given time. Expected {expected}, read {read}");
-            else if (read > expected)
-                Assert.Fail();
+            Assert.IsTrue(success);
+            Assert.AreEqual(expected, value);
         }
     }
 }

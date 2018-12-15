@@ -41,12 +41,13 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
 
-            Thread.Sleep(100);
             CheckProtocols();
 
-            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
-                .Result.Value.Single();
+            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
+                .Result;
 
+            Assert.IsTrue(success);
+            var read = multi.Single();
             Assert.AreEqual(testEntity.Id, read.Value.Id);
             Assert.AreEqual(testEntity.Name, read.Value.Name);
             Assert.AreEqual((A, 1), read.Clock);
@@ -81,16 +82,16 @@ namespace Shielded.Gossip.Tests
             })).Result;
             var expected = bools.Count(b => b);
 
-            Thread.Sleep(300);
-            OnMessage(null, "Done waiting.");
             CheckProtocols();
 
-            var read = Shield.InTransaction(() =>
+            var read = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter));
+                    _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter),
+                100).Result;
 
-            Assert.AreEqual(expected, read);
-            Assert.AreEqual(transactions, read);
+            Assert.IsTrue(read.Success);
+            Assert.AreEqual(expected, read.Value);
+            Assert.AreEqual(transactions, read.Value);
         }
 
         [TestMethod]
@@ -100,12 +101,16 @@ namespace Shielded.Gossip.Tests
 
             _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version()); }).Wait();
 
-            Thread.Sleep(100);
-
             Versioned<TestClass> read = default, next = default;
             _backends[B].RunConsistent(() =>
             {
                 read = _backends[B].TryGetVersioned<TestClass>("key");
+                // if the commit is not yet fully complete, we won't see anything here. since the code
+                // later here depends on reading it, we'll just busy-wait by rolling back. NB that
+                // if we had continued, this transaction would get retried anyway because of that
+                // incomplete commit.
+                if (read.Value == null)
+                    Shield.Rollback();
                 Assert.AreEqual(testEntity.Name, read.Value.Name);
 
                 next = read.NextVersion();
@@ -113,9 +118,7 @@ namespace Shielded.Gossip.Tests
                 _backends[B].Set("key", next);
             }).Wait();
 
-            Thread.Sleep(100);
-
-            read = Shield.InTransaction(() => _backends[C].TryGetVersioned<TestClass>("key"));
+            read = _backends[C].RunConsistent(() => _backends[C].TryGetVersioned<TestClass>("key")).Result.Value;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
         }
     }

@@ -68,10 +68,9 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
-            Thread.Sleep(100);
             CheckProtocols();
 
-            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"))
+            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"), 100)
                 .Result.Value.Single();
 
             Assert.AreEqual("accepted", read.Value);
@@ -81,7 +80,7 @@ namespace Shielded.Gossip.Tests
             // it makes sense. the only way he could have accepted that "rejected" version is
             // if someone wrote it in non-consistently. and consistent transactions never block
             // non-consistent ones.
-            var readCMulti = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"))
+            var readCMulti = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"), 100)
                 .Result.Value;
 
             Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readCMulti.MergedClock);
@@ -105,7 +104,6 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
-            Thread.Sleep(100);
             CheckProtocols();
 
             // NB we still cannot read the value on A, because gossip is disabled.

@@ -427,6 +427,11 @@ namespace Shielded.Gossip
             return true;
         }
 
+        internal MessageItem GetItem(string key)
+        {
+            return _local.TryGetValue(key, out MessageItem i) ? i : null;
+        }
+
         private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
         {
             return FNV1a64.Hash(
@@ -518,5 +523,16 @@ namespace Shielded.Gossip
             _deletableTimer.Dispose();
             _preCommit.Dispose();
         }
+
+        /// <summary>
+        /// An enumerable of keys read or written into by the current transaction. Includes
+        /// keys that did not have a value.
+        /// </summary>
+        public IEnumerable<string> Reads => _local.Reads;
+
+        /// <summary>
+        /// An enumerable of keys written into by the current transaction.
+        /// </summary>
+        public IEnumerable<string> Changes => _local.Changes;
     }
 }

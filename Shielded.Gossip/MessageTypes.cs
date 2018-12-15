@@ -75,8 +75,8 @@ namespace Shielded.Gossip
         [IgnoreDataMember]
         public object Value
         {
-            get => Serializer.Deserialize(Data);
-            set => Data = Serializer.Serialize(value);
+            get => Data == null ? null : Serializer.Deserialize(Data);
+            set => Data = value == null ? null : Serializer.Serialize(value);
         }
 
         [IgnoreDataMember]
