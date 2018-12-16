@@ -35,7 +35,8 @@ namespace Shielded.Gossip
             new Vc<T> { Value = val, Clock = clock ?? new VectorClock() };
 
         /// <summary>
-        /// Wraps the value in a <see cref="Vc{T}"/> with a new vector clock.
+        /// Wraps the value in a <see cref="Vc{T}"/> with a new vector clock. To produce new
+        /// versions for something that already has a clock, use <see cref="Vc{T}.NextVersion(string)"/>.
         /// </summary>
         public static Vc<T> Clock<T>(this T val, string ownServerId, int init = 1) =>
             new Vc<T> { Value = val, Clock = (ownServerId, init) };

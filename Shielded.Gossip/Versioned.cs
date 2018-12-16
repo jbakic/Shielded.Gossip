@@ -32,7 +32,7 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Produces a new wrapper with the same value, but with the version moved up by one.
+        /// Produces a new wrapper with the same (by ref!) value, but with the version moved up by one.
         /// </summary>
         public Versioned<T> NextVersion() =>
             new Versioned<T> { Value = Value, Version = checked(Version + 1) };
@@ -44,9 +44,9 @@ namespace Shielded.Gossip
         /// A wrapper which adds an int Version to any type, making it work with the gossip backends.
         /// Useful as a minimal wrapper for keys which get changed in consistent transactions only.
         /// In non-consistent transactions it can lose writes or lead to servers holding different
-        /// values for one key. 
+        /// values for one key.
         /// </summary>
-        public static Versioned<T> Version<T>(this T val, int version = 1) =>
+        public static Versioned<T> Version<T>(this T val, int version) =>
             new Versioned<T> { Value = val, Version = version };
 
         /// <summary>

@@ -217,7 +217,7 @@ namespace Shielded.Gossip.Tests
             // Versioned is not safe to use with a non-consistent backend. we'll just test the basics.
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            Shield.InTransaction(() => { _backend.Set("key", testEntity.Version()); });
+            Shield.InTransaction(() => { _backend.Set("key", testEntity.Version(1)); });
 
             // also checking IDeletable impl...
             Thread.Sleep(500);

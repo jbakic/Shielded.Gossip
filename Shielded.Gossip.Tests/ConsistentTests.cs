@@ -99,7 +99,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "New entity" };
 
-            _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version()); }).Wait();
+            _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version(1)); }).Wait();
 
             Versioned<TestClass> read = default, next = default;
             var (success, readName) = _backends[B].RunConsistent(() =>
