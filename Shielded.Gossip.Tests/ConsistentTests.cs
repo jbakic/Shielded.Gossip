@@ -102,21 +102,18 @@ namespace Shielded.Gossip.Tests
             _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version()); }).Wait();
 
             Versioned<TestClass> read = default, next = default;
-            _backends[B].RunConsistent(() =>
+            var (success, readName) = _backends[B].RunConsistent(() =>
             {
                 read = _backends[B].TryGetVersioned<TestClass>("key");
-                // if the commit is not yet fully complete, we won't see anything here. since the code
-                // later here depends on reading it, we'll just busy-wait by rolling back. NB that
-                // if we had continued, this transaction would get retried anyway because of that
-                // incomplete commit.
-                if (read.Value == null)
-                    Shield.Rollback();
-                Assert.AreEqual(testEntity.Name, read.Value.Name);
+                var res = read.Value.Name;
 
                 next = read.NextVersion();
                 next.Value = new TestClass { Id = 1, Name = "Version 2" };
                 _backends[B].Set("key", next);
-            }).Wait();
+                return res;
+            }).Result;
+            Assert.IsTrue(success);
+            Assert.AreEqual(testEntity.Name, readName);
 
             read = _backends[C].RunConsistent(() => _backends[C].TryGetVersioned<TestClass>("key")).Result.Value;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
