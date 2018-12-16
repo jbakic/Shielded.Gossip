@@ -147,14 +147,17 @@ namespace Shielded.Gossip
                 AllKeys = allKeys;
             }
 
-            public void Complete(bool res)
+            public void Complete(bool res) => Shield.InTransaction(() =>
             {
-                if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
+                if (!Self._transactions.Remove(TransactionId))
                     return;
                 Self.UnlockFields(this);
-                PrepareCompleter.TrySetResult(new PrepareResult(res));
-                Committer.TrySetResult(null);
-            }
+                Shield.SideEffect(() =>
+                {
+                    PrepareCompleter.TrySetResult(new PrepareResult(res));
+                    Committer.TrySetResult(null);
+                });
+            });
         }
 
         private readonly ShieldedLocal<Dictionary<string, MessageItem>> _currentState = new ShieldedLocal<Dictionary<string, MessageItem>>();
@@ -351,6 +354,8 @@ namespace Shielded.Gossip
                 {
                     Task waitFor = Shield.InTransaction(() =>
                     {
+                        if (!_transactions.ContainsKey(ourState.TransactionId))
+                            return prepareTask;
                         var tasks = keys.Select(key =>
                         {
                             if (!_fieldBlockers.TryGetValue(key, out var someState))
@@ -368,8 +373,6 @@ namespace Shielded.Gossip
                             _fieldBlockers[key] = ourState;
                         return null;
                     });
-                    if (prepareTask.IsCompleted)
-                        return prepareTask.Result;
                     if (waitFor == null)
                     {
                         success = true;
