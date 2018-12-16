@@ -81,15 +81,18 @@ namespace Shielded.Gossip
                     Monitor.TryEnter(lockObj, ref lockTaken);
                     if (!lockTaken)
                         return;
-                    Shield.InTransaction(() =>
-                    {
-                        var toRemove = _freshIndex.Range(0, lastFreshness)
+                    var (toRemove, freshness) = Shield.InTransaction(() =>
+                        (_freshIndex.Range(0, lastFreshness)
                             .Where(kvp => _local[kvp.Value].Deletable)
                             .Select(kvp => kvp.Value)
-                            .ToArray();
-                        lastFreshness.Value = GetMaxFreshness();
+                            .ToArray(),
+                        GetMaxFreshness()));
+                    Shield.InTransaction(() =>
+                    {
                         foreach (var key in toRemove)
-                            _local.Remove(key);
+                            if (_local.TryGetValue(key, out var mi) && mi.Freshness <= lastFreshness)
+                                _local.Remove(key);
+                        lastFreshness.Value = freshness;
                     });
                 }
                 finally

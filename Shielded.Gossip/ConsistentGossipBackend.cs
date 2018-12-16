@@ -151,8 +151,8 @@ namespace Shielded.Gossip
             {
                 if (!Shield.InTransaction(() => Self._transactions.Remove(TransactionId)))
                     return;
-                PrepareCompleter.TrySetResult(new PrepareResult(res));
                 Self.UnlockFields(this);
+                PrepareCompleter.TrySetResult(new PrepareResult(res));
                 Committer.TrySetResult(null);
             }
         }
@@ -265,7 +265,6 @@ namespace Shielded.Gossip
                         return cont;
 
                     cont.Rollback();
-                    ourState.Complete(false);
                     SetFail(ourState.TransactionId);
                     if (resTask == prepTask && prepTask.Result.WaitBeforeRetry != null)
                         await prepTask.Result.WaitBeforeRetry;
