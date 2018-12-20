@@ -109,28 +109,30 @@ namespace Shielded.Gossip
             return Join(other, Compare).Aggregate(VectorRelationship.Equal, (a, b) => a | b);
         }
 
-        public IEnumerable<TRes> Join<TRes>(TVec rightVec, Func<T, T, TRes> resultSelector)
+        public IEnumerable<TRes> Join<TRVec, TR, TRes>(VectorBase<TRVec, TR> rightVec, Func<T, TR, TRes> resultSelector)
+            where TRVec : VectorBase<TRVec, TR>, new()
         {
             return Join(rightVec, (_, l, r) => resultSelector(l, r));
         }
 
-        public IEnumerable<TRes> Join<TRes>(TVec rightVec, Func<string, T, T, TRes> resultSelector)
+        public IEnumerable<TRes> Join<TRVec, TR, TRes>(VectorBase<TRVec, TR> rightVec, Func<string, T, TR, TRes> resultSelector)
+            where TRVec : VectorBase<TRVec, TR>, new()
         {
             var lefts = Items ?? Enumerable.Empty<VectorItem<T>>();
-            var rights = rightVec?.Items ?? Enumerable.Empty<VectorItem<T>>();
+            var rights = rightVec?.Items ?? Enumerable.Empty<VectorItem<TR>>();
 
-            foreach (var grp in lefts.Select(i => (left: true, item: i))
-                .Concat(rights.Select(i => (left: false, item: i)))
-                .GroupBy(t => t.item.ServerId, StringComparer.InvariantCultureIgnoreCase))
+            foreach (var grp in lefts.Select(i => (left: true, server: i.ServerId, leftval: i.Value, rightval: default(TR)))
+                .Concat(rights.Select(i => (left: false, server: i.ServerId, leftval: default(T), rightval: i.Value)))
+                .GroupBy(t => t.server, StringComparer.InvariantCultureIgnoreCase))
             {
                 // note that this validates that the same server ID is not present multiple times in either.
-                var left = grp.SingleOrDefault(t => t.left).item;
-                var right = grp.SingleOrDefault(t => !t.left).item;
-                var serverId = left.ServerId ?? right.ServerId;
+                var leftval = grp.SingleOrDefault(t => t.left).leftval;
+                var rightval = grp.SingleOrDefault(t => !t.left).rightval;
+                var serverId = grp.Key;
                 if (string.IsNullOrWhiteSpace(serverId))
                     throw new InvalidOperationException("Vector server IDs may not be empty.");
 
-                yield return resultSelector(serverId, left.Value, right.Value);
+                yield return resultSelector(serverId, leftval, rightval);
             }
         }
 
