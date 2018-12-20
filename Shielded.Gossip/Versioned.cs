@@ -21,7 +21,7 @@ namespace Shielded.Gossip
 
         public bool CanDelete => Value is IDeletable del && del.CanDelete;
 
-        public VersionHash GetVersionHash() => FNV1a64.Hash(BitConverter.GetBytes(Version));
+        public VersionHash GetVersionHash() => VersionHash.Hash(BitConverter.GetBytes(Version));
 
         public Versioned<T> MergeWith(Versioned<T> other) => Version >= other.Version ? this : other;
 

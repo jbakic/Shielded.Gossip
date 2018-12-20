@@ -84,8 +84,8 @@ namespace Shielded.Gossip
         public VersionHash GetVersionHash()
         {
             if (Items == null || Items.Length == 0)
-                return 0;
-            return FNV1a64.Hash(YieldFields());
+                return default;
+            return VersionHash.Hash(YieldFields());
         }
 
         public override string ToString()

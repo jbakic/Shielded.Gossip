@@ -437,9 +437,9 @@ namespace Shielded.Gossip
 
         private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
         {
-            return FNV1a64.Hash(
+            return VersionHash.Hash(
                 Encoding.UTF8.GetBytes(key),
-                BitConverter.GetBytes(i.GetVersionHash()));
+                i.GetVersionHash().GetBytes());
         }
 
         /// <summary>
@@ -474,7 +474,7 @@ namespace Shielded.Gossip
                     return cmp;
                 // we support this only for safety - a CanDelete should never accept any changes, nor switch to !CanDelete.
                 var oldDeletable = oldVal is IDeletable oldDel && oldDel.CanDelete;
-                var oldHash = oldDeletable ? 0 : GetHash(key, oldVal);
+                var oldHash = oldDeletable ? default : GetHash(key, oldVal);
                 // in case someone screws up the MergeWith impl, we call it after extracting the critical info above.
                 val = oldVal.MergeWith(val);
 
@@ -485,7 +485,7 @@ namespace Shielded.Gossip
                     Value = val,
                     Deletable = deletable,
                 };
-                var hash = oldHash ^ (deletable ? 0 : GetHash(key, val));
+                var hash = oldHash ^ (deletable ? default : GetHash(key, val));
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
                 OnChanged(key, oldVal, val);

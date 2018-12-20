@@ -4,27 +4,16 @@ using System.Linq;
 namespace Shielded.Gossip
 {
     /// <summary>
-    /// Type of the hash used by the <see cref="GossipBackend"/>.
-    /// </summary>
-    public struct VersionHash
-    {
-        public ulong Value;
-
-        public static implicit operator ulong(VersionHash v) => v.Value;
-        public static implicit operator VersionHash(ulong v) => new VersionHash { Value = v };
-    }
-
-    /// <summary>
     /// FNV1a hash implementation, 64 bits.
     /// </summary>
     public static class FNV1a64
     {
-        public static VersionHash Hash(IEnumerable<byte[]> fields)
+        public static ulong Hash(IEnumerable<byte[]> fields)
         {
             return Hash(fields.ToArray());
         }
 
-        public static VersionHash Hash(params byte[][] fields)
+        public static ulong Hash(params byte[][] fields)
         {
             unchecked
             {

@@ -8,7 +8,7 @@
     {
         /// <summary>
         /// Calculates the version hash. Must guarantee same result on all servers.
-        /// You can use <see cref="FNV1a64"/> when implementing this.
+        /// You can use <see cref="VersionHash.Hash(byte[][])"/> static methods when implementing this.
         /// </summary>
         VersionHash GetVersionHash();
     }

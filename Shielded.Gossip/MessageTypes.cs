@@ -16,7 +16,7 @@ namespace Shielded.Gossip
         [DataMember]
         public string From { get; set; }
         [DataMember]
-        public ulong DatabaseHash { get; set; }
+        public VersionHash DatabaseHash { get; set; }
         [DataMember]
         public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
     }
