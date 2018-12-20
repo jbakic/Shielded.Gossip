@@ -25,7 +25,6 @@ namespace Shielded.Gossip
 
         public ITransport Transport => _wrapped.Transport;
         public GossipConfiguration Configuration => _wrapped.Configuration;
-        public ShieldedLocal<string> DirectMailRestriction => _wrapped.DirectMailRestriction;
 
         /// <summary>
         /// Constructor.
@@ -477,7 +476,7 @@ namespace Shielded.Gossip
             }
             if (StringComparer.InvariantCultureIgnoreCase.Equals(newVal.Initiator, Transport.OwnId))
             {
-                Shield.SideEffect(() => SetFail(id));
+                SetFail(id);
                 return;
             }
             var ourState = new BackendState(id, newVal.Initiator, this, newVal.AllKeys.ToArray());
@@ -513,7 +512,6 @@ namespace Shielded.Gossip
                 current.State[Transport.OwnId] != TransactionState.None ||
                 current.State.IsDone)
                 return false;
-            _wrapped.DirectMailRestriction.Value = current.Initiator;
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
             return true;
         });
@@ -524,7 +522,6 @@ namespace Shielded.Gossip
                 current.State[Transport.OwnId] != TransactionState.None ||
                 current.State.IsDone)
                 return false;
-            _wrapped.DirectMailRestriction.Value = current.Initiator;
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Rejected));
             return true;
         });
@@ -534,8 +531,6 @@ namespace Shielded.Gossip
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 return;
-            if (!StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
-                _wrapped.DirectMailRestriction.Value = null;
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Fail));
         });
 
@@ -544,8 +539,6 @@ namespace Shielded.Gossip
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 return false;
-            if (!StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
-                _wrapped.DirectMailRestriction.Value = null;
             Apply(current);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
             return true;
@@ -558,21 +551,15 @@ namespace Shielded.Gossip
             _transactions.TryGetValue(id, out var ourState);
             if (current.State.IsFail || current.State.IsRejected)
             {
-                Shield.SideEffect(() =>
-                {
-                    SetFail(id);
-                    if (ourState != null)
-                        ourState.Complete(false);
-                });
+                SetFail(id);
+                if (ourState != null)
+                    Shield.SideEffect(() => ourState.Complete(false));
             }
             else if (current.State.IsSuccess)
             {
-                Shield.SideEffect(() =>
-                {
-                    ApplyAndSetSuccess(id);
-                    if (ourState != null)
-                        ourState.Complete(true);
-                });
+                ApplyAndSetSuccess(id);
+                if (ourState != null)
+                    Shield.SideEffect(() => ourState.Complete(true));
             }
             else if (current.State.IsPrepared &&
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
@@ -581,7 +568,7 @@ namespace Shielded.Gossip
                     Shield.SideEffect(() =>
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
                 else
-                    Shield.SideEffect(() => SetFail(id));
+                    SetFail(id);
             }
         }
 

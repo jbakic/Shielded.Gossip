@@ -31,13 +31,6 @@ namespace Shielded.Gossip
         public readonly GossipConfiguration Configuration;
 
         /// <summary>
-        /// If set inside a transaction, restricts the direct mail message sending
-        /// to only this server. Affects only the current transaction. If set to null, no
-        /// direct mail will be sent.
-        /// </summary>
-        public readonly ShieldedLocal<string> DirectMailRestriction = new ShieldedLocal<string>();
-
-        /// <summary>
         /// Constructor.
         /// </summary>
         /// <param name="transport">The message transport to use. The backend will dispose it when it gets disposed.</param>
@@ -58,13 +51,11 @@ namespace Shielded.Gossip
                 SyncIndexes();
                 if (_keysToMail.HasValue && _keysToMail.Value.Count > 0)
                 {
-                    var hasRestriction = DirectMailRestriction.HasValue;
-                    var restriction = hasRestriction ? DirectMailRestriction.Value : null;
                     var items = _keysToMail.Value
                         .Select(key => _local.TryGetValue(key, out var mi) ? mi : null)
                         .Where(mi => mi != null)
                         .ToArray();
-                    Shield.SideEffect(() => DoDirectMail(items, hasRestriction, restriction));
+                    Shield.SideEffect(() => DoDirectMail(items));
                 }
             });
         }
@@ -130,17 +121,12 @@ namespace Shielded.Gossip
             return _freshIndex.Descending.FirstOrDefault().Key;
         }
 
-        private void DoDirectMail(MessageItem[] items, bool hasRestriction, string restriction)
+        private void DoDirectMail(MessageItem[] items)
         {
             if (Configuration.DirectMail == DirectMailType.Off || items.Length == 0)
                 return;
             var package = new DirectMail { Items = items };
-            if (hasRestriction)
-            {
-                if (!string.IsNullOrWhiteSpace(restriction))
-                    SendMail(restriction, package);
-            }
-            else if (Configuration.DirectMail == DirectMailType.Always)
+            if (Configuration.DirectMail == DirectMailType.Always)
             {
                 Transport.Broadcast(package);
             }

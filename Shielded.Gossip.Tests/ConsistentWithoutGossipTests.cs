@@ -60,11 +60,12 @@ namespace Shielded.Gossip.Tests
         {
             // we'll set a version on one server, but only locally. he will reject the transaction, but will
             // be in a minority, and the transaction will go through.
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[C].DirectMailRestriction.Value = null;
                 _backends[C].SetVc("key", "rejected".Clock(C));
             });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
             Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
@@ -91,16 +92,18 @@ namespace Shielded.Gossip.Tests
         {
             // we'll set a version on two servers, but only locally. the A server will try to run the
             // transaction and B and C will reject it.
+            _backends[B].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[B].DirectMailRestriction.Value = null;
                 _backends[B].SetVc("key", "rejected".Clock(B));
             });
+            _backends[B].Configuration.DirectMail = DirectMailType.GossipSupressed;
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[C].DirectMailRestriction.Value = null;
                 _backends[C].SetVc("key", "rejected".Clock(B));
             });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
             Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
 
