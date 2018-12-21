@@ -54,6 +54,37 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void Consistent_SingleNode()
+        {
+            Shield.InTransaction(() =>
+            {
+                ((TcpTransport)_backends[A].Transport).ServerIPs.Clear();
+                ((TcpTransport)_backends[B].Transport).ServerIPs.Remove(A);
+                ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
+            });
+
+            var testEntity = new TestClass { Id = 1, Name = "One" };
+
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
+
+            CheckProtocols();
+
+            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"), 100)
+                .Result;
+
+            Assert.IsTrue(success);
+            var read = multi.Single();
+            Assert.AreEqual(testEntity.Id, read.Value.Id);
+            Assert.AreEqual(testEntity.Name, read.Value.Name);
+            Assert.AreEqual((A, 1), read.Clock);
+
+            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
+                .Result;
+            Assert.IsTrue(success);
+            Assert.IsFalse(multi.Any());
+        }
+
+        [TestMethod]
         public void Consistent_Race()
         {
             const int transactions = 500;

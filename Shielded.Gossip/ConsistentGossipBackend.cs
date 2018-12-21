@@ -108,6 +108,8 @@ namespace Shielded.Gossip
                 if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
                 val = oldVal.MergeWith(val);
+                if (val == null)
+                    throw new ApplicationException("IMergeable.MergeWith should not return null for non-null arguments.");
             }
 
             var local = _currentState.Value;

@@ -224,7 +224,7 @@ namespace Shielded.Gossip
         {
             if (items == null)
                 return;
-            foreach (var item in items)
+            foreach (var item in items.Where(i => i.Data != null))
             {
                 if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
                     continue;
@@ -463,6 +463,8 @@ namespace Shielded.Gossip
                 var oldHash = oldDeletable ? default : GetHash(key, oldVal);
                 // in case someone screws up the MergeWith impl, we call it after extracting the critical info above.
                 val = oldVal.MergeWith(val);
+                if (val == null)
+                    throw new ApplicationException("IMergeable.MergeWith should not return null for non-null arguments.");
 
                 var deletable = val is IDeletable del && del.CanDelete;
                 _local[key] = new MessageItem
