@@ -85,6 +85,31 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void Consistent_ConflictIsGreaterToo()
+        {
+            var testEntity = new TestClass { Id = 1, Name = "One" };
+
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
+
+            var testEntity2 = new TestClass { Id = 1, Name = "One, Bs version" };
+
+            // even though this is a conflicting edit, the merged data - a Multiple which will contain both
+            // versions of the data - gets actually saved and transmitted, and it is Greater than both versions.
+            var (success, comp) = _backends[B].RunConsistent(() => _backends[B].SetVc("key", testEntity2.Clock(B))).Result;
+
+            CheckProtocols();
+
+            Assert.IsTrue(success);
+            Assert.AreEqual(VectorRelationship.Conflict, comp);
+
+            var saved = _backends[B].TryGetClocked<TestClass>("key");
+
+            Assert.AreEqual(VectorRelationship.Greater, saved.VectorCompare(testEntity.Clock(A)));
+            Assert.AreEqual(VectorRelationship.Greater, saved.VectorCompare(testEntity2.Clock(B)));
+            Assert.AreEqual((VectorClock)(A, 1) | (B, 1), saved.MergedClock);
+        }
+
+        [TestMethod]
         public void Consistent_PrepareAndRollback()
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
@@ -166,7 +191,7 @@ namespace Shielded.Gossip.Tests
             var (success, readName) = _backends[B].RunConsistent(() =>
             {
                 read = _backends[B].TryGetVersioned<TestClass>("key");
-                var res = read.Value.Name;
+                var res = read.Value?.Name;
 
                 next = read.NextVersion();
                 next.Value = new TestClass { Id = 1, Name = "Version 2" };
