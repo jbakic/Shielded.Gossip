@@ -34,6 +34,7 @@ namespace Shielded.Gossip.Tests
         [TestInitialize]
         public void Init()
         {
+            RandomizePorts();
             _backends = new Dictionary<string, TBackend>(_addresses.Select(kvp =>
             {
                 var transport = CreateTransport(kvp.Key, kvp.Value, _addresses.Where(inner => inner.Key != kvp.Key));
@@ -44,6 +45,16 @@ namespace Shielded.Gossip.Tests
                     GossipInterval = 250,
                 }));
             }), StringComparer.InvariantCultureIgnoreCase);
+        }
+
+        private void RandomizePorts()
+        {
+            var rnd = new Random();
+            foreach (var server in _addresses.Keys.ToArray())
+            {
+                var port = 2000 + rnd.Next(1000);
+                _addresses[server] = new IPEndPoint(IPAddress.Loopback, port);
+            }
         }
 
         [TestCleanup]
