@@ -85,6 +85,34 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void Consistent_PrepareAndRollback()
+        {
+            var testEntity = new TestClass { Id = 1, Name = "One" };
+
+            var cont = _backends[A].Prepare(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result;
+            Assert.IsNotNull(cont);
+            Assert.IsFalse(cont.Completed);
+
+            Assert.IsTrue(cont.TryRollback());
+            Assert.IsTrue(cont.Completed);
+            Assert.IsFalse(cont.Committed);
+
+            CheckProtocols();
+
+            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"), 100)
+                .Result;
+
+            Assert.IsTrue(success);
+            Assert.IsFalse(multi.Any());
+
+            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
+                .Result;
+
+            Assert.IsTrue(success);
+            Assert.IsFalse(multi.Any());
+        }
+
+        [TestMethod]
         public void Consistent_Race()
         {
             const int transactions = 500;

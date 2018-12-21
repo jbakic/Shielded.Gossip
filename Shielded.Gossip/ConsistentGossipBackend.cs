@@ -243,7 +243,8 @@ namespace Shielded.Gossip
                             };
                             ourState = new BackendState(WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString()),
                                 Transport.OwnId, this, transaction.AllKeys.ToArray());
-                            Shield.SideEffect(() => Commit(ourState), () => ourState.Complete(false));
+
+                            Shield.SideEffect(() => Commit(ourState), () => Fail(ourState));
                         }
                     });
 
@@ -269,7 +270,6 @@ namespace Shielded.Gossip
                         return cont;
 
                     cont.Rollback();
-                    SetFail(ourState.TransactionId);
                     if (resTask == prepTask && prepTask.Result.WaitBeforeRetry != null)
                         await prepTask.Result.WaitBeforeRetry;
                 }
@@ -555,13 +555,13 @@ namespace Shielded.Gossip
             {
                 SetFail(id);
                 if (ourState != null)
-                    Shield.SideEffect(() => ourState.Complete(false));
+                    ourState.Complete(false);
             }
             else if (current.State.IsSuccess)
             {
                 ApplyAndSetSuccess(id);
                 if (ourState != null)
-                    Shield.SideEffect(() => ourState.Complete(true));
+                    ourState.Complete(true);
             }
             else if (current.State.IsPrepared &&
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
@@ -590,6 +590,12 @@ namespace Shielded.Gossip
             Apply(current);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
             Shield.SideEffect(() => ourState.Complete(true));
+        });
+
+        private void Fail(BackendState ourState) => Shield.InTransaction(() =>
+        {
+            SetFail(ourState.TransactionId);
+            ourState.Complete(false);
         });
 
         public void Dispose()
