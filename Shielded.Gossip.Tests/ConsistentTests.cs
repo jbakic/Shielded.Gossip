@@ -89,15 +89,15 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            var cont = _backends[A].Prepare(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result;
-            Assert.IsNotNull(cont);
-            Assert.IsFalse(cont.Completed);
+            using (var cont = _backends[A].Prepare(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result)
+            {
+                Assert.IsNotNull(cont);
+                Assert.IsFalse(cont.Completed);
 
-            Assert.IsTrue(cont.TryRollback());
-            Assert.IsTrue(cont.Completed);
-            Assert.IsFalse(cont.Committed);
-
-            CheckProtocols();
+                Assert.IsTrue(cont.TryRollback());
+                Assert.IsTrue(cont.Completed);
+                Assert.IsFalse(cont.Committed);
+            }
 
             var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"), 100)
                 .Result;
@@ -107,6 +107,8 @@ namespace Shielded.Gossip.Tests
 
             (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
                 .Result;
+
+            CheckProtocols();
 
             Assert.IsTrue(success);
             Assert.IsFalse(multi.Any());
