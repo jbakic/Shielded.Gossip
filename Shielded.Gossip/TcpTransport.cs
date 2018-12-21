@@ -146,8 +146,8 @@ namespace Shielded.Gossip
 
         public void Send(string server, object msg)
         {
-            var ip = ServerIPs[server];
-            Send(ip, Serializer.Serialize(msg));
+            if (ServerIPs.TryGetValue(server, out var ip))
+                Send(ip, Serializer.Serialize(msg));
         }
 
         private async void Send(IPEndPoint ip, byte[] bytes)
