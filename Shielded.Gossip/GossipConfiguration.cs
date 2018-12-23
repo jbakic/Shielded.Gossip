@@ -35,17 +35,13 @@
         public int GossipInterval { get; set; } = 1000;
 
         /// <summary>
-        /// Number of transactions to send in the opening message when beginning a new gossip exchange.
-        /// May be 0.
+        /// Number of key/value pairs to send in the opening message when beginning a new gossip exchange.
+        /// Must be > 0. The message sizes grow exponentially after that, doubling in size, until they
+        /// reach the <see cref="AntiEntropyCutoff"/>. Messages will contain only whole transactions,
+        /// so the actual size will not be exactly this number. Reply messages will also include all new
+        /// changes, so they may grow even faster than 2x per reply if the system is under load.
         /// </summary>
-        public int AntiEntropyPushPackages { get; set; } = 5;
-
-        /// <summary>
-        /// Number of transactions to add to each gossip reply. Every new reply will include all
-        /// new writes since the last one, and this many older transactions from the reverse time index.
-        /// This must be > 0.
-        /// </summary>
-        public int AntiEntropyReplyPackages { get; set; } = 20;
+        public int AntiEntropyInitialTransactions { get; set; } = 10;
 
         /// <summary>
         /// Limit on the size, in key/value pairs, of any message. A message may grow bigger than this

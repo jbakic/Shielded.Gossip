@@ -79,14 +79,8 @@ namespace Shielded.Gossip
             set => Data = value == null ? null : Serializer.Serialize(value);
         }
 
-        [IgnoreDataMember]
-        public long Freshness
-        {
-            get => _freshness;
-            set => _freshness = value;
-        }
-        [NonSerialized]
-        private long _freshness;
+        [DataMember]
+        public long Freshness { get; set; }
 
         [IgnoreDataMember]
         public bool Deletable

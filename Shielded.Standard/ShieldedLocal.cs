@@ -46,7 +46,7 @@ namespace Shielded.Standard
             }
         }
 
-        public T GetValueOrDefault() => HasValue ? Value : default;
+        public T GetValueOrDefault(T defaultValue = default) => HasValue ? Value : defaultValue;
 
         /// <summary>
         /// Returns the current <see cref="Value"/>.

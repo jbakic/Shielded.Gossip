@@ -579,7 +579,8 @@ namespace Shielded.Gossip
         {
             _wrapped.ApplyItems(
                 (current.Reads ?? Enumerable.Empty<MessageItem>())
-                .Concat(current.Changes ?? Enumerable.Empty<MessageItem>()));
+                .Concat(current.Changes ?? Enumerable.Empty<MessageItem>())
+                .ToArray(), false);
         }
 
         private void Commit(BackendState ourState) => Shield.InTransaction(() =>

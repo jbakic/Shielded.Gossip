@@ -105,8 +105,8 @@ namespace Shielded.Gossip
 
                 if (_local.TryGetValue(key, out var newItem))
                 {
-                    newItem.Freshness = newFresh;
-                    _freshIndex.Add(newFresh, key);
+                    newItem.Freshness += newFresh;
+                    _freshIndex.Add(newItem.Freshness, key);
                 }
             }
         }
@@ -179,7 +179,7 @@ namespace Shielded.Gossip
             if (IsGossipActive(server))
                 return false;
             _lastSendTime[server] = DateTimeOffset.UtcNow;
-            var toSend = GetPackage(Configuration.AntiEntropyPushPackages, null, null, out var _);
+            var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, null, null, out var _);
             Shield.SideEffect(() =>
             {
                 Transport.Send(server, new NewGossip
@@ -199,12 +199,12 @@ namespace Shielded.Gossip
             switch (msg)
             {
                 case DirectMail trans:
-                    ApplyItems(trans.Items);
+                    ApplyItems(trans.Items, true);
                     break;
 
                 case NewGossip pkg:
                     if (pkg.DatabaseHash != _databaseHash.Value)
-                        ApplyItems(pkg.Items);
+                        ApplyItems(pkg.Items, true);
                     SendReply(pkg);
                     break;
 
@@ -217,20 +217,37 @@ namespace Shielded.Gossip
         private readonly ApplyMethods _applyMethods = new ApplyMethods(typeof(GossipBackend)
             .GetMethod("SetInternal", BindingFlags.Instance | BindingFlags.NonPublic));
 
+        private static readonly ShieldedLocal<long> _freshnessContext = new ShieldedLocal<long>();
+
         /// <summary>
-        /// Applies the given items internally, does not cause any direct mail.
+        /// Applies the given items internally, does not cause any direct mail. Applies them
+        /// starting from the last, and if they have different Freshness values, they will be
+        /// indexed in this backend with different values too. It is assumed they are sorted
+        /// by descending freshness.
         /// </summary>
-        public void ApplyItems(IEnumerable<MessageItem> items) => Shield.InTransaction(() =>
+        internal void ApplyItems(MessageItem[] items, bool respectFreshness) => Shield.InTransaction(() =>
         {
-            if (items == null)
+            if (items == null || items.Length == 0)
                 return;
-            foreach (var item in items.Where(i => i.Data != null))
+            long prevItemFreshness = items[items.Length - 1].Freshness;
+            bool freshnessUtilized = false;
+            for (var i = items.Length - 1; i >= 0; i--)
             {
+                var item = items[i];
+                if (item.Data == null)
+                    continue;
                 if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
                     continue;
+                if (respectFreshness && prevItemFreshness != item.Freshness)
+                {
+                    prevItemFreshness = item.Freshness;
+                    if (freshnessUtilized)
+                        _freshnessContext.Value = _freshnessContext.GetValueOrDefault() + 1;
+                    freshnessUtilized = false;
+                }
                 var obj = item.Value;
                 var method = _applyMethods.Get(this, obj.GetType());
-                method(item.Key, obj);
+                freshnessUtilized |= (method(item.Key, obj) & VectorRelationship.Greater) != 0;
             }
         });
 
@@ -278,7 +295,9 @@ namespace Shielded.Gossip
                 return;
             }
 
-            var toSend = GetPackage(Configuration.AntiEntropyReplyPackages,
+            var packageSize = hisNews == null || hisNews.Items == null ? Configuration.AntiEntropyInitialTransactions :
+                Math.Max(Configuration.AntiEntropyInitialTransactions, hisNews.Items.Length * 2);
+            var toSend = GetPackage(packageSize,
                 hisReply?.LastWindowStart, hisReply?.LastWindowEnd, out var connectedWithLast);
 
             if (toSend.Length == 0)
@@ -352,10 +371,13 @@ namespace Shielded.Gossip
 
         private MessageItem[] GetPackage(int packageSize, long? lastWindowStart, long? lastWindowEnd, out bool connectedWithLast)
         {
+            if (packageSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(packageSize), "The size of an anti-entropy package must be greater than zero.");
             int cutoff = Configuration.AntiEntropyCutoff;
             long? prevFreshness = null;
             var connected = false;
             long? connectedAt = null;
+            int taken = 0;
             var toSend = YieldItems(lastWindowStart, lastWindowEnd)
                 .TakeWhile(item =>
                 {
@@ -367,18 +389,18 @@ namespace Shielded.Gossip
                     }
                     if (prevFreshness == null || prevFreshness.Value != item.Freshness)
                     {
-                        if (cutoff <= 0 || (connected && --packageSize < 0))
+                        if (taken >= cutoff || (connected && taken >= packageSize))
                             return false;
                         prevFreshness = item.Freshness;
                     }
-                    --cutoff;
+                    taken++;
                     return true;
                 })
                 .Where(i => i != null)
                 .ToArray();
             // if crossed the cutoff, remove the last package, except if it is the only one.
             // this forces any package > cutoff to be sent alone.
-            if (cutoff < 0 && toSend[0].Freshness != toSend[toSend.Length - 1].Freshness)
+            if (taken > cutoff && toSend[0].Freshness != toSend[toSend.Length - 1].Freshness)
             {
                 var removeFreshness = toSend[toSend.Length - 1].Freshness;
                 if (removeFreshness == connectedAt)
@@ -473,6 +495,7 @@ namespace Shielded.Gossip
                     Key = key,
                     Value = val,
                     Deletable = deletable,
+                    Freshness = _freshnessContext.GetValueOrDefault(),
                 };
                 var hash = oldHash ^ (deletable ? default : GetHash(key, val));
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
@@ -487,12 +510,13 @@ namespace Shielded.Gossip
                 _local[key] = new MessageItem
                 {
                     Key = key,
-                    Value = val
+                    Value = val,
+                    Freshness = _freshnessContext.GetValueOrDefault(),
                 };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, null, val);
+                OnChanged(key, default(TItem), val);
                 return VectorRelationship.Greater;
             }
         }
