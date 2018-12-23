@@ -589,7 +589,7 @@ namespace Shielded.Gossip
                 throw new ApplicationException("Critical error - unexpected commit failure.");
             Apply(current);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-            Shield.SideEffect(() => ourState.Complete(true));
+            ourState.Complete(true);
         });
 
         private void Fail(BackendState ourState) => Shield.InTransaction(() =>
