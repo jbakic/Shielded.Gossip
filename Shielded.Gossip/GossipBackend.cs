@@ -19,6 +19,7 @@ namespace Shielded.Gossip
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
+        private readonly Shielded<long> _lastFreshness = new Shielded<long>();
         private readonly Shielded<VersionHash> _databaseHash = new Shielded<VersionHash>();
         private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
         private readonly ShieldedLocal<HashSet<string>> _keysToMail = new ShieldedLocal<HashSet<string>>();
@@ -77,7 +78,7 @@ namespace Shielded.Gossip
                             .Where(kvp => _local[kvp.Value].Deletable)
                             .Select(kvp => kvp.Value)
                             .ToArray(),
-                        GetMaxFreshness()));
+                        GetLastFreshness()));
                     Shield.InTransaction(() =>
                     {
                         foreach (var key in toRemove)
@@ -96,7 +97,8 @@ namespace Shielded.Gossip
 
         private void SyncIndexes()
         {
-            var newFresh = GetNextFreshness();
+            _lastFreshness.Modify((ref long l) => l++);
+            var newFresh = _lastFreshness.Value;
             foreach (var key in _local.Changes)
             {
                 var oldItem = Shield.ReadOldState(() => _local.TryGetValue(key, out MessageItem o) ? o : null);
@@ -111,14 +113,9 @@ namespace Shielded.Gossip
             }
         }
 
-        private long GetNextFreshness()
+        private long GetLastFreshness()
         {
-            return checked(GetMaxFreshness() + 1);
-        }
-
-        private long GetMaxFreshness()
-        {
-            return _freshIndex.Descending.FirstOrDefault().Key;
+            return _lastFreshness.Value;
         }
 
         private void DoDirectMail(MessageItem[] items)
@@ -325,7 +322,7 @@ namespace Shielded.Gossip
             if (connectedWithLast && hisReply?.LastWindowStart != null && hisReply.LastWindowStart < windowStart)
                 windowStart = hisReply.LastWindowStart.Value;
 
-            var windowEnd = GetMaxFreshness();
+            var windowEnd = GetLastFreshness();
 
             SendReply(server, new GossipReply
             {
