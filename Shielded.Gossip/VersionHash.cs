@@ -7,7 +7,7 @@ namespace Shielded.Gossip
 {
     /// <summary>
     /// Type of the hash used by the <see cref="GossipBackend"/>. It contains a 32bit and a
-    /// 64bit FNV1a hash, which greatly reduces the risk of a hash conflict.
+    /// 64bit FNV1a hash.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public struct VersionHash : IEquatable<VersionHash>
