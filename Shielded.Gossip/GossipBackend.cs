@@ -435,6 +435,7 @@ namespace Shielded.Gossip
         /// only if the result of comparison is Greater or Conflict.
         /// </summary>
         public VectorRelationship Set<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+            => Shield.InTransaction(() =>
         {
             var res = SetInternal(key, val);
             if ((res & VectorRelationship.Greater) == 0)
@@ -442,7 +443,7 @@ namespace Shielded.Gossip
             var set = _keysToMail.HasValue ? _keysToMail.Value : (_keysToMail.Value = new HashSet<string>());
             set.Add(key);
             return res;
-        }
+        });
 
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {

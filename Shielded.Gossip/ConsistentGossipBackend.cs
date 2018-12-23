@@ -88,6 +88,7 @@ namespace Shielded.Gossip
         /// that it's Greater on all servers.
         /// </summary>
         public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
+            => Shield.InTransaction(() =>
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException("key");
@@ -97,7 +98,7 @@ namespace Shielded.Gossip
             if (!IsInConsistentTransaction)
                 return _wrapped.Set(key, item);
             return SetInternal(key, item);
-        }
+        });
 
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
         {
