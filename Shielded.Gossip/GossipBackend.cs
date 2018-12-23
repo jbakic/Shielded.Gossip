@@ -97,8 +97,8 @@ namespace Shielded.Gossip
 
         private void SyncIndexes()
         {
-            _lastFreshness.Modify((ref long l) => l++);
-            var newFresh = _lastFreshness.Value;
+            var newFresh = _lastFreshness.Value + 1;
+            long maxFreshOffset = 0;
             foreach (var key in _local.Changes)
             {
                 var oldItem = Shield.ReadOldState(() => _local.TryGetValue(key, out MessageItem o) ? o : null);
@@ -107,10 +107,13 @@ namespace Shielded.Gossip
 
                 if (_local.TryGetValue(key, out var newItem))
                 {
+                    if (newItem.Freshness > maxFreshOffset)
+                        maxFreshOffset = newItem.Freshness;
                     newItem.Freshness += newFresh;
                     _freshIndex.Add(newItem.Freshness, key);
                 }
             }
+            _lastFreshness.Modify((ref long l) => l += maxFreshOffset + 1);
         }
 
         private long GetLastFreshness()
