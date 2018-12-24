@@ -178,19 +178,17 @@ namespace Shielded.Gossip
         {
             if (IsGossipActive(server))
                 return false;
-            _lastSendTime[server] = DateTimeOffset.UtcNow;
             var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, null, null, out var _);
-            Shield.SideEffect(() =>
+            var msg = new NewGossip
             {
-                Transport.Send(server, new NewGossip
-                {
-                    From = Transport.OwnId,
-                    DatabaseHash = _databaseHash.Value,
-                    Items = toSend,
-                    WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
-                    WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
-                });
-            });
+                From = Transport.OwnId,
+                DatabaseHash = _databaseHash.Value,
+                Items = toSend.Length == 0 ? null : toSend,
+                WindowStart = toSend.Length == 0 ? (long?)null : toSend[toSend.Length - 1].Freshness,
+                WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
+            };
+            _lastSendTime[server] = msg.Time;
+            Shield.SideEffect(() => Transport.Send(server, msg));
             return true;
         });
 
