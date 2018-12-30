@@ -7,6 +7,13 @@
     {
         bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>;
         VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>;
+
+        /// <summary>
+        /// A non-update, which ensures that when your local transaction is transmitted to other servers, this
+        /// field will be transmitted as well, even if you did not change its value.
+        /// </summary>
+        /// <param name="key">The key to touch.</param>
+        void Touch(string key);
     }
 
     public static class GossipBackendExtensions

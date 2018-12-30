@@ -71,20 +71,22 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"), 100)
-                .Result.Value.Single();
-
-            Assert.AreEqual("accepted", read.Value);
-            Assert.AreEqual((A, 1), read.Clock);
-
-            // on the C server the field will have two versions! seems like he's stubborn, but
-            // it makes sense. the only way he could have accepted that "rejected" version is
-            // if someone wrote it in non-consistently. and consistent transactions never block
-            // non-consistent ones.
-            var readCMulti = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"), 100)
+            // the field will now have two versions on all servers, due to the C server transmitting his version
+            // as part of rejecting the transaction.
+            var readA = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"), 100)
                 .Result.Value;
 
-            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readCMulti.MergedClock);
+            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readA.MergedClock);
+
+            var readB = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"), 100)
+                .Result.Value;
+
+            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readB.MergedClock);
+
+            var readC = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"), 100)
+                .Result.Value;
+
+            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readC.MergedClock);
         }
 
         [TestMethod]
@@ -105,16 +107,60 @@ namespace Shielded.Gossip.Tests
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
-            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
+            // we can make only one attempt, because the B/C version will be sent to us as part of their rejection of
+            // the transaction. after that, this would succeed, but with SetVc result == Conflict.
+            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }, 1).Result);
 
             CheckProtocols();
 
-            // NB we still cannot read the value on A, because gossip is disabled.
-            var read = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"))
+            // the A server should now see the other version.
+            var read = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"))
                 .Result.Value.Single();
 
             Assert.AreEqual("rejected", read.Value);
             Assert.AreEqual((B, 1), read.Clock);
+        }
+
+        [TestMethod]
+        public void ConsistentWithoutGossip_TouchInconsistent()
+        {
+            // we will test if the Touch method will transmit the value known only to C to other servers.
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[C].SetVc("key", "rejected".Clock(C));
+            });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
+
+            Shield.InTransaction(() => _backends[C].Touch("key"));
+
+            Thread.Sleep(100);
+            CheckProtocols();
+
+            var read = _backends[A].TryGetClocked<string>("key");
+
+            Assert.AreEqual("rejected", read.Single().Value);
+        }
+
+        [TestMethod]
+        public void ConsistentWithoutGossip_TouchConsistent()
+        {
+            // in a consistent transaction, touch is just like a read, and should be transmitted with the transaction.
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[C].SetVc("key", "rejected".Clock(C));
+            });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
+
+            Assert.IsTrue(_backends[C].RunConsistent(() => _backends[C].Touch("key")).Result);
+
+            CheckProtocols();
+
+            var (success, read) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"), 100).Result;
+
+            Assert.IsTrue(success);
+            Assert.AreEqual("rejected", read.Single().Value);
         }
     }
 }

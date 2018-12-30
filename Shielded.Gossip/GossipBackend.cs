@@ -449,6 +449,28 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
+        /// A non-update, which ensures that when your local transaction is transmitted to other servers, this
+        /// field will be transmitted as well, even if you did not change its value.
+        /// </summary>
+        /// <param name="key">The key to touch.</param>
+        public void Touch(string key) => Shield.InTransaction(() =>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException("key");
+            if (!_local.TryGetValue(key, out var mi))
+                return;
+            _local[key] = new MessageItem
+            {
+                Key = key,
+                Data = mi.Data,
+                Deletable = mi.Deletable,
+                Freshness = _freshnessContext.GetValueOrDefault()
+            };
+            var set = _keysToMail.HasValue ? _keysToMail.Value : (_keysToMail.Value = new HashSet<string>());
+            set.Add(key);
+        });
+
+        /// <summary>
         /// Sets the given value under the given key, merging it with any already existing value
         /// there. Returns the relationship of the new to the old value, or
         /// <see cref="VectorRelationship.Greater"/> if there is no old value. The storage gets affected
