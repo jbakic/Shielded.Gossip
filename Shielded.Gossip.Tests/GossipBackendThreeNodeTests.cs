@@ -50,9 +50,14 @@ namespace Shielded.Gossip.Tests
         private void RandomizePorts()
         {
             var rnd = new Random();
+            var used = new HashSet<int>();
             foreach (var server in _addresses.Keys.ToArray())
             {
-                var port = 2000 + rnd.Next(1000);
+                int port;
+                do
+                {
+                    port = 2000 + rnd.Next(1000);
+                } while (!used.Add(port));
                 _addresses[server] = new IPEndPoint(IPAddress.Loopback, port);
             }
         }
