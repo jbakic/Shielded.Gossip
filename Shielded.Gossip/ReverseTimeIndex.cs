@@ -1,168 +1,162 @@
 ﻿using Shielded.Standard;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
 namespace Shielded.Gossip
 {
-    internal class TimeIndexAppendItem
-    {
-        public string Key;
-        public long? OldFreshness;
-        public MessageItem NewItem;
+    //internal interface IReverseTimeIndexIterator
+    //{
+    //    long Freshness { get; }
+    //    MessageItem Item { get; }
+    //    bool Finished { get; }
+    //    void MovePrevious();
+    //    IReverseTimeIndexIterator Clone();
+    //}
 
-        public TimeIndexAppendItem(string key, long? oldFreshness, MessageItem newItem)
+    internal struct ReverseTimeIndexItem
+    {
+        public readonly long Freshness;
+        public readonly MessageItem Item;
+
+        public ReverseTimeIndexItem(long freshness, MessageItem item)
         {
-            Key = key;
-            OldFreshness = oldFreshness;
-            NewItem = newItem;
+            Freshness = freshness;
+            Item = item;
         }
     }
 
-    internal class ReverseTimeIndex
+    internal class ReverseTimeIndex : IEnumerable<ReverseTimeIndexItem>
     {
-        private class AppendBlock
+        private class ListElement
         {
-            public TimeIndexAppendItem[] Items;
-            public long LastFreshness;
-            public AppendBlock Previous;
+            public MessageItem Item;
+            public long Freshness;
+            public ListElement Previous;
         }
 
-        private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
-        private readonly Shielded<long> _lastAppliedFreshness = new Shielded<long>();
-        private readonly Shielded<AppendBlock> _appendQueue = new Shielded<AppendBlock>();
+        //private class ListIterator : IReverseTimeIndexIterator
+        //{
+        //    private ListElement _current;
+        //    private readonly Func<string, MessageItem> _currentItemGetter;
 
-        private HashSet<string> GetKeysToBeAppended()
+        //    public ListIterator(ListElement current, Func<string, MessageItem> currentItemGetter)
+        //    {
+        //        _current = current;
+        //        _currentItemGetter = currentItemGetter;
+
+        //        if (_current != null && _currentItemGetter(_current.Item.Key) == null)
+        //            MovePrevious();
+        //    }
+
+        //    public long Freshness => _current.Freshness;
+        //    public MessageItem Item => _current.Item;
+        //    public bool Finished => _current == null;
+
+        //    public void MovePrevious()
+        //    {
+        //        while (_current.Previous != null &&
+        //            _currentItemGetter(_current.Previous.Item.Key) != _current.Previous.Item)
+        //        {
+        //            // iterators help clean up the list. this is dangerous, but we never iterate in transactions
+        //            // that also change the items, so the _currentItemGetter will only return committed values,
+        //            // so this is safe to do. otherwise, the _currentItemGetter should use Shield.ReadOldState.
+        //            _current.Previous = _current.Previous.Previous;
+        //        }
+        //        _current = _current.Previous;
+        //    }
+
+        //    public IReverseTimeIndexIterator Clone() => new ListIterator(_current, _currentItemGetter);
+        //}
+
+        private readonly Shielded<ListElement> _listHead = new Shielded<ListElement>();
+        private readonly Func<string, MessageItem> _currentItemGetter;
+
+        public ReverseTimeIndex(Func<string, MessageItem> currentItemGetter)
         {
-            var result = new HashSet<string>();
-            var current = _appendQueue.Value;
-            while (current != null)
+            _currentItemGetter = currentItemGetter;
+        }
+
+        //public IReverseTimeIndexIterator GetIterator() => new ListIterator(_listHead.Value, _currentItemGetter);
+
+        //public IEnumerable<(long Freshness, MessageItem Item)> Enumerable
+        //{
+        //    get
+        //    {
+        //        var iter = GetIterator();
+        //        while (!iter.Finished)
+        //            yield return (iter.Freshness, iter.Item);
+        //    }
+        //}
+
+        public void Append(MessageItem[] items)
+        {
+            if (!items.Any())
+                return;
+            Array.Sort(items, (a, b) => a.FreshnessOffset.CompareTo(b.FreshnessOffset));
+            ListElement last = null, first = null;
+            foreach (var item in items)
             {
-                foreach (var item in current.Items)
-                    result.Add(item.Key);
-                current = current.Previous;
-            }
-            return result;
-        }
-
-        /// <summary>
-        /// This one will never include items still in the append queue, which is safe since it is
-        /// only used from the deletable items timer thread, which only looks at older changes.
-        /// </summary>
-        public IEnumerable<KeyValuePair<long, string>> Range(long from, long to)
-        {
-            var skip = GetKeysToBeAppended();
-            return _freshIndex.Range(from, to)
-                .Where(kvp => !skip.Contains(kvp.Value));
-        }
-
-        private IEnumerable<KeyValuePair<long, string>> GetAppendQueueEffectDescending()
-        {
-            var alreadyCovered = new HashSet<string>();
-            var current = _appendQueue.Value;
-            while (current != null)
-            {
-                for (var i = current.Items.Length - 1; i >= 0; i--)
+                last = new ListElement
                 {
-                    var item = current.Items[i];
-                    if (!alreadyCovered.Add(item.Key))
-                        continue;
-                    if (item.NewItem != null)
-                        yield return new KeyValuePair<long, string>(item.NewItem.Freshness, item.Key);
-                }
-                current = current.Previous;
+                    Item = item,
+                    Previous = last,
+                };
+                if (first == null)
+                    first = last;
             }
-        }
-
-        /// <summary>
-        /// This one includes the items from the queue as well, to make sure gossip replies always
-        /// see everything.
-        /// </summary>
-        public IEnumerable<KeyValuePair<long, string>> RangeDescending(long from, long to)
-        {
-            var fromQueue = GetAppendQueueEffectDescending()
-                .SkipWhile(kvp => kvp.Key > from)
-                .TakeWhile(kvp => kvp.Key >= to);
-            if (to > _lastAppliedFreshness)
-                return fromQueue;
-
-            var skip = GetKeysToBeAppended();
-            var fromTree = _freshIndex.RangeDescending(from, to).Where(kvp => !skip.Contains(kvp.Value));
-            if (_lastAppliedFreshness.Value >= from)
-                return fromTree;
-            return fromQueue.Concat(fromTree);
-        }
-
-        public void Append(TimeIndexAppendItem[] items)
-        {
-            Array.Sort(items, (a, b) => (a.NewItem?.FreshnessOffset ?? 0).CompareTo(b.NewItem?.FreshnessOffset ?? 0));
-            var lastFreshness = _lastAppliedFreshness.Value;
-            _appendQueue.Commute((ref AppendBlock cell) =>
+            _listHead.Commute((ref ListElement cell) =>
             {
                 // we must assign Freshness to items within this transaction, so that the correct value is
                 // visible as soon as we commit. it may not be changed later, because that would be unsafe.
                 // to maintain this commute, we must read the last appended Freshness from cell.
-                lastFreshness = cell?.LastFreshness ?? lastFreshness;
-                var newFresh = lastFreshness + 1;
-                var maxFresh = lastFreshness;
-                foreach (var item in items)
-                    if (item.NewItem != null)
-                    {
-                        item.NewItem.Freshness = newFresh + item.NewItem.FreshnessOffset;
-                        if (maxFresh < item.NewItem.Freshness)
-                            maxFresh = item.NewItem.Freshness;
-                    }
-                cell = new AppendBlock
+                var newFresh = (cell?.Freshness ?? 0) + 1;
+                var curr = last;
+                while (true)
                 {
-                    Items = items,
-                    LastFreshness = maxFresh,
-                    Previous = cell
-                };
-            });
-            Shield.SideEffect(ProcessQueue);
-        }
-
-        private IEnumerable<AppendBlock> GetAppendEnumerable()
-        {
-            var current = _appendQueue.Value;
-            while (current != null)
-            {
-                yield return current;
-                current = current.Previous;
-            }
-        }
-
-        private void ProcessQueue() => Shield.InTransaction(() =>
-        {
-            var maxFresh = _lastAppliedFreshness.Value;
-            var toAdd = new Dictionary<string, long?>();
-            var toRemove = new Dictionary<string, long?>();
-            foreach (var block in GetAppendEnumerable())
-            {
-                if (maxFresh < block.LastFreshness)
-                    maxFresh = block.LastFreshness;
-                foreach (var item in block.Items)
-                {
-                    // we will be removing a key based on its smallest OldFreshness we encounter. this assumes
-                    // we are moving through the queue in descending freshness order. and although we are going
-                    // in ascending order through the Items, one Items never contain the same key twice.
-                    toRemove[item.Key] = item.OldFreshness;
-                    // adding is the other way around - we take only the biggest, the first one we see, even if it is empty.
-                    if (!toAdd.ContainsKey(item.Key))
-                        toAdd[item.Key] = item.NewItem?.Freshness;
+                    curr.Freshness = curr.Item.Freshness = newFresh + curr.Item.FreshnessOffset;
+                    // since we change first.Previous below, we cannot just continue down Previouses until null...
+                    if (curr == first)
+                        break;
+                    curr = curr.Previous;
                 }
-            }
-            foreach (var kvp in toRemove)
-                if (kvp.Value != null)
-                    _freshIndex.Remove(kvp.Value.Value, kvp.Key);
-            foreach (var kvp in toAdd)
-                if (kvp.Value != null)
-                    _freshIndex.Add(kvp.Value.Value, kvp.Key);
-            _appendQueue.Value = null;
-            _lastAppliedFreshness.Value = maxFresh;
-        });
+                first.Previous = cell;
+                cell = last;
+            });
+        }
 
-        public long LastFreshness => _appendQueue.Value?.LastFreshness ?? _lastAppliedFreshness;
+        public IEnumerator<ReverseTimeIndexItem> GetEnumerator()
+        {
+            var current = _listHead.Value;
+            if (current == null)
+                yield break;
+            if (_currentItemGetter(current.Item.Key) == current.Item)
+                yield return new ReverseTimeIndexItem(current.Freshness, current.Item);
+
+            while (true)
+            {
+                var prev = current.Previous;
+                while (prev != null && _currentItemGetter(prev.Item.Key) != prev.Item)
+                {
+                    prev = prev.Previous;
+                }
+                // iterators help clean up the list. this is dangerous, but we never iterate in transactions
+                // that also change the items, so the _currentItemGetter will only return committed values,
+                // so this is safe to do. otherwise, the _currentItemGetter should use Shield.ReadOldState.
+                current = current.Previous = prev;
+                if (current == null)
+                    yield break;
+                yield return new ReverseTimeIndexItem(current.Freshness, current.Item);
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return ((IEnumerable<ReverseTimeIndexItem>)this).GetEnumerator();
+        }
+
+        public long LastFreshness => _listHead.Value?.Freshness ?? 0;
     }
 }
