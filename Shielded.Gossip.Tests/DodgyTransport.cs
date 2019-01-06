@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Shielded.Gossip.Tests
@@ -10,15 +11,19 @@ namespace Shielded.Gossip.Tests
     {
         private readonly TcpTransport _wrapped;
         private readonly double _lossRisk;
-        private readonly double _delayRisk;
-        private readonly int _delayMaxMs;
+        private readonly int _repeatLimit;
+        private readonly double _repeatRisk;
+        private readonly int _repeatDelayMaxMs;
 
-        public DodgyTransport(TcpTransport wrapped, double lossRisk = 0.1, double delayRisk = 0.1, int delayMaxMs = 5000)
+        public int CountLosses, CountRepeats;
+
+        public DodgyTransport(TcpTransport wrapped, double lossRisk = 0.1, int repeatLimit = 5, double repeatRisk = 0.25, int repeatDelayMaxMs = 3000)
         {
             _wrapped = wrapped;
             _lossRisk = lossRisk;
-            _delayRisk = delayRisk;
-            _delayMaxMs = delayMaxMs;
+            _repeatLimit = repeatLimit;
+            _repeatRisk = repeatRisk;
+            _repeatDelayMaxMs = repeatDelayMaxMs;
             _wrapped.MessageReceived += _wrapped_MessageReceived;
             _wrapped.Error += _wrapped_Error;
         }
@@ -32,19 +37,26 @@ namespace Shielded.Gossip.Tests
         private int? GetMsgDelay()
         {
             var rnd = new Random();
-            if (rnd.NextDouble() >= _delayRisk)
+            if (rnd.NextDouble() >= _repeatRisk)
                 return null;
-            return rnd.Next(_delayMaxMs);
+            return rnd.Next(_repeatDelayMaxMs);
         }
 
         private async void _wrapped_MessageReceived(object sender, object msg)
         {
-            if (ShouldLoseMsg())
-                return;
-            var delay = GetMsgDelay();
-            if (delay != null)
+            int count = _repeatLimit;
+            while (count --> 0)
+            {
+                if (!ShouldLoseMsg())
+                    MessageReceived?.Invoke(this, msg);
+                else
+                    Interlocked.Increment(ref CountLosses);
+                var delay = GetMsgDelay();
+                if (delay == null)
+                    return;
+                Interlocked.Increment(ref CountRepeats);
                 await Task.Delay(delay.Value);
-            MessageReceived?.Invoke(this, msg);
+            }
         }
 
         private void _wrapped_Error(object sender, Exception e)
