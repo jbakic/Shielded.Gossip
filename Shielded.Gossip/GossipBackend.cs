@@ -18,8 +18,7 @@ namespace Shielded.Gossip
     public class GossipBackend : IGossipBackend, IDisposable
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
-        private readonly ShieldedTreeNc<long, string> _freshIndex = new ShieldedTreeNc<long, string>();
-        private readonly Shielded<long> _lastFreshness = new Shielded<long>();
+        private readonly ReverseTimeIndex _freshIndex = new ReverseTimeIndex();
         private readonly Shielded<VersionHash> _databaseHash = new Shielded<VersionHash>();
         private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
         private readonly ShieldedLocal<HashSet<string>> _keysToMail = new ShieldedLocal<HashSet<string>>();
@@ -78,7 +77,7 @@ namespace Shielded.Gossip
                             .Where(kvp => _local[kvp.Value].Deletable)
                             .Select(kvp => kvp.Value)
                             .ToArray(),
-                        GetLastFreshness()));
+                        _freshIndex.LastFreshness));
                     Shield.InTransaction(() =>
                     {
                         foreach (var key in toRemove)
@@ -97,28 +96,11 @@ namespace Shielded.Gossip
 
         private void SyncIndexes()
         {
-            var newFresh = _lastFreshness.Value + 1;
-            long maxFreshOffset = 0;
-            foreach (var key in _local.Changes)
-            {
-                var oldItem = Shield.ReadOldState(() => _local.TryGetValue(key, out MessageItem o) ? o : null);
-                if (oldItem != null)
-                    _freshIndex.Remove(oldItem.Freshness, key);
-
-                if (_local.TryGetValue(key, out var newItem))
-                {
-                    if (newItem.Freshness > maxFreshOffset)
-                        maxFreshOffset = newItem.Freshness;
-                    newItem.Freshness += newFresh;
-                    _freshIndex.Add(newItem.Freshness, key);
-                }
-            }
-            _lastFreshness.Modify((ref long l) => l += maxFreshOffset + 1);
-        }
-
-        private long GetLastFreshness()
-        {
-            return _lastFreshness.Value;
+            _freshIndex.Append(_local.Changes
+                .Select(key => new TimeIndexAppendItem(key,
+                    Shield.ReadOldState(() => _local.TryGetValue(key, out MessageItem o) ? (long?)o.Freshness : null),
+                    _local.TryGetValue(key, out var mi) ? mi : null))
+                .ToArray());
         }
 
         private void DoDirectMail(MessageItem[] items)
@@ -323,7 +305,7 @@ namespace Shielded.Gossip
             if (connectedWithLast && hisReply?.LastWindowStart != null && hisReply.LastWindowStart < windowStart)
                 windowStart = hisReply.LastWindowStart.Value;
 
-            var windowEnd = GetLastFreshness();
+            var windowEnd = _freshIndex.LastFreshness;
 
             SendReply(server, new GossipReply
             {
@@ -464,7 +446,7 @@ namespace Shielded.Gossip
                 Key = key,
                 Data = mi.Data,
                 Deletable = mi.Deletable,
-                Freshness = _freshnessContext.GetValueOrDefault()
+                FreshnessOffset = _freshnessContext.GetValueOrDefault()
             };
             var set = _keysToMail.HasValue ? _keysToMail.Value : (_keysToMail.Value = new HashSet<string>());
             set.Add(key);
@@ -515,7 +497,7 @@ namespace Shielded.Gossip
                     Key = key,
                     Value = val,
                     Deletable = deletable,
-                    Freshness = _freshnessContext.GetValueOrDefault(),
+                    FreshnessOffset = _freshnessContext.GetValueOrDefault(),
                 };
                 var hash = oldHash ^ (deletable ? default : GetHash(key, val));
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
@@ -531,7 +513,7 @@ namespace Shielded.Gossip
                 {
                     Key = key,
                     Value = val,
-                    Freshness = _freshnessContext.GetValueOrDefault(),
+                    FreshnessOffset = _freshnessContext.GetValueOrDefault(),
                 };
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);

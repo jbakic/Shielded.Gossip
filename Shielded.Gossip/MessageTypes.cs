@@ -83,6 +83,15 @@ namespace Shielded.Gossip
         public long Freshness { get; set; }
 
         [IgnoreDataMember]
+        public long FreshnessOffset
+        {
+            get => _freshnessOffset;
+            set => _freshnessOffset = value;
+        }
+        [NonSerialized]
+        private long _freshnessOffset;
+
+        [IgnoreDataMember]
         public bool Deletable
         {
             get => _deletable;
