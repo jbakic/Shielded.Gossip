@@ -27,9 +27,9 @@ namespace Shielded.Gossip
         [DataMember]
         public MessageItem[] Items { get; set; }
         [DataMember]
-        public long? WindowStart { get; set; }
+        public long WindowStart { get; set; }
         [DataMember]
-        public long? WindowEnd { get; set; }
+        public long WindowEnd { get; set; }
     }
 
     public interface IGossipReply

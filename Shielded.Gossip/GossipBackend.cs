@@ -183,8 +183,8 @@ namespace Shielded.Gossip
                 From = Transport.OwnId,
                 DatabaseHash = _databaseHash.Value,
                 Items = toSend.Length == 0 ? null : toSend,
-                WindowStart = toSend.Length == 0 ? (long?)null : (newWindowStart?.Current.Freshness ?? 0),
-                WindowEnd = toSend.Length == 0 ? (long?)null : toSend[0].Freshness
+                WindowStart = toSend.Length == 0 ? 0 : (newWindowStart?.Current.Freshness ?? 0),
+                WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness
             };
             _gossipStates[server] = new GossipState(true, newWindowStart, msg.Time);
             Shield.SideEffect(() => Transport.Send(server, msg));
@@ -268,7 +268,8 @@ namespace Shielded.Gossip
             // first, a regular timeout check
             if (ourLastTime != null && (DateTimeOffset.UtcNow - ourLastTime.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
                 return false;
-            // then, if our state is obsolete, we will only accept starter messages
+            // then, if our state is obsolete, we will only accept starter messages, or replies to GossipEnd (they will
+            // also have ourLastStart == null, which makes sense, we sent no items in a GossipEnd.
             if (!_gossipStates.TryGetValue(server, out var state) ||
                 (DateTimeOffset.UtcNow - state.LastSendTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
             {
@@ -319,8 +320,8 @@ namespace Shielded.Gossip
                         From = Transport.OwnId,
                         DatabaseHash = ownHash,
                         Items = null,
-                        WindowStart = hisReply?.LastWindowStart,
-                        WindowEnd = hisReply?.LastWindowEnd,
+                        WindowStart = hisReply?.LastWindowStart ?? 0,
+                        WindowEnd = hisReply?.LastWindowEnd ?? _freshIndex.LastFreshness,
                         LastWindowStart = hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         LastTime = replyTo.Time,
