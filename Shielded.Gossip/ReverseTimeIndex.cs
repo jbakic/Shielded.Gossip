@@ -129,6 +129,7 @@ namespace Shielded.Gossip
 
         public IEnumerator<ReverseTimeIndexItem> GetEnumerator()
         {
+            Shield.AssertInTransaction();
             var current = _listHead.Value;
             if (current == null)
                 yield break;

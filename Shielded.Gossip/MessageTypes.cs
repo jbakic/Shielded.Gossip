@@ -32,15 +32,8 @@ namespace Shielded.Gossip
         public long WindowEnd { get; set; }
     }
 
-    public interface IGossipReply
-    {
-        long? LastWindowStart { get; }
-        long? LastWindowEnd { get; }
-        DateTimeOffset LastTime { get; }
-    }
-
     [DataContract(Namespace = ""), Serializable]
-    public class GossipReply : NewGossip, IGossipReply
+    public class GossipReply : NewGossip
     {
         [DataMember]
         public long? LastWindowStart { get; set; }
@@ -51,15 +44,15 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class GossipEnd : GossipMessage, IGossipReply
+    public class GossipEnd : GossipMessage
     {
         [DataMember]
         public bool Success { get; set; }
+        [DataMember]
+        public long WindowEnd { get; set; }
 
         [DataMember]
-        public long? LastWindowStart { get; set; }
-        [DataMember]
-        public long? LastWindowEnd { get; set; }
+        public long LastWindowEnd { get; set; }
         [DataMember]
         public DateTimeOffset LastTime { get; set; }
     }

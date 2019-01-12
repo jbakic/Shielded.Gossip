@@ -133,23 +133,34 @@ namespace Shielded.Gossip
 
         private class GossipState
         {
-            public readonly bool IsStart;
-            public readonly IEnumerator<ReverseTimeIndexItem> LastStart;
-            public readonly DateTimeOffset LastSendTime;
+            public readonly DateTimeOffset? LastReceivedTime;
+            public readonly bool LastReceivedWasGossipEnd;
+            public readonly DateTimeOffset LastSentTime;
+            public readonly IEnumerator<ReverseTimeIndexItem> LastWindowStart;
 
-            public GossipState(bool isStart, IEnumerator<ReverseTimeIndexItem> lastStart, DateTimeOffset lastSendTime)
+            public GossipState(DateTimeOffset? lastReceivedTime, bool lastReceivedWasGossipEnd,
+                DateTimeOffset lastSentTime, IEnumerator<ReverseTimeIndexItem> lastWindowStart)
             {
-                IsStart = isStart;
-                LastStart = lastStart;
-                LastSendTime = lastSendTime;
+                LastReceivedTime = lastReceivedTime;
+                LastReceivedWasGossipEnd = lastReceivedWasGossipEnd;
+                LastSentTime = lastSentTime;
+                LastWindowStart = lastWindowStart;
             }
         }
 
         private ShieldedDictNc<string, GossipState> _gossipStates = new ShieldedDictNc<string, GossipState>(StringComparer.InvariantCultureIgnoreCase);
 
-        private bool IsGossipActive(string server) =>
-            _gossipStates.TryGetValue(server, out var state) &&
-            (DateTimeOffset.UtcNow - state.LastSendTime).TotalMilliseconds < Configuration.AntiEntropyIdleTimeout;
+        private bool IsGossipActive(string server) => Shield.InTransaction(() =>
+        {
+            if (!_gossipStates.TryGetValue(server, out var state))
+                return false;
+            if ((DateTimeOffset.UtcNow - state.LastSentTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
+            {
+                _gossipStates.Remove(server);
+                return false;
+            }
+            return true;
+        });
 
         private void SpreadRumors()
         {
@@ -177,7 +188,7 @@ namespace Shielded.Gossip
         {
             if (IsGossipActive(server))
                 return false;
-            var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, null, null, out var newWindowStart);
+            var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, null, null, null, null, out var newWindowStart);
             var msg = new NewGossip
             {
                 From = Transport.OwnId,
@@ -186,7 +197,7 @@ namespace Shielded.Gossip
                 WindowStart = toSend.Length == 0 ? 0 : (newWindowStart?.Current.Freshness ?? 0),
                 WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness
             };
-            _gossipStates[server] = new GossipState(true, newWindowStart, msg.Time);
+            _gossipStates[server] = new GossipState(null, false, msg.Time, newWindowStart);
             Shield.SideEffect(() => Transport.Send(server, msg));
             return true;
         });
@@ -200,9 +211,39 @@ namespace Shielded.Gossip
                     break;
 
                 case NewGossip pkg:
-                    if (pkg.DatabaseHash != _databaseHash.Value)
-                        ApplyItems(pkg.Items, true);
-                    SendReply(pkg);
+                    long? ignoreUpToFreshness = null;
+                    HashSet<string> keysToIgnore = null;
+                    if (pkg.Items != null && pkg.DatabaseHash != _databaseHash.Value)
+                    {
+                        Shield.InTransaction(() =>
+                        {
+                            keysToIgnore = ApplyItems(pkg.Items, true);
+                            if (keysToIgnore != null)
+                                Shield.SyncSideEffect(() =>
+                                {
+                                    // this happens if we receive a msg just as someone disposed us! the pre-commit is
+                                    // not subscribed any more.
+                                    if (!_changeLock.HasValue)
+                                    {
+                                        keysToIgnore = null;
+                                    }
+                                    else
+                                    {
+                                        // we don't want to send back the same things we just received. so, ignore all keys from
+                                        // the incoming msg for which the result of application was Greater, which means our
+                                        // local value is now identical to the received one, unless they also appear in _keysToMail,
+                                        // which means a Changed handler made further changes to them.
+                                        // we need the max freshness in case these fields change after this transaction.
+                                        ignoreUpToFreshness = _freshIndex.LastFreshness;
+                                        if (_keysToMail.HasValue)
+                                            keysToIgnore.ExceptWith(_keysToMail.Value);
+                                    }
+                                });
+                            else
+                                keysToIgnore = null;
+                        });
+                    }
+                    SendReply(pkg, ignoreUpToFreshness, keysToIgnore);
                     break;
 
                 case GossipEnd end:
@@ -220,14 +261,16 @@ namespace Shielded.Gossip
         /// Applies the given items internally, does not cause any direct mail. Applies them
         /// starting from the last, and if they have different Freshness values, they will be
         /// indexed in this backend with different values too. It is assumed they are sorted
-        /// by descending freshness.
+        /// by descending freshness. Result contains keys whose result was Greater, i.e. our
+        /// local value was fully overwritten.
         /// </summary>
-        internal void ApplyItems(MessageItem[] items, bool respectFreshness) => Shield.InTransaction(() =>
+        internal HashSet<string> ApplyItems(MessageItem[] items, bool respectFreshness) => Shield.InTransaction(() =>
         {
             if (items == null || items.Length == 0)
-                return;
+                return null;
             long prevItemFreshness = items[items.Length - 1].Freshness;
             bool freshnessUtilized = false;
+            HashSet<string> greaterKeys = null;
             for (var i = items.Length - 1; i >= 0; i--)
             {
                 var item = items[i];
@@ -244,8 +287,16 @@ namespace Shielded.Gossip
                 }
                 var obj = item.Value;
                 var method = _applyMethods.Get(this, obj.GetType());
-                freshnessUtilized |= (method(item.Key, obj) & VectorRelationship.Greater) != 0;
+                var itemResult = method(item.Key, obj);
+                freshnessUtilized |= (itemResult & VectorRelationship.Greater) != 0;
+                if (itemResult == VectorRelationship.Greater)
+                {
+                    if (greaterKeys == null)
+                        greaterKeys = new HashSet<string>();
+                    greaterKeys.Add(item.Key);
+                }
             }
+            return greaterKeys;
         });
 
         private static bool IsByteEqual(byte[] one, byte[] two)
@@ -261,52 +312,109 @@ namespace Shielded.Gossip
             return true;
         }
 
-        private bool ShouldReply(string server, long? ourLastStart, DateTimeOffset? ourLastTime,
+        private bool ShouldReply(string server, DateTimeOffset hisTime, long? ourLastStart, DateTimeOffset? ourLastTime,
             out IEnumerator<ReverseTimeIndexItem> lastStartEnumerator)
         {
             lastStartEnumerator = null;
-            // first, a regular timeout check
+            // first, a regular RTT timeout check
             if (ourLastTime != null && (DateTimeOffset.UtcNow - ourLastTime.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
                 return false;
             // then, if our state is obsolete, we will only accept starter messages, or replies to GossipEnd (they will
-            // also have ourLastStart == null, which makes sense, we sent no items in a GossipEnd.
+            // also have ourLastStart == null).
             if (!_gossipStates.TryGetValue(server, out var state) ||
-                (DateTimeOffset.UtcNow - state.LastSendTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
+                (DateTimeOffset.UtcNow - state.LastSentTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
             {
                 return ourLastStart == null;
             }
-            // otherwise, the ourLastStart he sent us must match our remembered last start. the only exception is if both
-            // this new message and our last message are starter messages, in which case we reply if we have lower precedence.
-            if (ourLastStart == null)
-                return state.IsStart && StringComparer.InvariantCultureIgnoreCase.Compare(server, Transport.OwnId) < 0;
-            lastStartEnumerator = state.LastStart;
-            return ourLastStart.Value == (state.LastStart?.Current.Freshness ?? 0);
+
+            // here we have a state. we will cover all possible cases separately.
+            // did we previously send him a gossip start message?
+            if (state.LastReceivedTime == null)
+            {
+                // is he replying to it? if yes, the times will match.
+                if (ourLastTime == state.LastSentTime)
+                {
+                    // if he's sending a GossipEnd, ourLastStart will be null. that's OK.
+                    if (ourLastStart == null)
+                        return true;
+                    // otherwise, we expect the LastWindowStart he sent us to be correct.
+                    else if (ourLastStart != (state.LastWindowStart?.Current.Freshness ?? 0))
+                        throw new ApplicationException("Reply chain logic failure.");
+                    lastStartEnumerator = state.LastWindowStart;
+                    return true;
+                }
+                else
+                {
+                    // if he's not replying, then we will only answer if it's his starter msg or if he replied to a previous
+                    // GossipEnd that we sent him. it means we're (re)starting an exchange in parallel, and the higher prio
+                    // server will win.
+                    return ourLastStart == null && StringComparer.InvariantCultureIgnoreCase.Compare(server, Transport.OwnId) < 0;
+                }
+            }
+            // so, we last replied to something.
+            // if this message of his is older than or the same one as the one we already replied to, then we ignore it.
+            else if (state.LastReceivedTime >= hisTime)
+            {
+                return false;
+            }
+            else
+            {
+                // if he's starting a new gossip round (ourLastTime will be null then) then he does not plan to answer
+                // that what we sent him before. we may as well answer this.
+                if (ourLastTime == null)
+                {
+                    return true;
+                }
+                // if here, then we replied to him, and he's replying to us. we only answer to replies to our latest message.
+                else if (ourLastTime != state.LastSentTime)
+                {
+                    return false;
+                }
+                else
+                {
+                    // if he's sending a GossipEnd, ourLastStart will be null. that's OK.
+                    if (ourLastStart == null)
+                        return true;
+                    // he is replying to our latest message. here, again, we expect the window starts to match.
+                    if ((ourLastStart ?? 0) != (state.LastWindowStart?.Current.Freshness ?? 0))
+                        throw new ApplicationException("Reply chain logic failure.");
+                    lastStartEnumerator = state.LastWindowStart;
+                    return true;
+                }
+            }
         }
 
-        private void SendReply(GossipMessage replyTo) => Shield.InTransaction(() =>
+        private void SendReply(GossipMessage replyTo,
+            long? ignoreUpToFreshness = null, HashSet<string> keysToIgnore = null) => Shield.InTransaction(() =>
         {
             var server = replyTo.From;
-            var hisReply = replyTo as IGossipReply;
             var hisNews = replyTo as NewGossip;
+            var hisReply = replyTo as GossipReply;
+            var hisEnd = replyTo as GossipEnd;
 
-            if (!ShouldReply(replyTo.From, hisReply?.LastWindowStart, hisReply?.LastTime, out var lastStartEnumerator))
+            var lastWindowStart = hisReply?.LastWindowStart;
+            var lastWindowEnd = hisReply?.LastWindowEnd ?? hisEnd?.LastWindowEnd;
+            var lastTime = hisReply?.LastTime ?? hisEnd?.LastTime;
+
+            if (!ShouldReply(replyTo.From, replyTo.Time, lastWindowStart, lastTime, out var lastStartEnumerator))
                 return;
 
             var ownHash = _databaseHash.Value;
             if (ownHash == replyTo.DatabaseHash)
             {
-                // hisNews == null means his message was already a GossipEnd.
-                if (hisNews == null)
+                if (hisEnd != null)
                     _gossipStates.Remove(server);
                 else
                     SendEnd(hisNews, true);
                 return;
             }
 
-            var packageSize = hisNews == null || hisNews.Items == null ? Configuration.AntiEntropyInitialTransactions :
-                Math.Max(Configuration.AntiEntropyInitialTransactions, hisNews.Items.Length * 2);
-            var toSend = GetPackage(packageSize,
-                lastStartEnumerator, hisReply?.LastWindowEnd, out var newStartEnumerator);
+            var packageSize = lastWindowStart == null || lastWindowEnd == null
+                ? Configuration.AntiEntropyInitialTransactions
+                : Math.Max(Configuration.AntiEntropyInitialTransactions,
+                    (int)Math.Min(Configuration.AntiEntropyCutoff, lastWindowEnd.Value - lastWindowStart.Value));
+            var toSend = GetPackage(packageSize, lastStartEnumerator, lastWindowEnd,
+                ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
 
             if (toSend.Length == 0)
             {
@@ -320,8 +428,8 @@ namespace Shielded.Gossip
                         From = Transport.OwnId,
                         DatabaseHash = ownHash,
                         Items = null,
-                        WindowStart = hisReply?.LastWindowStart ?? 0,
-                        WindowEnd = hisReply?.LastWindowEnd ?? _freshIndex.LastFreshness,
+                        WindowStart = 0,
+                        WindowEnd = _freshIndex.LastFreshness,
                         LastWindowStart = hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         LastTime = replyTo.Time,
@@ -339,7 +447,7 @@ namespace Shielded.Gossip
                 WindowStart = windowStart,
                 WindowEnd = windowEnd,
                 LastWindowStart = hisNews?.WindowStart,
-                LastWindowEnd = hisNews?.WindowEnd,
+                LastWindowEnd = hisNews?.WindowEnd ?? hisEnd?.WindowEnd,
                 LastTime = replyTo.Time,
             }, newStartEnumerator);
         });
@@ -350,12 +458,13 @@ namespace Shielded.Gossip
             // IsGossipActive is correct, and to guarantee that we actually are done.
             _gossipStates.Remove(hisNews.From);
             var ourHash = _databaseHash.Value;
+            var maxFresh = _freshIndex.LastFreshness;
             Shield.SideEffect(() => Transport.Send(hisNews.From, new GossipEnd
             {
                 From = Transport.OwnId,
                 Success = success,
                 DatabaseHash = ourHash,
-                LastWindowStart = hisNews.WindowStart,
+                WindowEnd = maxFresh,
                 LastWindowEnd = hisNews.WindowEnd,
                 LastTime = hisNews.Time,
             }));
@@ -368,13 +477,14 @@ namespace Shielded.Gossip
                 // reply transactions are kept read-only since they conflict too easily,
                 // and it really makes no difference, whatever we skipped now, we'll see
                 // in the next reply. so we change this only in the side-effect.
-                Shield.InTransaction(() => _gossipStates[server] = new GossipState(false, startEnumerator, msg.Time));
+                Shield.InTransaction(() => _gossipStates[server] = new GossipState(
+                    msg.LastTime, false, msg.Time, startEnumerator));
                 Transport.Send(server, msg);
             });
         }
 
         private MessageItem[] GetPackage(int packageSize, IEnumerator<ReverseTimeIndexItem> lastWindowStart, long? lastWindowEnd,
-            out IEnumerator<ReverseTimeIndexItem> newWindowStart)
+            long? ignoreUpToFreshness, HashSet<string> keysToIgnore, out IEnumerator<ReverseTimeIndexItem> newWindowStart)
         {
             if (packageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(packageSize), "The size of an anti-entropy package must be greater than zero.");
@@ -395,7 +505,8 @@ namespace Shielded.Gossip
                         return result.ToArray();
                     prevFreshness = item.Freshness;
                 }
-                result.Add(item.Item);
+                if (keysToIgnore == null || item.Freshness > ignoreUpToFreshness.Value || !keysToIgnore.Contains(item.Item.Key))
+                    result.Add(item.Item);
             }
             newWindowStart.Dispose();
 
@@ -405,8 +516,12 @@ namespace Shielded.Gossip
 
             // last time we iterated this one, we stopped without adding the current item. so this
             // will be a do/while. but first, let's see if that item is still up to date.
-            if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key))
-                newWindowStart.MoveNext();
+            if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
+            {
+                newWindowStart.Dispose();
+                newWindowStart = null;
+                return result.ToArray();
+            }
             do
             {
                 var item = newWindowStart.Current;

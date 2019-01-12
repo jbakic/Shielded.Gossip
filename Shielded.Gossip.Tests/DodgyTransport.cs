@@ -17,7 +17,7 @@ namespace Shielded.Gossip.Tests
 
         public int CountLosses, CountRepeats;
 
-        public DodgyTransport(TcpTransport wrapped, double lossRisk = 0.1, int repeatLimit = 5, double repeatRisk = 0.25, int repeatDelayMaxMs = 3000)
+        public DodgyTransport(TcpTransport wrapped, double lossRisk = 0.1, int repeatLimit = 5, double repeatRisk = 0.25, int repeatDelayMaxMs = 300)
         {
             _wrapped = wrapped;
             _lossRisk = lossRisk;
