@@ -36,9 +36,9 @@ namespace Shielded.Gossip
     public class GossipReply : NewGossip
     {
         [DataMember]
-        public long? LastWindowStart { get; set; }
+        public long LastWindowStart { get; set; }
         [DataMember]
-        public long? LastWindowEnd { get; set; }
+        public long LastWindowEnd { get; set; }
         [DataMember]
         public DateTimeOffset LastTime { get; set; }
     }
