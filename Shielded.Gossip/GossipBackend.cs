@@ -135,10 +135,10 @@ namespace Shielded.Gossip
         {
             public readonly DateTimeOffset? LastReceivedTime;
             public readonly DateTimeOffset LastSentTime;
-            public readonly IEnumerator<ReverseTimeIndexItem> LastWindowStart;
+            public readonly ReverseTimeIndex.Enumerator LastWindowStart;
             public readonly bool LastSentMsgWasEnd;
 
-            public GossipState(DateTimeOffset? lastReceivedTime, DateTimeOffset lastSentTime, IEnumerator<ReverseTimeIndexItem> lastWindowStart,
+            public GossipState(DateTimeOffset? lastReceivedTime, DateTimeOffset lastSentTime, ReverseTimeIndex.Enumerator lastWindowStart,
                 bool lastSentMsgWasEnd = false)
             {
                 LastReceivedTime = lastReceivedTime;
@@ -188,13 +188,13 @@ namespace Shielded.Gossip
         {
             if (IsGossipActive(server))
                 return false;
-            var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, null, null, null, null, out var newWindowStart);
+            var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, default, null, null, null, out var newWindowStart);
             var msg = new NewGossip
             {
                 From = Transport.OwnId,
                 DatabaseHash = _databaseHash.Value,
                 Items = toSend.Length == 0 ? null : toSend,
-                WindowStart = toSend.Length == 0 ? 0 : (newWindowStart?.Current.Freshness ?? 0),
+                WindowStart = toSend.Length == 0 || newWindowStart.IsDefault ? 0 : newWindowStart.Current.Freshness,
                 WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness
             };
             _gossipStates[server] = new GossipState(null, msg.Time, newWindowStart);
@@ -318,9 +318,9 @@ namespace Shielded.Gossip
         }
 
         private bool ShouldAcceptMsg(string server, DateTimeOffset hisTime, long? ourLastStart, DateTimeOffset? ourLastTime,
-            out IEnumerator<ReverseTimeIndexItem> lastStartEnumerator)
+            out ReverseTimeIndex.Enumerator lastStartEnumerator)
         {
-            lastStartEnumerator = null;
+            lastStartEnumerator = default;
             // first, a regular RTT timeout check
             if (ourLastTime != null && (DateTimeOffset.UtcNow - ourLastTime.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
                 return false;
@@ -342,7 +342,7 @@ namespace Shielded.Gossip
                     if (ourLastStart == null)
                         return true;
                     // otherwise, we expect the LastWindowStart he sent us to be correct.
-                    else if (ourLastStart != (state.LastWindowStart?.Current.Freshness ?? 0))
+                    else if (ourLastStart != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
                         throw new ApplicationException("Reply chain logic failure.");
                     lastStartEnumerator = state.LastWindowStart;
                     return true;
@@ -380,7 +380,7 @@ namespace Shielded.Gossip
                     if (ourLastStart == null)
                         return true;
                     // otherwise, he is replying to our latest message. here, again, we expect the window starts to match.
-                    else if ((ourLastStart ?? 0) != (state.LastWindowStart?.Current.Freshness ?? 0))
+                    else if ((ourLastStart ?? 0) != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
                         throw new ApplicationException("Reply chain logic failure.");
                     lastStartEnumerator = state.LastWindowStart;
                     return true;
@@ -388,7 +388,7 @@ namespace Shielded.Gossip
             }
         }
 
-        private void SendReply(GossipMessage replyTo, IEnumerator<ReverseTimeIndexItem> lastStartEnumerator,
+        private void SendReply(GossipMessage replyTo, ReverseTimeIndex.Enumerator lastStartEnumerator,
             long? ignoreUpToFreshness = null, HashSet<string> keysToIgnore = null) => Shield.InTransaction(() =>
         {
             var server = replyTo.From;
@@ -437,7 +437,7 @@ namespace Shielded.Gossip
                 return;
             }
 
-            var windowStart = newStartEnumerator?.Current.Freshness ?? 0;
+            var windowStart = newStartEnumerator.IsDefault ? 0 : newStartEnumerator.Current.Freshness;
             var windowEnd = _freshIndex.LastFreshness;
             SendReply(server, new GossipReply
             {
@@ -467,11 +467,11 @@ namespace Shielded.Gossip
                 LastWindowEnd = hisNews.WindowEnd,
                 LastTime = hisNews.Time,
             };
-            _gossipStates[hisNews.From] = new GossipState(hisNews.Time, endMsg.Time, null, true);
+            _gossipStates[hisNews.From] = new GossipState(hisNews.Time, endMsg.Time, default, true);
             Shield.SideEffect(() => Transport.Send(hisNews.From, endMsg));
         }
 
-        private void SendReply(string server, GossipReply msg, IEnumerator<ReverseTimeIndexItem> startEnumerator)
+        private void SendReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator)
         {
             Shield.SideEffect(() =>
             {
@@ -484,35 +484,44 @@ namespace Shielded.Gossip
             });
         }
 
-        private MessageItem[] GetPackage(int packageSize, IEnumerator<ReverseTimeIndexItem> lastWindowStart, long? lastWindowEnd,
-            long? ignoreUpToFreshness, HashSet<string> keysToIgnore, out IEnumerator<ReverseTimeIndexItem> newWindowStart)
+        private MessageItem[] GetPackage(int packageSize, ReverseTimeIndex.Enumerator lastWindowStart, long? lastWindowEnd,
+            long? ignoreUpToFreshness, HashSet<string> keysToIgnore, out ReverseTimeIndex.Enumerator newWindowStart)
         {
             if (packageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(packageSize), "The size of an anti-entropy package must be greater than zero.");
             int cutoff = Configuration.AntiEntropyCutoff;
-            long? prevFreshness = null;
+            ReverseTimeIndex.Enumerator prevFreshnessStart = default;
             var result = new List<MessageItem>();
             bool interrupted = false;
 
-            newWindowStart = _freshIndex.GetEnumerator();
+            newWindowStart = _freshIndex.GetCloneableEnumerator();
             while (newWindowStart.MoveNext())
             {
                 var item = newWindowStart.Current;
                 if (item.Freshness <= lastWindowEnd)
                     break;
-                if (prevFreshness == null || prevFreshness.Value != item.Freshness)
+                if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
                     if (result.Count >= cutoff || (lastWindowEnd == null && result.Count >= packageSize))
                         return result.ToArray();
-                    prevFreshness = item.Freshness;
+                    prevFreshnessStart = newWindowStart;
                 }
                 if (keysToIgnore == null || item.Freshness > ignoreUpToFreshness.Value || !keysToIgnore.Contains(item.Item.Key))
+                {
+                    if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
+                    {
+                        newWindowStart = prevFreshnessStart;
+                        var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
+                        result.RemoveRange(index, result.Count - index);
+                        return result.ToArray();
+                    }
                     result.Add(item.Item);
+                }
             }
             newWindowStart.Dispose();
 
             newWindowStart = lastWindowStart;
-            if (newWindowStart == null)
+            if (newWindowStart.IsDefault)
                 return result.ToArray();
 
             // last time we iterated this one, we stopped without adding the current item. so this
@@ -520,27 +529,34 @@ namespace Shielded.Gossip
             if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
             {
                 newWindowStart.Dispose();
-                newWindowStart = null;
+                newWindowStart = default;
                 return result.ToArray();
             }
             do
             {
                 var item = newWindowStart.Current;
-                if (prevFreshness == null || prevFreshness.Value != item.Freshness)
+                if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
                     if (result.Count >= cutoff || result.Count >= packageSize)
                     {
                         interrupted = true;
                         break;
                     }
-                    prevFreshness = item.Freshness;
+                    prevFreshnessStart = newWindowStart;
+                }
+                if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
+                {
+                    newWindowStart = prevFreshnessStart;
+                    var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
+                    result.RemoveRange(index, result.Count - index);
+                    return result.ToArray();
                 }
                 result.Add(item.Item);
             } while (newWindowStart.MoveNext());
             if (!interrupted)
             {
                 newWindowStart.Dispose();
-                newWindowStart = null;
+                newWindowStart = default;
             }
             return result.ToArray();
         }
