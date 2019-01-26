@@ -435,7 +435,7 @@ namespace Shielded.Gossip
                         LastWindowStart = hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         LastTime = replyTo.Time,
-                    }, newStartEnumerator, packageSize);
+                    }, newStartEnumerator, currentState?.LastPackageSize ?? 0);
                 return;
             }
 
