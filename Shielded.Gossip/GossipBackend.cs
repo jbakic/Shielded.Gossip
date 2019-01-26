@@ -152,11 +152,14 @@ namespace Shielded.Gossip
 
         private ShieldedDictNc<string, GossipState> _gossipStates = new ShieldedDictNc<string, GossipState>(StringComparer.InvariantCultureIgnoreCase);
 
+        private bool HasGossipTimedOut(DateTimeOffset lastTime, DateTimeOffset? now = null) =>
+            ((now ?? DateTimeOffset.UtcNow) - lastTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout;
+
         private bool IsGossipActive(string server) => Shield.InTransaction(() =>
         {
             if (!_gossipStates.TryGetValue(server, out var state) || state.LastSentMsgWasEnd)
                 return false;
-            if ((DateTimeOffset.UtcNow - state.LastSentTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
+            if (HasGossipTimedOut(state.LastSentTime))
             {
                 _gossipStates.Remove(server);
                 return false;
@@ -324,11 +327,11 @@ namespace Shielded.Gossip
         {
             currentState = null;
             // first, a regular RTT timeout check
-            if (ourLastTime != null && (DateTimeOffset.UtcNow - ourLastTime.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
+            var now = DateTimeOffset.UtcNow;
+            if (ourLastTime != null && HasGossipTimedOut(ourLastTime.Value, now))
                 return false;
             // then, if our state is obsolete, we will only accept starter messages.
-            if (!_gossipStates.TryGetValue(server, out var state) ||
-                (DateTimeOffset.UtcNow - state.LastSentTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
+            if (!_gossipStates.TryGetValue(server, out var state) || HasGossipTimedOut(state.LastSentTime, now))
             {
                 return ourLastTime == null;
             }
