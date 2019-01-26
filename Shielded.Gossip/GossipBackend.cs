@@ -136,14 +136,16 @@ namespace Shielded.Gossip
             public readonly DateTimeOffset? LastReceivedTime;
             public readonly DateTimeOffset LastSentTime;
             public readonly ReverseTimeIndex.Enumerator LastWindowStart;
+            public readonly int LastPackageSize;
             public readonly bool LastSentMsgWasEnd;
 
             public GossipState(DateTimeOffset? lastReceivedTime, DateTimeOffset lastSentTime, ReverseTimeIndex.Enumerator lastWindowStart,
-                bool lastSentMsgWasEnd = false)
+                int lastPackageSize, bool lastSentMsgWasEnd = false)
             {
                 LastReceivedTime = lastReceivedTime;
                 LastSentTime = lastSentTime;
                 LastWindowStart = lastWindowStart;
+                LastPackageSize = lastPackageSize;
                 LastSentMsgWasEnd = lastSentMsgWasEnd;
             }
         }
@@ -188,7 +190,7 @@ namespace Shielded.Gossip
         {
             if (IsGossipActive(server))
                 return false;
-            var toSend = GetPackage(Configuration.AntiEntropyInitialTransactions, default, null, null, null, out var newWindowStart);
+            var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
             var msg = new NewGossip
             {
                 From = Transport.OwnId,
@@ -197,7 +199,7 @@ namespace Shielded.Gossip
                 WindowStart = toSend.Length == 0 || newWindowStart.IsDefault ? 0 : newWindowStart.Current.Freshness,
                 WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness
             };
-            _gossipStates[server] = new GossipState(null, msg.Time, newWindowStart);
+            _gossipStates[server] = new GossipState(null, msg.Time, newWindowStart, Configuration.AntiEntropyInitialSize);
             Shield.SideEffect(() => Transport.Send(server, msg));
             return true;
         });
@@ -212,7 +214,7 @@ namespace Shielded.Gossip
 
                 case NewGossip pkg:
                     var reply = pkg as GossipReply;
-                    if (!ShouldAcceptMsg(pkg.From, pkg.Time, reply?.LastWindowStart, reply?.LastTime, out var lastStartEnumerator1))
+                    if (!ShouldAcceptMsg(pkg.From, pkg.Time, reply?.LastWindowStart, reply?.LastTime, out var currentState1))
                         return;
                     long? ignoreUpToFreshness = null;
                     HashSet<string> keysToIgnore = null;
@@ -246,13 +248,13 @@ namespace Shielded.Gossip
                                 keysToIgnore = null;
                         });
                     }
-                    SendReply(pkg, lastStartEnumerator1, ignoreUpToFreshness, keysToIgnore);
+                    SendReply(pkg, currentState1, ignoreUpToFreshness, keysToIgnore);
                     break;
 
                 case GossipEnd end:
-                    if (!ShouldAcceptMsg(end.From, end.Time, null, end.LastTime, out var lastStartEnumerator2))
+                    if (!ShouldAcceptMsg(end.From, end.Time, null, end.LastTime, out var currentState2))
                         return;
-                    SendReply(end, lastStartEnumerator2);
+                    SendReply(end, currentState2);
                     break;
             }
         }
@@ -318,9 +320,9 @@ namespace Shielded.Gossip
         }
 
         private bool ShouldAcceptMsg(string server, DateTimeOffset hisTime, long? ourLastStart, DateTimeOffset? ourLastTime,
-            out ReverseTimeIndex.Enumerator lastStartEnumerator)
+            out GossipState currentState)
         {
-            lastStartEnumerator = default;
+            currentState = null;
             // first, a regular RTT timeout check
             if (ourLastTime != null && (DateTimeOffset.UtcNow - ourLastTime.Value).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout)
                 return false;
@@ -344,7 +346,7 @@ namespace Shielded.Gossip
                     // otherwise, we expect the LastWindowStart he sent us to be correct.
                     else if (ourLastStart != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
                         throw new ApplicationException("Reply chain logic failure.");
-                    lastStartEnumerator = state.LastWindowStart;
+                    currentState = state;
                     return true;
                 }
                 else
@@ -382,13 +384,13 @@ namespace Shielded.Gossip
                     // otherwise, he is replying to our latest message. here, again, we expect the window starts to match.
                     else if ((ourLastStart ?? 0) != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
                         throw new ApplicationException("Reply chain logic failure.");
-                    lastStartEnumerator = state.LastWindowStart;
+                    currentState = state;
                     return true;
                 }
             }
         }
 
-        private void SendReply(GossipMessage replyTo, ReverseTimeIndex.Enumerator lastStartEnumerator,
+        private void SendReply(GossipMessage replyTo, GossipState currentState,
             long? ignoreUpToFreshness = null, HashSet<string> keysToIgnore = null) => Shield.InTransaction(() =>
         {
             var server = replyTo.From;
@@ -405,15 +407,15 @@ namespace Shielded.Gossip
                 if (hisEnd != null)
                     _gossipStates.Remove(server);
                 else
-                    SendEnd(hisNews, true);
+                    SendEnd(hisNews, currentState?.LastPackageSize ?? 0, true);
                 return;
             }
 
-            var packageSize = lastWindowStart == null || lastWindowEnd == null
-                ? Configuration.AntiEntropyInitialTransactions
-                : Math.Max(Configuration.AntiEntropyInitialTransactions,
-                    (int)Math.Min(Configuration.AntiEntropyCutoff, lastWindowEnd.Value - lastWindowStart.Value));
-            var toSend = GetPackage(packageSize, lastStartEnumerator, lastWindowEnd,
+            var packageSize = currentState == null
+                ? Configuration.AntiEntropyInitialSize
+                : Math.Max(Configuration.AntiEntropyInitialSize,
+                    (int)Math.Min(Configuration.AntiEntropyCutoff, currentState.LastPackageSize * 2));
+            var toSend = GetPackage(packageSize, currentState?.LastWindowStart ?? default, lastWindowEnd,
                 ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
 
             if (toSend.Length == 0)
@@ -421,7 +423,7 @@ namespace Shielded.Gossip
                 if (hisNews == null)
                     _gossipStates.Remove(server);
                 else if (hisNews.Items == null || hisNews.Items.Length == 0)
-                    SendEnd(hisNews, false);
+                    SendEnd(hisNews, currentState?.LastPackageSize ?? 0, false);
                 else
                     SendReply(server, new GossipReply
                     {
@@ -433,7 +435,7 @@ namespace Shielded.Gossip
                         LastWindowStart = hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         LastTime = replyTo.Time,
-                    }, newStartEnumerator);
+                    }, newStartEnumerator, packageSize);
                 return;
             }
 
@@ -449,10 +451,10 @@ namespace Shielded.Gossip
                 LastWindowStart = hisNews?.WindowStart ?? 0,
                 LastWindowEnd = (hisNews?.WindowEnd ?? hisEnd?.WindowEnd).Value,
                 LastTime = replyTo.Time,
-            }, newStartEnumerator);
+            }, newStartEnumerator, packageSize);
         });
 
-        private void SendEnd(NewGossip hisNews, bool success)
+        private void SendEnd(NewGossip hisNews, int lastPackageSize, bool success)
         {
             // if we're sending GossipEnd, we clear this in transaction, to make sure
             // IsGossipActive is correct, and to guarantee that we actually are done.
@@ -467,11 +469,11 @@ namespace Shielded.Gossip
                 LastWindowEnd = hisNews.WindowEnd,
                 LastTime = hisNews.Time,
             };
-            _gossipStates[hisNews.From] = new GossipState(hisNews.Time, endMsg.Time, default, true);
+            _gossipStates[hisNews.From] = new GossipState(hisNews.Time, endMsg.Time, default, lastPackageSize, true);
             Shield.SideEffect(() => Transport.Send(hisNews.From, endMsg));
         }
 
-        private void SendReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator)
+        private void SendReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator, int newPackageSize)
         {
             Shield.SideEffect(() =>
             {
@@ -479,7 +481,7 @@ namespace Shielded.Gossip
                 // and it really makes no difference, whatever we skipped now, we'll see
                 // in the next reply. so we change this only in the side-effect.
                 Shield.InTransaction(() => _gossipStates[server] = new GossipState(
-                    msg.LastTime, msg.Time, startEnumerator));
+                    msg.LastTime, msg.Time, startEnumerator, newPackageSize));
                 Transport.Send(server, msg);
             });
         }

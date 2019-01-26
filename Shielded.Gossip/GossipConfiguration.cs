@@ -39,9 +39,9 @@
         /// Must be > 0. The message sizes grow exponentially after that, doubling in size, until they
         /// reach the <see cref="AntiEntropyCutoff"/>. Messages will contain only whole transactions,
         /// so the actual size will not be exactly this number. Reply messages will also include all new
-        /// changes, so they may grow even faster than 2x per reply if the system is under load.
+        /// changes, so they may be bigger when under load.
         /// </summary>
-        public int AntiEntropyInitialTransactions { get; set; } = 10;
+        public int AntiEntropyInitialSize { get; set; } = 10;
 
         /// <summary>
         /// Limit on the size, in key/value pairs, of any message. A message may grow bigger than this
