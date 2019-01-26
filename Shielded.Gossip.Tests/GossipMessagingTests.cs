@@ -444,5 +444,108 @@ namespace Shielded.Gossip.Tests
                     .All(clock => clock == ((VectorClock)(A, 1) | (B, 1))));
             }
         }
+
+        [TestMethod]
+        public void GossipMessaging_SimultaneousGossipStart()
+        {
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                backendA.SetVc("trigger", true.Clock(A));
+                var msgA1 = transportA.LastSentMessage.Msg as NewGossip;
+                Assert.IsNotNull(msgA1);
+
+                backendB.SetVc("trigger", true.Clock(B));
+                var msgB1 = transportB.LastSentMessage.Msg as NewGossip;
+                Assert.IsNotNull(msgB1);
+
+                transportA.Receive(msgB1);
+                var msgA2 = transportA.LastSentMessage.Msg;
+                transportB.Receive(msgA1);
+                var msgB2 = transportB.LastSentMessage.Msg;
+                // only B will answer, because he comes later in the alphabet. since that's fully arbitrary, we
+                // only check that just one of them answered, does not matter which one.
+                Assert.IsTrue(
+                    msgA2 == msgA1 && msgB2 != msgB1 && msgB2 is GossipReply ||
+                    msgA2 != msgA1 && msgB2 == msgB1 && msgA2 is GossipReply);
+
+                // if we resend the start messages again, neither should react anymore!
+                transportA.Receive(msgB1);
+                var msgA3 = transportA.LastSentMessage.Msg;
+                transportB.Receive(msgA1);
+                var msgB3 = transportB.LastSentMessage.Msg;
+                Assert.IsTrue(msgA3 == msgA2 && msgB3 == msgB2);
+            }
+        }
+
+        [TestMethod]
+        public void GossipMessaging_UnexpectedMessage()
+        {
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string>());
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+                AntiEntropyInitialSize = 7,
+                AntiEntropyCutoff = 49,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+                AntiEntropyInitialSize = 7,
+                AntiEntropyCutoff = 49,
+            }))
+            {
+                for (int i = 0; i < 100; i++)
+                {
+                    Shield.InTransaction(() =>
+                    {
+                        for (int j = 0; j < 10; j++)
+                        {
+                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                        }
+                    });
+                }
+                backendA.Configuration.DirectMail = DirectMailType.StartGossip;
+                backendA.Set("trigger", "bla".Lww());
+
+                // let's get them warmed up
+                var msgA1 = transportA.LastSentMessage.Msg;
+                transportB.Receive(msgA1);
+                var msgB1 = transportB.LastSentMessage.Msg;
+                transportA.Receive(msgB1);
+                var msgA2 = transportA.LastSentMessage.Msg;
+                Assert.AreNotEqual(msgA1, msgA2);
+                transportB.Receive(msgA2);
+                var msgB2 = transportB.LastSentMessage.Msg;
+                Assert.AreNotEqual(msgB1, msgB2);
+
+                // now let's see if B will correctly ignore already processed messages
+                transportB.Receive(msgA2);
+                Assert.AreEqual(msgB2, transportB.LastSentMessage.Msg);
+                transportB.Receive(msgA1);
+                Assert.AreEqual(msgB2, transportB.LastSentMessage.Msg);
+
+                // the old messages should not have screwed up his state - he should reply to the correct message
+                transportA.Receive(msgB2);
+                var msgA3 = transportA.LastSentMessage.Msg;
+                Assert.AreNotEqual(msgA2, msgA3);
+                transportB.Receive(msgA3);
+                var msgB3 = transportB.LastSentMessage.Msg;
+                Assert.AreNotEqual(msgB2, msgB3);
+            }
+        }
     }
 }
