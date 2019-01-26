@@ -417,14 +417,12 @@ namespace Shielded.Gossip.Tests
                 // before B receives the message, we change one of the keys on it
                 backendB.SetVc("key-01-05", false.Clock(B));
                 // and we create a subscription that will change stuff when the A message comes in
-                bool fired = false;
                 Shield.InTransaction(() =>
                     backendB.Changed.Subscribe((sender, changed) =>
                     {
-                        if (!fired && changed.Key == "key-00-06")
+                        // the value clock check means we do this only once, otherwise, we'll get a stack overflow.
+                        if (changed.Key == "key-00-06" && ((Multiple<Vc<bool>>)changed.NewValue).MergedClock[B] == 0)
                         {
-                            // we don't want a stack overflow...
-                            fired = true;
                             // we'll change it and one unrelated key, just to be more evil.
                             backendB.SetVc("key-00-06", ((Multiple<Vc<bool>>)changed.NewValue).Single().NextVersion(B));
                             backendB.SetVc("key-00-04", backendB.TryGetClocked<bool>("key-00-04").SingleOrDefault().NextVersion(B));
@@ -442,7 +440,6 @@ namespace Shielded.Gossip.Tests
                     .SequenceEqual(new[] { "key-00-04", "key-00-06", "key-01-05" }));
                 Assert.IsTrue(
                     msgB1.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
                     .Select(i => ((Multiple<Vc<bool>>)i.Value).MergedClock)
                     .All(clock => clock == ((VectorClock)(A, 1) | (B, 1))));
             }
