@@ -205,9 +205,6 @@ namespace Shielded.Gossip
         {
             if (IsGossipActive(server))
                 return false;
-            // if our last sent msg was GossipEnd, the old state will still be in the dict. we include the LastReceivedTime
-            // in case the other side did not receive that end message. in effect, GossipStart doubles as an End to the
-            // previous chain.
             var lastReceivedTime = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedTime : null;
             var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
             var msg = new GossipStart
