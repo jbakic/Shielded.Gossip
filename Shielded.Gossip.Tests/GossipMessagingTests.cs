@@ -414,8 +414,14 @@ namespace Shielded.Gossip.Tests
                 // the full package
                 Assert.AreEqual(21, msgA1.Items.Length);
 
-                // before B receives the message, we change one of the keys on it
+                // before B receives the message, we change some keys on it
                 backendB.SetVc("key-01-05", false.Clock(B));
+                // this one we make equal to the value on A. this means B does have a change on it, but
+                // the value is identical to the one received, and he will not transmit it in the reply.
+                backendB.SetVc("key-01-06", true.Clock(A));
+                // this one we have a higher version. it would maybe make more sense if it was coming from
+                // some third server, but this is just a unit test, it's fine.
+                backendB.SetVc("key-01-07", false.Clock(A, 2));
                 // and we create a subscription that will change stuff when the A message comes in
                 Shield.InTransaction(() =>
                     backendB.Changed.Subscribe((sender, changed) =>
@@ -432,16 +438,20 @@ namespace Shielded.Gossip.Tests
                 transportB.Receive(msgA1);
                 var msgB1 = transportB.LastSentMessage.Msg as GossipReply;
                 Assert.IsNotNull(msgB1);
-                Assert.AreEqual(3, msgB1.Items?.Length ?? 0);
+                Assert.AreEqual(4, msgB1.Items?.Length ?? 0);
                 Assert.IsTrue(
                     msgB1.Items
                     .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
                     .Select(i => i.Key)
-                    .SequenceEqual(new[] { "key-00-04", "key-00-06", "key-01-05" }));
+                    // key-01-07 comes first - the edit on B happened before the incoming msg, and the msg did not
+                    // cause any change on it, so its freshness is less than the others.
+                    .SequenceEqual(new[] { "key-01-07", "key-00-04", "key-00-06", "key-01-05" }));
                 Assert.IsTrue(
                     msgB1.Items
-                    .Select(i => ((Multiple<Vc<bool>>)i.Value).MergedClock)
-                    .All(clock => clock == ((VectorClock)(A, 1) | (B, 1))));
+                    .Select(i => (i.Key, ((Multiple<Vc<bool>>)i.Value).MergedClock))
+                    .All(kc =>
+                         kc.Key != "key-01-07" && kc.MergedClock == ((VectorClock)(A, 1) | (B, 1)) ||
+                         kc.Key == "key-01-07" && kc.MergedClock == (A, 2)));
             }
         }
 

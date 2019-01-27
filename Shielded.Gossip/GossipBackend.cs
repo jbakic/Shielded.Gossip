@@ -271,8 +271,8 @@ namespace Shielded.Gossip
         /// Applies the given items internally, does not cause any direct mail. Applies them
         /// starting from the last, and if they have different Freshness values, they will be
         /// indexed in this backend with different values too. It is assumed they are sorted
-        /// by descending freshness. Result contains keys whose result was Greater, i.e. our
-        /// local value was fully overwritten.
+        /// by descending freshness. Result contains keys whose values are (now) equal in our
+        /// DB to the received values.
         /// </summary>
         internal HashSet<string> ApplyItems(MessageItem[] items, bool respectFreshness) => Shield.InTransaction(() =>
         {
@@ -280,14 +280,19 @@ namespace Shielded.Gossip
                 return null;
             long prevItemFreshness = items[items.Length - 1].Freshness;
             bool freshnessUtilized = false;
-            HashSet<string> greaterKeys = null;
+            HashSet<string> equalKeys = null;
             for (var i = items.Length - 1; i >= 0; i--)
             {
                 var item = items[i];
                 if (item.Data == null)
                     continue;
                 if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
+                {
+                    if (equalKeys == null)
+                        equalKeys = new HashSet<string>();
+                    equalKeys.Add(item.Key);
                     continue;
+                }
                 if (respectFreshness && prevItemFreshness != item.Freshness)
                 {
                     prevItemFreshness = item.Freshness;
@@ -299,14 +304,14 @@ namespace Shielded.Gossip
                 var method = _applyMethods.Get(this, obj.GetType());
                 var itemResult = method(item.Key, obj);
                 freshnessUtilized |= (itemResult & VectorRelationship.Greater) != 0;
-                if (itemResult == VectorRelationship.Greater)
+                if (itemResult == VectorRelationship.Greater || itemResult == VectorRelationship.Equal)
                 {
-                    if (greaterKeys == null)
-                        greaterKeys = new HashSet<string>();
-                    greaterKeys.Add(item.Key);
+                    if (equalKeys == null)
+                        equalKeys = new HashSet<string>();
+                    equalKeys.Add(item.Key);
                 }
             }
-            return greaterKeys;
+            return equalKeys;
         });
 
         private static bool IsByteEqual(byte[] one, byte[] two)
