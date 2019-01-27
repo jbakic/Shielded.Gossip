@@ -142,7 +142,7 @@ namespace Shielded.Gossip
         {
             public readonly DateTimeOffset? LastReceivedTime;
             public readonly DateTimeOffset LastSentTime;
-            public readonly ReverseTimeIndex.Enumerator LastWindowStart;
+            public ReverseTimeIndex.Enumerator LastWindowStart { get; private set; }
             public readonly int LastPackageSize;
             public readonly MessageType LastSentMsgType;
 
@@ -154,6 +154,11 @@ namespace Shielded.Gossip
                 LastWindowStart = lastWindowStart;
                 LastPackageSize = lastPackageSize;
                 LastSentMsgType = lastSentMsgType;
+            }
+
+            public void ReleaseEnumerator()
+            {
+                LastWindowStart = default;
             }
         }
 
@@ -168,7 +173,7 @@ namespace Shielded.Gossip
                 return false;
             if (HasGossipTimedOut(state.LastSentTime))
             {
-                _gossipStates.Remove(server);
+                state.ReleaseEnumerator();
                 return false;
             }
             return true;
