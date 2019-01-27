@@ -648,5 +648,78 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgBX2));
             }
         }
+
+        [TestMethod]
+        public void GossipMessaging_StartAfterEnd()
+        {
+            // the ShouldAcceptMsg became so strict at one point, that it did not accept any
+            // GossipStart message coming after we sent a GossipEnd unless that new starter
+            // contained the correct LastTime. this is of course not necessary, we can always
+            // accept a starter if our last msg was an End...
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                backendA.SetVc("trigger", true.Clock(A));
+                var msgA1 = transportA.LastSentMessage.Msg;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
+                Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
+
+                // we now make another change on A, so that it sends a GossipStart to B. that GossipStart will
+                // have LastTime == null, because A accepted the GossipEnd from B and cleared his state. B should
+                // accept that new gossip.
+                backendA.SetVc("trigger", false.Clock(A, 2));
+                var msgA2 = transportA.LastSentMessage.Msg;
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2);
+                Assert.IsInstanceOfType(msgB2, typeof(GossipEnd));
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB2));
+            }
+        }
+
+        [TestMethod]
+        public void GossipMessaging_SimultaneousStartAfterEnd()
+        {
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                backendA.SetVc("trigger", true.Clock(A));
+                var msgA1 = transportA.LastSentMessage.Msg;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
+                Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
+
+                // we now make another change on both, so they initiate simultaneous gossips
+                backendA.SetVc("trigger", false.Clock(A, 2));
+                var msgA2 = transportA.LastSentMessage.Msg;
+                backendB.SetVc("trigger", false.Clock((VectorClock)(A, 1) | (B, 1)));
+                var msgB2 = transportB.LastSentMessage.Msg;
+
+                var msgA3 = transportA.ReceiveAndGetReply(msgB2);
+                var msgB3 = transportB.ReceiveAndGetReply(msgA2);
+                Assert.IsTrue(
+                    msgA3 == null && msgB3 is GossipReply ||
+                    msgB3 == null && msgA3 is GossipReply);
+            }
+        }
     }
 }

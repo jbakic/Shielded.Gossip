@@ -355,10 +355,11 @@ namespace Shielded.Gossip
                 if (msg.LastTime == state.LastSentTime)
                     return true;
                 else
-                    // otherwise, we can only accept a starter if our msg was a starter too - that's simultaneous start,
-                    // so we answer if the other server has higher "prio".
-                    return state.LastSentMsgType == MessageType.Start &&
-                        StringComparer.InvariantCultureIgnoreCase.Compare(msg.From, Transport.OwnId) < 0;
+                    // otherwise, we can only accept a starter if our msg was an end msg, or in case of simultaneous start,
+                    // if the other server has higher "prio".
+                    return state.LastSentMsgType == MessageType.End ||
+                        state.LastSentMsgType == MessageType.Start &&
+                            StringComparer.InvariantCultureIgnoreCase.Compare(msg.From, Transport.OwnId) < 0;
             }
 
             // in all non-starter messages, he must send us a correct LastTime
