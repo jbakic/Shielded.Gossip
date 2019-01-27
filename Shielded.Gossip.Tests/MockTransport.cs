@@ -22,6 +22,17 @@ namespace Shielded.Gossip.Tests
             MessageReceived?.Invoke(this, msg);
         }
 
+        public object ReceiveAndGetReply(object msg)
+        {
+            var prevCount = SentMessages.Count;
+            MessageReceived?.Invoke(this, msg);
+            if (SentMessages.Count == prevCount)
+                return null;
+            if (SentMessages.Count > prevCount + 1)
+                throw new ApplicationException("More than one reply generated.");
+            return LastSentMessage.Msg;
+        }
+
         public List<(string To, object Msg)> SentMessages = new List<(string, object)>();
 
         public (string To, object Msg) LastSentMessage => SentMessages.Count == 0

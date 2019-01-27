@@ -116,9 +116,8 @@ namespace Shielded.Gossip.Tests
                 // basic check for the window fields.
                 Assert.AreEqual(msgA1.Items[19].Freshness - 1, msgA1.WindowStart);
                 Assert.AreEqual(msgA1.Items[0].Freshness, msgA1.WindowEnd);
-
-                transportB.Receive(msgA1);
-                var msgB1 = transportB.LastSentMessage.Msg as GossipReply;
+ 
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
                 // this confirms that the B server recognizes there's no need to send the same items back to A
                 Assert.AreEqual(0, msgB1.Items?.Length ?? 0);
@@ -127,8 +126,7 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(3, msgB1.WindowEnd);
                 Assert.AreEqual(0, msgB1.WindowStart);
 
-                transportA.Receive(msgB1);
-                var msgA2 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1) as GossipReply;
                 Assert.IsNotNull(msgA2);
                 // in the second round, the target size is 2*17=34, so he takes 40.
                 Assert.AreEqual(40, msgA2.Items.Length);
@@ -145,13 +143,11 @@ namespace Shielded.Gossip.Tests
                 // the window grows. end is equal since there were no new changes in between replies.
                 Assert.IsTrue(msgA2.WindowStart < msgA1.WindowStart && msgA2.WindowEnd == msgA1.WindowEnd);
 
-                transportB.Receive(msgA2);
-                var msgB2 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2) as GossipReply;
                 Assert.IsNotNull(msgB2);
                 Assert.AreEqual(0, msgB2.Items?.Length ?? 0);
 
-                transportA.Receive(msgB2);
-                var msgA3 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA3 = transportA.ReceiveAndGetReply(msgB2) as GossipReply;
                 Assert.IsNotNull(msgA3);
                 // in the third round, the target size is 2*34=68, which exceeds cut-off of 59. cut-off is strict, so
                 // the message will contain only 50 items - 5 whole transactions.
@@ -168,13 +164,11 @@ namespace Shielded.Gossip.Tests
                                 $"key-{i:00}-{j:00}"))));
                 Assert.IsTrue(msgA3.WindowStart < msgA2.WindowStart && msgA3.WindowEnd == msgA2.WindowEnd);
 
-                transportB.Receive(msgA3);
-                var msgB3 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB3 = transportB.ReceiveAndGetReply(msgA3) as GossipReply;
                 Assert.IsNotNull(msgB3);
                 Assert.AreEqual(0, msgB3.Items?.Length ?? 0);
 
-                transportA.Receive(msgB3);
-                var msgA4 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA4 = transportA.ReceiveAndGetReply(msgB3) as GossipReply;
                 Assert.IsNotNull(msgA4);
                 // since we hit cut-off, he will again just send 50 items. we want to make sure that he did not
                 // skip the transaction he stopped at last time.
@@ -230,8 +224,7 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNotNull(msgA1);
                 // initial size is 7, he takes the trigger and one full transaction of 10 items.
                 Assert.AreEqual(11, msgA1.Items.Length);
-                transportB.Receive(msgA1);
-                var msgB1 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
                 Assert.AreEqual(0, msgB1.Items?.Length ?? 0);
 
@@ -248,8 +241,7 @@ namespace Shielded.Gossip.Tests
                     });
                 }
 
-                transportA.Receive(msgB1);
-                var msgA2 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1) as GossipReply;
                 Assert.IsNotNull(msgA2);
                 // in the second round, the target size is 2*7=14. he'll take 20 - 10 new items, and 10 older ones.
                 Assert.AreEqual(20, msgA2.Items.Length);
@@ -266,8 +258,7 @@ namespace Shielded.Gossip.Tests
                 // the window grows. this time, the end expands as well, due to new changes.
                 Assert.IsTrue(msgA2.WindowStart < msgA1.WindowStart && msgA2.WindowEnd > msgA1.WindowEnd);
 
-                transportB.Receive(msgA2);
-                var msgB2 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2) as GossipReply;
                 Assert.IsNotNull(msgB2);
                 Assert.AreEqual(0, msgB2.Items?.Length ?? 0);
 
@@ -284,8 +275,7 @@ namespace Shielded.Gossip.Tests
                     });
                 }
 
-                transportA.Receive(msgB2);
-                var msgA3 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA3 = transportA.ReceiveAndGetReply(msgB2) as GossipReply;
                 Assert.IsNotNull(msgA3);
                 // package size is 28, which would mean 30 items, but we get 40 - all the new changes between replies.
                 Assert.AreEqual(40, msgA3.Items.Length);
@@ -302,8 +292,7 @@ namespace Shielded.Gossip.Tests
                 // here, the start did not move, the message contained only the new changes
                 Assert.IsTrue(msgA3.WindowStart == msgA2.WindowStart && msgA3.WindowEnd > msgA2.WindowEnd);
 
-                transportB.Receive(msgA3);
-                var msgB3 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB3 = transportB.ReceiveAndGetReply(msgA3) as GossipReply;
                 Assert.IsNotNull(msgB3);
                 Assert.AreEqual(0, msgB3.Items?.Length ?? 0);
 
@@ -321,8 +310,7 @@ namespace Shielded.Gossip.Tests
                     });
                 }
 
-                transportA.Receive(msgB3);
-                var msgA4 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA4 = transportA.ReceiveAndGetReply(msgB3) as GossipReply;
                 Assert.IsNotNull(msgA4);
                 Assert.AreEqual(40, msgA4.Items.Length);
                 for (int c = 0; c < 39; c++)
@@ -339,15 +327,13 @@ namespace Shielded.Gossip.Tests
                 // the window slipped!
                 Assert.IsTrue(msgA4.WindowStart > msgA3.WindowEnd);
 
-                transportB.Receive(msgA4);
-                var msgB4 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB4 = transportB.ReceiveAndGetReply(msgA4) as GossipReply;
                 Assert.IsNotNull(msgB4);
                 Assert.AreEqual(0, msgB4.Items?.Length ?? 0);
 
                 // now, without any new changes, let's confirm it just continues. since the window slipped,
                 // it will now resend the items it sent once before already.
-                transportA.Receive(msgB4);
-                var msgA5 = transportA.LastSentMessage.Msg as GossipReply;
+                var msgA5 = transportA.ReceiveAndGetReply(msgB4) as GossipReply;
                 Assert.IsNotNull(msgA5);
                 // cut-off limits us again, but we have 41 now, because the "trigger" item is here again.
                 Assert.AreEqual(41, msgA5.Items.Length);
@@ -435,8 +421,7 @@ namespace Shielded.Gossip.Tests
                         }
                     }));
 
-                transportB.Receive(msgA1);
-                var msgB1 = transportB.LastSentMessage.Msg as GossipReply;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
                 Assert.AreEqual(4, msgB1.Items?.Length ?? 0);
                 Assert.IsTrue(
@@ -479,22 +464,17 @@ namespace Shielded.Gossip.Tests
                 var msgB1 = transportB.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgB1);
 
-                transportA.Receive(msgB1);
-                var msgA2 = transportA.LastSentMessage.Msg;
-                transportB.Receive(msgA1);
-                var msgB2 = transportB.LastSentMessage.Msg;
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1);
+                var msgB2 = transportB.ReceiveAndGetReply(msgA1);
                 // only B will answer, because he comes later in the alphabet. since that's fully arbitrary, we
                 // only check that just one of them answered, does not matter which one.
                 Assert.IsTrue(
-                    msgA2 == msgA1 && msgB2 != msgB1 && msgB2 is GossipReply ||
-                    msgA2 != msgA1 && msgB2 == msgB1 && msgA2 is GossipReply);
+                    msgA2 == null && msgB2 is GossipReply ||
+                    msgB2 == null && msgA2 is GossipReply);
 
                 // if we resend the start messages again, neither should react anymore!
-                transportA.Receive(msgB1);
-                var msgA3 = transportA.LastSentMessage.Msg;
-                transportB.Receive(msgA1);
-                var msgB3 = transportB.LastSentMessage.Msg;
-                Assert.IsTrue(msgA3 == msgA2 && msgB3 == msgB2);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
+                Assert.IsNull(transportB.ReceiveAndGetReply(msgA1));
             }
         }
 
@@ -533,28 +513,21 @@ namespace Shielded.Gossip.Tests
 
                 // let's get them warmed up
                 var msgA1 = transportA.LastSentMessage.Msg;
-                transportB.Receive(msgA1);
-                var msgB1 = transportB.LastSentMessage.Msg;
-                transportA.Receive(msgB1);
-                var msgA2 = transportA.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgA1, msgA2);
-                transportB.Receive(msgA2);
-                var msgB2 = transportB.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgB1, msgB2);
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1);
+                Assert.IsNotNull(msgA2);
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2);
+                Assert.IsNotNull(msgB2);
 
                 // now let's see if B will correctly ignore already processed messages
-                transportB.Receive(msgA2);
-                Assert.AreEqual(msgB2, transportB.LastSentMessage.Msg);
-                transportB.Receive(msgA1);
-                Assert.AreEqual(msgB2, transportB.LastSentMessage.Msg);
+                Assert.IsNull(transportB.ReceiveAndGetReply(msgA2));
+                Assert.IsNull(transportB.ReceiveAndGetReply(msgA1));
 
                 // the old messages should not have screwed up his state - he should reply to the correct message
-                transportA.Receive(msgB2);
-                var msgA3 = transportA.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgA2, msgA3);
-                transportB.Receive(msgA3);
-                var msgB3 = transportB.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgB2, msgB3);
+                var msgA3 = transportA.ReceiveAndGetReply(msgB2);
+                Assert.IsNotNull(msgA3);
+                var msgB3 = transportB.ReceiveAndGetReply(msgA3);
+                Assert.IsNotNull(msgB3);
             }
         }
 
@@ -576,8 +549,7 @@ namespace Shielded.Gossip.Tests
             {
                 backendA.SetVc("trigger", true.Clock(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
-                transportB.Receive(msgA1);
-                var msgB1 = transportB.LastSentMessage.Msg;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
 
                 // both will now get new changes.
@@ -594,23 +566,17 @@ namespace Shielded.Gossip.Tests
                 // A will accept his message, because B included in his GossipStart the same LastTime he sent
                 // in his GossipEnd. this is meant for this case exactly. A can then recognize that he did
                 // not (yet) receive the GossipEnd message, and will just accept the new chain.
-                transportA.Receive(msgBX);
-                var msgAX = transportA.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgA1, msgAX);
+                var msgAX = transportA.ReceiveAndGetReply(msgBX);
                 Assert.IsInstanceOfType(msgAX, typeof(GossipReply));
 
                 // the delayed end msg will now be rejected by A.
-                transportA.Receive(msgB1);
-                Assert.AreEqual(msgAX, transportA.LastSentMessage.Msg);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
 
                 // from this point on, all is well - they both accept the new chain only.
-                transportB.Receive(msgAX);
-                var msgBX2 = transportB.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgBX, msgBX2);
+                var msgBX2 = transportB.ReceiveAndGetReply(msgAX);
                 Assert.IsInstanceOfType(msgBX2, typeof(GossipEnd));
 
-                transportA.Receive(msgBX2);
-                Assert.AreEqual(msgAX, transportA.LastSentMessage.Msg);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgBX2));
             }
         }
 
@@ -647,17 +613,12 @@ namespace Shielded.Gossip.Tests
                 backendA.Configuration.DirectMail = DirectMailType.StartGossip;
                 backendA.SetVc("trigger", true.Clock(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
-                transportB.Receive(msgA1);
-                var msgB1 = transportB.LastSentMessage.Msg;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipReply));
 
-                transportA.Receive(msgB1);
-                var msgA2 = transportA.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgA1, msgA2);
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1);
                 Assert.IsInstanceOfType(msgA2, typeof(GossipReply));
-                transportB.Receive(msgA2);
-                var msgB2 = transportB.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgB1, msgB2);
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2);
                 Assert.IsInstanceOfType(msgB2, typeof(GossipEnd));
 
                 // so, they are in sync, but before A receives the end msg, both will get new changes.
@@ -674,23 +635,17 @@ namespace Shielded.Gossip.Tests
                 // behavior here the same as above, A can recognize that he missed a GossipEnd, and
                 // behaves as if he had received it. in a way, a GossipStart that has LastTime doubles as
                 // a GossipEnd message too.
-                transportA.Receive(msgBX);
-                var msgAX = transportA.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgA2, msgAX);
+                var msgAX = transportA.ReceiveAndGetReply(msgBX);
                 Assert.IsInstanceOfType(msgAX, typeof(GossipReply));
 
                 // the delayed end msg will now be rejected by A.
-                transportA.Receive(msgB2);
-                Assert.AreEqual(msgAX, transportA.LastSentMessage.Msg);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB2));
 
                 // from this point on, all is well - they both accept the new chain only.
-                transportB.Receive(msgAX);
-                var msgBX2 = transportB.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgBX, msgBX2);
+                var msgBX2 = transportB.ReceiveAndGetReply(msgAX);
                 Assert.IsInstanceOfType(msgBX2, typeof(GossipEnd));
 
-                transportA.Receive(msgBX2);
-                Assert.AreEqual(msgAX, transportA.LastSentMessage.Msg);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgBX2));
             }
         }
     }
