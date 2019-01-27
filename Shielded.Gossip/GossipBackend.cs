@@ -131,22 +131,29 @@ namespace Shielded.Gossip
                 StartGossip(server);
         }
 
+        private enum MessageType
+        {
+            Start,
+            Reply,
+            End
+        }
+
         private class GossipState
         {
             public readonly DateTimeOffset? LastReceivedTime;
             public readonly DateTimeOffset LastSentTime;
             public readonly ReverseTimeIndex.Enumerator LastWindowStart;
             public readonly int LastPackageSize;
-            public readonly bool LastSentMsgWasEnd;
+            public readonly MessageType LastSentMsgType;
 
             public GossipState(DateTimeOffset? lastReceivedTime, DateTimeOffset lastSentTime, ReverseTimeIndex.Enumerator lastWindowStart,
-                int lastPackageSize, bool lastSentMsgWasEnd = false)
+                int lastPackageSize, MessageType lastSentMsgType)
             {
                 LastReceivedTime = lastReceivedTime;
                 LastSentTime = lastSentTime;
                 LastWindowStart = lastWindowStart;
                 LastPackageSize = lastPackageSize;
-                LastSentMsgWasEnd = lastSentMsgWasEnd;
+                LastSentMsgType = lastSentMsgType;
             }
         }
 
@@ -157,7 +164,7 @@ namespace Shielded.Gossip
 
         private bool IsGossipActive(string server) => Shield.InTransaction(() =>
         {
-            if (!_gossipStates.TryGetValue(server, out var state) || state.LastSentMsgWasEnd)
+            if (!_gossipStates.TryGetValue(server, out var state) || state.LastSentMsgType == MessageType.End)
                 return false;
             if (HasGossipTimedOut(state.LastSentTime))
             {
@@ -193,16 +200,21 @@ namespace Shielded.Gossip
         {
             if (IsGossipActive(server))
                 return false;
+            // if our last sent msg was GossipEnd, the old state will still be in the dict. we include the LastReceivedTime
+            // in case the other side did not receive that end message. in effect, GossipStart doubles as an End to the
+            // previous chain.
+            var lastReceivedTime = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedTime : null;
             var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
-            var msg = new NewGossip
+            var msg = new GossipStart
             {
                 From = Transport.OwnId,
                 DatabaseHash = _databaseHash.Value,
                 Items = toSend.Length == 0 ? null : toSend,
                 WindowStart = toSend.Length == 0 || newWindowStart.IsDefault ? 0 : newWindowStart.Current.Freshness,
-                WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness
+                WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness,
+                LastTime = lastReceivedTime,
             };
-            _gossipStates[server] = new GossipState(null, msg.Time, newWindowStart, Configuration.AntiEntropyInitialSize);
+            _gossipStates[server] = new GossipState(null, msg.Time, newWindowStart, Configuration.AntiEntropyInitialSize, MessageType.Start);
             Shield.SideEffect(() => Transport.Send(server, msg));
             return true;
         });
@@ -215,13 +227,13 @@ namespace Shielded.Gossip
                     ApplyItems(trans.Items, true);
                     break;
 
-                case NewGossip pkg:
-                    var reply = pkg as GossipReply;
-                    if (!ShouldAcceptMsg(pkg.From, pkg.Time, reply?.LastWindowStart, reply?.LastTime, out var currentState1))
+                case GossipMessage gossip:
+                    var pkg = gossip as NewGossip;
+                    if (!ShouldAcceptMsg(gossip, out var currentState))
                         return;
                     long? ignoreUpToFreshness = null;
                     HashSet<string> keysToIgnore = null;
-                    if (pkg.Items != null && pkg.DatabaseHash != _databaseHash.Value)
+                    if (pkg?.Items != null && gossip.DatabaseHash != _databaseHash.Value)
                     {
                         Shield.InTransaction(() =>
                         {
@@ -251,13 +263,7 @@ namespace Shielded.Gossip
                                 keysToIgnore = null;
                         });
                     }
-                    SendReply(pkg, currentState1, ignoreUpToFreshness, keysToIgnore);
-                    break;
-
-                case GossipEnd end:
-                    if (!ShouldAcceptMsg(end.From, end.Time, null, end.LastTime, out var currentState2))
-                        return;
-                    SendReply(end, currentState2);
+                    SendReply(gossip, currentState, ignoreUpToFreshness, keysToIgnore);
                     break;
             }
         }
@@ -327,75 +333,44 @@ namespace Shielded.Gossip
             return true;
         }
 
-        private bool ShouldAcceptMsg(string server, DateTimeOffset hisTime, long? ourLastStart, DateTimeOffset? ourLastTime,
-            out GossipState currentState)
+        private bool ShouldAcceptMsg(GossipMessage msg, out GossipState currentState)
         {
             currentState = null;
-            // first, a regular RTT timeout check
+            var isStarter = msg is GossipStart;
             var now = DateTimeOffset.UtcNow;
-            if (ourLastTime != null && HasGossipTimedOut(ourLastTime.Value, now))
+            // first, a regular RTT timeout check. msg.LastTime must be given in non-starter messages.
+            if (!isStarter && HasGossipTimedOut(msg.LastTime.Value, now))
                 return false;
             // then, if our state is obsolete, we will only accept starter messages.
-            if (!_gossipStates.TryGetValue(server, out var state) || HasGossipTimedOut(state.LastSentTime, now))
+            if (!_gossipStates.TryGetValue(msg.From, out var state) || HasGossipTimedOut(state.LastSentTime, now))
+                return isStarter;
+
+            // we have an active state. handling starter messages first.
+            if (isStarter)
             {
-                return ourLastTime == null;
+                // this means he was aware of our last message, whatever it was, and chose to send us this. OK.
+                // this may happen if he sent us a GossipEnd before, but we did not receive it (yet).
+                if (msg.LastTime == state.LastSentTime)
+                    return true;
+                else
+                    // otherwise, we can only accept a starter if our msg was a starter too - that's simultaneous start,
+                    // so we answer if the other server has higher "prio".
+                    return state.LastSentMsgType == MessageType.Start &&
+                        StringComparer.InvariantCultureIgnoreCase.Compare(msg.From, Transport.OwnId) < 0;
             }
 
-            // here we have a state. we will cover all possible cases separately.
-            // did we previously send him a gossip start message?
-            if (state.LastReceivedTime == null)
-            {
-                // is he replying to it? if yes, the times will match.
-                if (ourLastTime == state.LastSentTime)
-                {
-                    // if he's sending a GossipEnd, ourLastStart will be null. that's OK.
-                    if (ourLastStart == null)
-                        return true;
-                    // otherwise, we expect the LastWindowStart he sent us to be correct.
-                    else if (ourLastStart != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
-                        throw new ApplicationException("Reply chain logic failure.");
-                    currentState = state;
-                    return true;
-                }
-                else
-                {
-                    // if he's not replying, then we will only answer if it's his start msg. it means we're starting
-                    // an exchange in parallel, and the higher prio server will win.
-                    return ourLastTime == null && StringComparer.InvariantCultureIgnoreCase.Compare(server, Transport.OwnId) < 0;
-                }
-            }
-            // so, we last replied to something.
-            // if this message of his is older than or the same one as the one we already replied to, then we ignore it.
-            else if (state.LastReceivedTime >= hisTime)
-            {
+            // in all non-starter messages, he must send us a correct LastTime
+            if (state.LastSentTime != msg.LastTime)
                 return false;
-            }
-            else
-            {
-                // this is a weird case - his message Time is newer than the LastReceivedTime, and yet, instead of
-                // replying to our last msg to him, he's sending a new gossip start message... we may reply to this,
-                // since by sending this message to us he already changed his state and will insist on us replying to this.
-                if (ourLastTime == null)
-                {
-                    return true;
-                }
-                // if here, then we replied to him, and he's replying to us. we only answer to replies to our latest message.
-                else if (ourLastTime != state.LastSentTime)
-                {
-                    return false;
-                }
-                else
-                {
-                    // if he's sending a GossipEnd, ourLastStart will be null. that's OK.
-                    if (ourLastStart == null)
-                        return true;
-                    // otherwise, he is replying to our latest message. here, again, we expect the window starts to match.
-                    else if ((ourLastStart ?? 0) != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
-                        throw new ApplicationException("Reply chain logic failure.");
-                    currentState = state;
-                    return true;
-                }
-            }
+
+            // so, he's replying. this is just a safety check, to see if the windows match. they will.
+            var ourLastStart = (msg as GossipReply)?.LastWindowStart ?? 0;
+            if (ourLastStart > 0 && ourLastStart != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
+                throw new ApplicationException("Reply chain logic failure.");
+
+            // OK, everything checks out
+            currentState = state;
+            return true;
         }
 
         private void SendReply(GossipMessage replyTo, GossipState currentState,
@@ -406,7 +381,7 @@ namespace Shielded.Gossip
             var hisReply = replyTo as GossipReply;
             var hisEnd = replyTo as GossipEnd;
 
-            var lastWindowStart = hisReply?.LastWindowStart;
+            var lastWindowStart = hisReply?.LastWindowStart ?? 0;
             var lastWindowEnd = hisReply?.LastWindowEnd ?? hisEnd?.LastWindowEnd;
 
             var ownHash = _databaseHash.Value;
@@ -422,8 +397,9 @@ namespace Shielded.Gossip
             var packageSize = currentState == null
                 ? Configuration.AntiEntropyInitialSize
                 : Math.Max(Configuration.AntiEntropyInitialSize,
-                    (int)Math.Min(Configuration.AntiEntropyCutoff, currentState.LastPackageSize * 2));
-            var toSend = GetPackage(packageSize, currentState?.LastWindowStart ?? default, lastWindowEnd,
+                    Math.Min(Configuration.AntiEntropyCutoff, currentState.LastPackageSize * 2));
+            var toSend = GetPackage(packageSize,
+                lastWindowStart > 0 ? currentState.LastWindowStart : default, lastWindowEnd,
                 ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
 
             if (toSend.Length == 0)
@@ -477,7 +453,7 @@ namespace Shielded.Gossip
                 LastWindowEnd = hisNews.WindowEnd,
                 LastTime = hisNews.Time,
             };
-            _gossipStates[hisNews.From] = new GossipState(hisNews.Time, endMsg.Time, default, lastPackageSize, true);
+            _gossipStates[hisNews.From] = new GossipState(hisNews.Time, endMsg.Time, default, lastPackageSize, MessageType.End);
             Shield.SideEffect(() => Transport.Send(hisNews.From, endMsg));
         }
 
@@ -489,7 +465,7 @@ namespace Shielded.Gossip
                 // and it really makes no difference, whatever we skipped now, we'll see
                 // in the next reply. so we change this only in the side-effect.
                 Shield.InTransaction(() => _gossipStates[server] = new GossipState(
-                    msg.LastTime, msg.Time, startEnumerator, newPackageSize));
+                    msg.LastTime, msg.Time, startEnumerator, newPackageSize, MessageType.Reply));
                 Transport.Send(server, msg);
             });
         }

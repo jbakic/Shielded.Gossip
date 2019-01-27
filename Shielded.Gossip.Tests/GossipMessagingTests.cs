@@ -28,7 +28,7 @@ namespace Shielded.Gossip.Tests
 
                 var (to, msg) = transport.LastSentMessage;
                 Assert.AreEqual(B, to);
-                Assert.IsTrue(msg is NewGossip);
+                Assert.IsTrue(msg is GossipStart);
             }
         }
 
@@ -51,7 +51,7 @@ namespace Shielded.Gossip.Tests
                 backendA.SetVc("key", (25.5m).Clock(A));
                 var (to, msg) = transportA.LastSentMessage;
                 Assert.AreEqual(B, to);
-                var starter = msg as NewGossip;
+                var starter = msg as GossipStart;
                 Assert.IsNotNull(starter);
 
                 transportB.Receive(msg);
@@ -97,7 +97,7 @@ namespace Shielded.Gossip.Tests
                 backendA.Configuration.DirectMail = DirectMailType.StartGossip;
                 backendA.Set("trigger", "bla".Lww());
 
-                var msgA1 = transportA.LastSentMessage.Msg as NewGossip;
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // we breach the initial size of 17 while going through the third transaction, and since initial size
                 // is not strict, he takes the third transaction too, resulting in 21 items (trigger + 2x10...)
@@ -226,7 +226,7 @@ namespace Shielded.Gossip.Tests
                 backendA.Configuration.DirectMail = DirectMailType.StartGossip;
                 backendA.Set("trigger", "bla".Lww());
 
-                var msgA1 = transportA.LastSentMessage.Msg as NewGossip;
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // initial size is 7, he takes the trigger and one full transaction of 10 items.
                 Assert.AreEqual(11, msgA1.Items.Length);
@@ -409,7 +409,7 @@ namespace Shielded.Gossip.Tests
                 backendA.Configuration.DirectMail = DirectMailType.StartGossip;
                 backendA.Set("trigger", "bla".Lww());
 
-                var msgA1 = transportA.LastSentMessage.Msg as NewGossip;
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // the full package
                 Assert.AreEqual(21, msgA1.Items.Length);
@@ -472,11 +472,11 @@ namespace Shielded.Gossip.Tests
             }))
             {
                 backendA.SetVc("trigger", true.Clock(A));
-                var msgA1 = transportA.LastSentMessage.Msg as NewGossip;
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
 
                 backendB.SetVc("trigger", true.Clock(B));
-                var msgB1 = transportB.LastSentMessage.Msg as NewGossip;
+                var msgB1 = transportB.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgB1);
 
                 transportA.Receive(msgB1);
@@ -589,26 +589,28 @@ namespace Shielded.Gossip.Tests
                 // yes new message, because B sent a GossipEnd and he thinks the gossip is done.
                 var msgBX = transportB.LastSentMessage.Msg;
                 Assert.AreNotEqual(msgB1, msgBX);
-                Assert.IsInstanceOfType(msgBX, typeof(NewGossip));
+                Assert.IsInstanceOfType(msgBX, typeof(GossipStart));
 
-                // A will ignore this new gossip message - he sent a NewGossip, and now he's receiving
-                // a NewGossip, so he thinks that they just simultaneously sent start messages to each
-                // other. so he just ignores, because he comes first in the alphabet.
+                // A will accept his message, because B included in his GossipStart the same LastTime he sent
+                // in his GossipEnd. this is meant for this case exactly. A can then recognize that he did
+                // not (yet) receive the GossipEnd message, and will just accept the new chain.
                 transportA.Receive(msgBX);
-                Assert.AreEqual(msgA1, transportA.LastSentMessage.Msg);
+                var msgAX = transportA.LastSentMessage.Msg;
+                Assert.AreNotEqual(msgA1, msgAX);
+                Assert.IsInstanceOfType(msgAX, typeof(GossipReply));
 
-                // A will respond to the end msg with a GossipReply
+                // the delayed end msg will now be rejected by A.
                 transportA.Receive(msgB1);
-                var msgA2 = transportA.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgA1, msgA2);
-                Assert.IsInstanceOfType(msgA2, typeof(GossipReply));
+                Assert.AreEqual(msgAX, transportA.LastSentMessage.Msg);
 
-                // FAILURE: B thinks he's in the new chain, and will not accept the msgA2 because
-                // it replies to the end of his old chain!
-                transportB.Receive(msgA2);
-                var msgB2 = transportB.LastSentMessage.Msg;
-                Assert.AreNotEqual(msgBX, msgB2);
-                Assert.IsInstanceOfType(msgB2, typeof(GossipReply));
+                // from this point on, all is well - they both accept the new chain only.
+                transportB.Receive(msgAX);
+                var msgBX2 = transportB.LastSentMessage.Msg;
+                Assert.AreNotEqual(msgBX, msgBX2);
+                Assert.IsInstanceOfType(msgBX2, typeof(GossipEnd));
+
+                transportA.Receive(msgBX2);
+                Assert.AreEqual(msgAX, transportA.LastSentMessage.Msg);
             }
         }
 
@@ -667,14 +669,11 @@ namespace Shielded.Gossip.Tests
                 // yes new message, because B sent a GossipEnd and he thinks the gossip is done.
                 var msgBX = transportB.LastSentMessage.Msg;
                 Assert.AreNotEqual(msgB2, msgBX);
-                Assert.IsInstanceOfType(msgBX, typeof(NewGossip));
+                Assert.IsInstanceOfType(msgBX, typeof(GossipStart));
 
-                // this is why this test is called a "late end" - the previous test differs here:
-                // A will accept this message! he thinks the first gossip chain is still running,
-                // but he already received messages from B in that chain, and he will be able to
-                // recognize that this message from B is newer than any previously seen, and he'll
-                // just go with it. in "early conflict" test, he could not recognize this since he
-                // received nothing from B and had no last received time from B to go on.
+                // behavior here the same as above, A can recognize that he missed a GossipEnd, and
+                // behaves as if he had received it. in a way, a GossipStart that has LastTime doubles as
+                // a GossipEnd message too.
                 transportA.Receive(msgBX);
                 var msgAX = transportA.LastSentMessage.Msg;
                 Assert.AreNotEqual(msgA2, msgAX);

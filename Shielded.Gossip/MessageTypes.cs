@@ -19,10 +19,15 @@ namespace Shielded.Gossip
         public VersionHash DatabaseHash { get; set; }
         [DataMember]
         public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
+        /// <summary>
+        /// Will always be set on reply and end messages.
+        /// </summary>
+        [DataMember]
+        public DateTimeOffset? LastTime { get; set; }
     }
 
     [DataContract(Namespace = ""), Serializable]
-    public class NewGossip : GossipMessage
+    public abstract class NewGossip : GossipMessage
     {
         [DataMember]
         public MessageItem[] Items { get; set; }
@@ -33,14 +38,15 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
+    public class GossipStart : NewGossip { }
+
+    [DataContract(Namespace = ""), Serializable]
     public class GossipReply : NewGossip
     {
         [DataMember]
         public long LastWindowStart { get; set; }
         [DataMember]
         public long LastWindowEnd { get; set; }
-        [DataMember]
-        public DateTimeOffset LastTime { get; set; }
     }
 
     [DataContract(Namespace = ""), Serializable]
@@ -53,8 +59,6 @@ namespace Shielded.Gossip
 
         [DataMember]
         public long LastWindowEnd { get; set; }
-        [DataMember]
-        public DateTimeOffset LastTime { get; set; }
     }
 
     [DataContract(Namespace = ""), Serializable]
