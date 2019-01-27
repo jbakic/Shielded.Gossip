@@ -719,6 +719,11 @@ namespace Shielded.Gossip.Tests
                 Assert.IsTrue(
                     msgA3 == null && msgB3 is GossipReply ||
                     msgB3 == null && msgA3 is GossipReply);
+
+                if (msgA3 != null)
+                    Assert.IsInstanceOfType(transportB.ReceiveAndGetReply(msgA3), typeof(GossipEnd));
+                else
+                    Assert.IsInstanceOfType(transportA.ReceiveAndGetReply(msgB3), typeof(GossipEnd));
             }
         }
     }
