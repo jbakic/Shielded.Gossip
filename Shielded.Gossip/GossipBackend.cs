@@ -146,6 +146,8 @@ namespace Shielded.Gossip
             public readonly int LastPackageSize;
             public readonly MessageType LastSentMsgType;
 
+            public readonly int CreationTickCount = Environment.TickCount;
+
             public GossipState(DateTimeOffset? lastReceivedTime, DateTimeOffset lastSentTime, ReverseTimeIndex.Enumerator lastWindowStart,
                 int lastPackageSize, MessageType lastSentMsgType)
             {
@@ -164,14 +166,14 @@ namespace Shielded.Gossip
 
         private ShieldedDictNc<string, GossipState> _gossipStates = new ShieldedDictNc<string, GossipState>(StringComparer.InvariantCultureIgnoreCase);
 
-        private bool HasGossipTimedOut(DateTimeOffset lastTime, DateTimeOffset? now = null) =>
-            ((now ?? DateTimeOffset.UtcNow) - lastTime).TotalMilliseconds >= Configuration.AntiEntropyIdleTimeout;
+        private bool HasTimedOut(GossipState state) =>
+            unchecked(Environment.TickCount - state.CreationTickCount) >= Configuration.AntiEntropyIdleTimeout;
 
         private bool IsGossipActive(string server) => Shield.InTransaction(() =>
         {
             if (!_gossipStates.TryGetValue(server, out var state) || state.LastSentMsgType == MessageType.End)
                 return false;
-            if (HasGossipTimedOut(state.LastSentTime))
+            if (HasTimedOut(state))
             {
                 state.ReleaseEnumerator();
                 return false;
@@ -339,12 +341,8 @@ namespace Shielded.Gossip
         {
             currentState = null;
             var isStarter = msg is GossipStart;
-            var now = DateTimeOffset.UtcNow;
-            // first, a regular RTT timeout check. msg.LastTime must be given in non-starter messages.
-            if (!isStarter && HasGossipTimedOut(msg.LastTime.Value, now))
-                return false;
-            // then, if our state is obsolete, we will only accept starter messages.
-            if (!_gossipStates.TryGetValue(msg.From, out var state) || HasGossipTimedOut(state.LastSentTime, now))
+            // if our state is obsolete, we will only accept starter messages.
+            if (!_gossipStates.TryGetValue(msg.From, out var state) || HasTimedOut(state))
                 return isStarter;
 
             // we have an active state. handling starter messages first.
