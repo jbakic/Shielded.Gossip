@@ -788,5 +788,41 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB2));
             }
         }
+
+        [TestMethod]
+        public void GossipMessaging_NastyPreCommit()
+        {
+            // originally, the GossipBackend used a PreCommit to sync the reverse time index
+            // with the main dictionary. the PreCommits are, however, problematic, because they
+            // do not trigger each other - if the main transaction changes nothing, but another
+            // PreCommit does make a change, the syncing of indexes would not be done, and no
+            // direct mail would be activated. new version avoids using PreCommits.
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                var x = new Shielded<int>();
+                using (Shield.PreCommit(() => { int a = x; return true; }, () =>
+                {
+                    backendA.SetVc("trigger", true.Clock(A));
+                }))
+                {
+                    Shield.InTransaction(() => x.Value = 1);
+                }
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
+                Assert.IsNotNull(msgA1);
+                Assert.AreEqual(1, msgA1.Items.Length);
+                Assert.AreEqual("trigger", msgA1.Items[0].Key);
+            }
+        }
     }
 }

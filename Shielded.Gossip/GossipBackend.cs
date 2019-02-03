@@ -20,12 +20,10 @@ namespace Shielded.Gossip
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ReverseTimeIndex _freshIndex;
         private readonly Shielded<VersionHash> _databaseHash = new Shielded<VersionHash>();
-        private readonly ShieldedLocal<bool> _changeLock = new ShieldedLocal<bool>();
-        private readonly ShieldedLocal<HashSet<string>> _keysToMail = new ShieldedLocal<HashSet<string>>();
+        private readonly ShieldedLocal<Dictionary<string, MessageItem>> _toMail = new ShieldedLocal<Dictionary<string, MessageItem>>();
 
         private readonly Timer _gossipTimer;
         private readonly Timer _deletableTimer;
-        private readonly IDisposable _preCommit;
 
         public readonly ITransport Transport;
         public readonly GossipConfiguration Configuration;
@@ -45,21 +43,6 @@ namespace Shielded.Gossip
 
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
             _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.DeletableCleanUpInterval, Configuration.DeletableCleanUpInterval);
-
-            _preCommit = Shield.PreCommit(() => _local.TryGetValue("any", out MessageItem _) || true, () =>
-            {
-                // so nobody sneaks in a PreCommit after this one, and screws up the fresh index.
-                _changeLock.Value = true;
-                SyncIndexes();
-                if (_keysToMail.HasValue && _keysToMail.Value.Count > 0)
-                {
-                    var items = _keysToMail.Value
-                        .Select(key => _local.TryGetValue(key, out var mi) ? mi : null)
-                        .Where(mi => mi != null)
-                        .ToArray();
-                    Shield.SideEffect(() => DoDirectMail(items));
-                }
-            });
         }
 
         private TimerCallback GetDeletableTimerMethod()
@@ -96,14 +79,6 @@ namespace Shielded.Gossip
                         Monitor.Exit(lockObj);
                 }
             };
-        }
-
-        private void SyncIndexes()
-        {
-            _freshIndex.Append(_local.Changes
-                .Select(key => _local.TryGetValue(key, out var mi) ? mi : null)
-                .Where(mi => mi != null)
-                .ToArray());
         }
 
         private void DoDirectMail(MessageItem[] items)
@@ -249,23 +224,14 @@ namespace Shielded.Gossip
                                 else
                                     Shield.SyncSideEffect(() =>
                                     {
-                                        // this happens if we receive a msg just as someone disposed us! the pre-commit is
-                                        // not subscribed any more.
-                                        if (!_changeLock.HasValue)
-                                        {
-                                            keysToIgnore = null;
-                                        }
-                                        else
-                                        {
-                                            // we don't want to send back the same things we just received. so, ignore all keys from
-                                            // the incoming msg for which the result of application was Greater, which means our
-                                            // local value is now identical to the received one, unless they also appear in _keysToMail,
-                                            // which means a Changed handler made further changes to them.
-                                            // we need the max freshness in case these fields change after this transaction.
-                                            ignoreUpToFreshness = _freshIndex.LastFreshness;
-                                            if (_keysToMail.HasValue)
-                                                keysToIgnore.ExceptWith(_keysToMail.Value);
-                                        }
+                                        // we don't want to send back the same things we just received. so, ignore all keys from
+                                        // the incoming msg for which the result of application was Greater, which means our
+                                        // local value is now identical to the received one, unless they also appear in _toMail,
+                                        // which means a Changed handler made further changes to them.
+                                        // we need the max freshness in case these fields change after this transaction.
+                                        ignoreUpToFreshness = _freshIndex.LastFreshness;
+                                        if (_toMail.HasValue)
+                                            keysToIgnore.ExceptWith(_toMail.Value.Keys);
                                     });
                             }
                         });
@@ -586,16 +552,28 @@ namespace Shielded.Gossip
                 throw new ArgumentNullException("key");
             if (!_local.TryGetValue(key, out var mi))
                 return;
-            _local[key] = new MessageItem
+            var newItem = new MessageItem
             {
                 Key = key,
                 Data = mi.Data,
                 Deletable = mi.Deletable,
                 FreshnessOffset = _freshnessContext.GetValueOrDefault()
             };
-            var set = _keysToMail.HasValue ? _keysToMail.Value : (_keysToMail.Value = new HashSet<string>());
-            set.Add(key);
+            _local[key] = newItem;
+            _freshIndex.Append(newItem);
+            AddToMail(newItem);
         });
+
+        private void AddToMail(MessageItem item)
+        {
+            var dict = _toMail.GetValueOrDefault();
+            if (dict == null)
+            {
+                _toMail.Value = dict = new Dictionary<string, MessageItem>();
+                Shield.SideEffect(() => DoDirectMail(dict.Values.ToArray()));
+            }
+            dict[item.Key] = item;
+        }
 
         /// <summary>
         /// Sets the given value under the given key, merging it with any already existing value
@@ -606,22 +584,20 @@ namespace Shielded.Gossip
         public VectorRelationship Set<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
             => Shield.InTransaction(() =>
         {
-            var res = SetInternal(key, val);
-            if ((res & VectorRelationship.Greater) == 0)
-                return res;
-            var set = _keysToMail.HasValue ? _keysToMail.Value : (_keysToMail.Value = new HashSet<string>());
-            set.Add(key);
-            return res;
+            return SetInternalWithAddToMail(key, val, true);
         });
 
         private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+        {
+            return SetInternalWithAddToMail(key, val, false);
+        }
+
+        private VectorRelationship SetInternalWithAddToMail<TItem>(string key, TItem val, bool addToMail) where TItem : IMergeable<TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException("key");
             if (val == null)
                 throw new ArgumentNullException("val");
-            if (_changeLock.GetValueOrDefault())
-                throw new InvalidOperationException("Changes are blocked at this time.");
             if (_local.TryGetValue(key, out MessageItem oldItem))
             {
                 var oldVal = (TItem)oldItem.Value;
@@ -637,13 +613,17 @@ namespace Shielded.Gossip
                     throw new ApplicationException("IMergeable.MergeWith should not return null for non-null arguments.");
 
                 var deletable = val is IDeletable del && del.CanDelete;
-                _local[key] = new MessageItem
+                var newItem = new MessageItem
                 {
                     Key = key,
                     Value = val,
                     Deletable = deletable,
                     FreshnessOffset = _freshnessContext.GetValueOrDefault(),
                 };
+                _local[key] = newItem;
+                _freshIndex.Append(newItem);
+                if (addToMail)
+                    AddToMail(newItem);
                 var hash = oldHash ^ (deletable ? default : GetHash(key, val));
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
@@ -654,12 +634,16 @@ namespace Shielded.Gossip
             {
                 if (val is IDeletable del && del.CanDelete)
                     return VectorRelationship.Equal;
-                _local[key] = new MessageItem
+                var newItem = new MessageItem
                 {
                     Key = key,
                     Value = val,
                     FreshnessOffset = _freshnessContext.GetValueOrDefault(),
                 };
+                _local[key] = newItem;
+                _freshIndex.Append(newItem);
+                if (addToMail)
+                    AddToMail(newItem);
                 var hash = GetHash(key, val);
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
@@ -684,7 +668,6 @@ namespace Shielded.Gossip
             Transport.Dispose();
             _gossipTimer.Dispose();
             _deletableTimer.Dispose();
-            _preCommit.Dispose();
         }
 
         /// <summary>

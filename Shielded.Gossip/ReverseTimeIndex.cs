@@ -100,40 +100,35 @@ namespace Shielded.Gossip
             _currentItemGetter = currentItemGetter ?? throw new ArgumentNullException();
         }
 
-        public void Append(MessageItem[] items)
+        private readonly ShieldedLocal<Dictionary<string, MessageItem>> _toAppend = new ShieldedLocal<Dictionary<string, MessageItem>>();
+
+        public void Append(MessageItem item)
         {
-            if (!items.Any())
-                return;
-            Array.Sort(items, (a, b) => a.FreshnessOffset.CompareTo(b.FreshnessOffset));
-            ListElement last = null, first = null;
-            foreach (var item in items)
+            if (item == null)
+                throw new ArgumentNullException(nameof(item));
+            var toAppend = _toAppend.GetValueOrDefault();
+            if (toAppend == null)
             {
-                last = new ListElement
+                _toAppend.Value = toAppend = new Dictionary<string, MessageItem>();
+                _listHead.Commute(AppendCommute);
+            }
+            toAppend[item.Key] = item;
+        }
+
+        private void AppendCommute(ref ListElement cell)
+        {
+            var newFresh = (cell?.Freshness ?? 0) + 1;
+            foreach (var kvp in _toAppend.Value.OrderBy(kvp => kvp.Value.FreshnessOffset))
+            {
+                var item = kvp.Value;
+                item.Freshness = newFresh + item.FreshnessOffset;
+                cell = new ListElement
                 {
                     Item = item,
-                    Previous = last,
+                    Freshness = item.Freshness,
+                    Previous = cell,
                 };
-                if (first == null)
-                    first = last;
             }
-            _listHead.Commute((ref ListElement cell) =>
-            {
-                // we must assign Freshness to items within this transaction, so that the correct value is
-                // visible as soon as we commit. it may not be changed later, because that would be unsafe.
-                // to maintain this commute, we must read the last appended Freshness from cell.
-                var newFresh = (cell?.Freshness ?? 0) + 1;
-                var curr = last;
-                while (true)
-                {
-                    curr.Freshness = curr.Item.Freshness = newFresh + curr.Item.FreshnessOffset;
-                    // since we change first.Previous below, we cannot just continue down Previouses until null...
-                    if (curr == first)
-                        break;
-                    curr = curr.Previous;
-                }
-                first.Previous = cell;
-                cell = last;
-            });
         }
 
         public Enumerator GetCloneableEnumerator() => new Enumerator(this);
