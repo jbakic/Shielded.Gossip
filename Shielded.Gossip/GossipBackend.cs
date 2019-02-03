@@ -225,8 +225,8 @@ namespace Shielded.Gossip
                                     Shield.SyncSideEffect(() =>
                                     {
                                         // we don't want to send back the same things we just received. so, ignore all keys from
-                                        // the incoming msg for which the result of application was Greater, which means our
-                                        // local value is now identical to the received one, unless they also appear in _toMail,
+                                        // the incoming msg for which the result of application was Greater or Equal, which means our
+                                        // local value is (now) identical to the received one, unless they also appear in _toMail,
                                         // which means a Changed handler made further changes to them.
                                         // we need the max freshness in case these fields change after this transaction.
                                         ignoreUpToFreshness = _freshIndex.LastFreshness;
