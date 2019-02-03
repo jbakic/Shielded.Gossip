@@ -243,28 +243,31 @@ namespace Shielded.Gossip
                         {
                             keysToIgnore = ApplyItems(pkg.Items, true);
                             if (keysToIgnore != null)
-                                Shield.SyncSideEffect(() =>
-                                {
-                                    // this happens if we receive a msg just as someone disposed us! the pre-commit is
-                                    // not subscribed any more.
-                                    if (!_changeLock.HasValue)
+                            {
+                                if (!_local.Changes.Any())
+                                    ignoreUpToFreshness = _freshIndex.LastFreshness;
+                                else
+                                    Shield.SyncSideEffect(() =>
                                     {
-                                        keysToIgnore = null;
-                                    }
-                                    else
-                                    {
-                                        // we don't want to send back the same things we just received. so, ignore all keys from
-                                        // the incoming msg for which the result of application was Greater, which means our
-                                        // local value is now identical to the received one, unless they also appear in _keysToMail,
-                                        // which means a Changed handler made further changes to them.
-                                        // we need the max freshness in case these fields change after this transaction.
-                                        ignoreUpToFreshness = _freshIndex.LastFreshness;
-                                        if (_keysToMail.HasValue)
-                                            keysToIgnore.ExceptWith(_keysToMail.Value);
-                                    }
-                                });
-                            else
-                                keysToIgnore = null;
+                                        // this happens if we receive a msg just as someone disposed us! the pre-commit is
+                                        // not subscribed any more.
+                                        if (!_changeLock.HasValue)
+                                        {
+                                            keysToIgnore = null;
+                                        }
+                                        else
+                                        {
+                                            // we don't want to send back the same things we just received. so, ignore all keys from
+                                            // the incoming msg for which the result of application was Greater, which means our
+                                            // local value is now identical to the received one, unless they also appear in _keysToMail,
+                                            // which means a Changed handler made further changes to them.
+                                            // we need the max freshness in case these fields change after this transaction.
+                                            ignoreUpToFreshness = _freshIndex.LastFreshness;
+                                            if (_keysToMail.HasValue)
+                                                keysToIgnore.ExceptWith(_keysToMail.Value);
+                                        }
+                                    });
+                            }
                         });
                     }
                     SendReply(gossip, currentState, ignoreUpToFreshness, keysToIgnore);

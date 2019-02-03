@@ -726,5 +726,67 @@ namespace Shielded.Gossip.Tests
                     Assert.IsInstanceOfType(transportA.ReceiveAndGetReply(msgB3), typeof(GossipEnd));
             }
         }
+
+        [TestMethod]
+        public void GossipMessaging_NeedlessItemsCheckWhenNoChangesHappened()
+        {
+            // the check for needless reply items involves accessing the LastFreshness in a SyncSideEffect.
+            // if that field had not changed, this will cause an exception - accessing a new field is not
+            // allowed in SyncSideEffect lambdas.
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                // we'll set them up so that the B backend has the values that will come in the first message from A,
+                // but their hashes are still different. B will then apply the message, but the message will cause
+                // no changes.
+                for (int i = 0; i < 2; i++)
+                {
+                    Shield.InTransaction(() =>
+                    {
+                        for (int j = 0; j < 10; j++)
+                        {
+                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                        }
+                    });
+                }
+                backendA.Configuration.DirectMail = DirectMailType.StartGossip;
+                backendA.SetVc("trigger", true.Clock(A));
+
+                for (int i = 1; i < 2; i++)
+                {
+                    Shield.InTransaction(() =>
+                    {
+                        for (int j = 0; j < 10; j++)
+                        {
+                            backendB.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                        }
+                    });
+                }
+                backendB.SetVc("trigger", true.Clock(A));
+
+                var msgA1 = transportA.LastSentMessage.Msg;
+                Assert.IsInstanceOfType(msgA1, typeof(GossipStart));
+
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
+                Assert.IsNotNull(msgB1);
+                Assert.IsTrue(msgB1.Items == null || msgB1.Items.Length == 0);
+
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1) as GossipReply;
+                Assert.IsNotNull(msgA2);
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2) as GossipEnd;
+                Assert.IsNotNull(msgB2);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB2));
+            }
+        }
     }
 }
