@@ -77,7 +77,7 @@ namespace Shielded.Gossip
         /// </summary>
         public bool CanDelete => State.Items.Count(s => (s.Value & TransactionState.Done) != 0) > (State.Items.Length / 2);
 
-        public VersionHash GetVersionHash() => (State ?? new TransactionVector()).GetVersionHash();
+        public IEnumerable<byte[]> GetVersionBytes() => (State ?? new TransactionVector()).GetVersionBytes();
 
         public TransactionInfo MergeWith(TransactionInfo other) => WithState(other?.State);
 

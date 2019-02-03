@@ -534,11 +534,11 @@ namespace Shielded.Gossip
             return _local.TryGetValue(key, out MessageItem i) ? i : null;
         }
 
-        private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IHasVersionHash
+        private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IMergeable<TItem>
         {
             return VersionHash.Hash(
-                Encoding.UTF8.GetBytes(key),
-                i.GetVersionHash().GetBytes());
+                new[] { Encoding.UTF8.GetBytes(key) }
+                .Concat(i.GetVersionBytes()));
         }
 
         /// <summary>

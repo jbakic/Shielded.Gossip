@@ -64,14 +64,16 @@ namespace Shielded.Gossip
         {
             if (Items == null || Items.Length == 0)
                 return 0;
-            return FNV1a32.Hash(YieldFields());
+            return FNV1a32.Hash(GetVersionBytes());
         }
 
         public static bool operator ==(VectorBase<TVec, T> left, TVec right) => left.Equals(right);
         public static bool operator !=(VectorBase<TVec, T> left, TVec right) => !left.Equals(right);
 
-        private IEnumerable<byte[]> YieldFields()
+        public IEnumerable<byte[]> GetVersionBytes()
         {
+            if (Items == null || Items.Length == 0)
+                yield break;
             var idComparer = StringComparer.InvariantCultureIgnoreCase;
             var valueComparer = EqualityComparer;
             foreach (var item in Items.OrderBy(vi => vi.ServerId, idComparer))
@@ -79,13 +81,6 @@ namespace Shielded.Gossip
                 yield return Encoding.UTF8.GetBytes(item.ServerId.ToLowerInvariant());
                 yield return BitConverter.GetBytes(valueComparer.GetHashCode(item.Value));
             }
-        }
-
-        public VersionHash GetVersionHash()
-        {
-            if (Items == null || Items.Length == 0)
-                return default;
-            return VersionHash.Hash(YieldFields());
         }
 
         public override string ToString()

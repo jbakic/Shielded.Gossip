@@ -1,18 +1,7 @@
-﻿namespace Shielded.Gossip
-{
-    /// <summary>
-    /// Interface for classes which can produce a version hash for use in determining
-    /// the hash of the whole database.
-    /// </summary>
-    public interface IHasVersionHash
-    {
-        /// <summary>
-        /// Calculates the version hash. Must guarantee same result on all servers.
-        /// You can use <see cref="VersionHash.Hash(byte[][])"/> static methods when implementing this.
-        /// </summary>
-        VersionHash GetVersionHash();
-    }
+﻿using System.Collections.Generic;
 
+namespace Shielded.Gossip
+{
     /// <summary>
     /// Interface for CRDTs - types which have a merge operation that is idempotent,
     /// commutative and associative. Such an operation allows multiple servers to eventually
@@ -23,8 +12,7 @@
     /// general case may be different from the merge result type.</typeparam>
     /// <typeparam name="TOut">The merge result type, which typically is the same type
     /// implementing this interface.</typeparam>
-    public interface IMergeable<in TIn, out TOut> : IHasVersionHash
-        where TOut : IMergeable<TIn, TOut>
+    public interface IMergeable<in TIn, out TOut> where TOut : IMergeable<TIn, TOut>
     {
         /// <summary>
         /// Merge the value with another, returning the result. Must be idempotent, commutative
@@ -38,6 +26,13 @@
         /// original values must return Greater or Equal.
         /// </summary>
         VectorRelationship VectorCompare(TIn other);
+
+        /// <summary>
+        /// Gets the bytes of fields which take part in determining the version of the data. Used
+        /// when determining the hash of the whole database. We will add a zero byte between every
+        /// two byte arrays in the returned enumerable.
+        /// </summary>
+        IEnumerable<byte[]> GetVersionBytes();
     }
 
     /// <summary>
@@ -46,7 +41,6 @@
     /// reach the same state regardless of the order or the number of messages which they
     /// exchange.
     /// </summary>
-    public interface IMergeable<T> : IMergeable<T, T>
-        where T : IMergeable<T, T>
+    public interface IMergeable<T> : IMergeable<T, T> where T : IMergeable<T, T>
     { }
 }

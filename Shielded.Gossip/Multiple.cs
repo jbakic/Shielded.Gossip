@@ -50,7 +50,7 @@ namespace Shielded.Gossip
 
         public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Clock);
 
-        public VersionHash GetVersionHash() => MergedClock.GetVersionHash();
+        public IEnumerable<byte[]> GetVersionBytes() => MergedClock.GetVersionBytes();
 
         public static Multiple<T> operator |(Multiple<T> left, Multiple<T> right) => left.MergeWith(right);
 
