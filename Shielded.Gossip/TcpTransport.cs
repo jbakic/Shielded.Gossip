@@ -72,7 +72,7 @@ namespace Shielded.Gossip
                 listener.Start();
                 while (true)
                 {
-                    var client = await listener.AcceptTcpClientAsync();
+                    var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
                     ProcessIncoming(client);
                 }
             }
@@ -90,7 +90,7 @@ namespace Shielded.Gossip
             {
                 int done = 0;
                 while (done < buff.Length)
-                    done += await stream.ReadAsync(buff, done, buff.Length - done);
+                    done += await stream.ReadAsync(buff, done, buff.Length - done).ConfigureAwait(false);
                 return done;
             }
 
@@ -101,11 +101,11 @@ namespace Shielded.Gossip
                 var stream = client.GetStream();
 
                 var lengthBytes = new byte[4];
-                await ReceiveBuffer(stream, lengthBytes);
+                await ReceiveBuffer(stream, lengthBytes).ConfigureAwait(false);
                 var length = BitConverter.ToInt32(lengthBytes, 0);
 
                 buffer = new byte[length];
-                await ReceiveBuffer(stream, buffer);
+                await ReceiveBuffer(stream, buffer).ConfigureAwait(false);
                 client.Close();
             }
             catch (Exception ex)
@@ -156,12 +156,12 @@ namespace Shielded.Gossip
             {
                 using (var client = new TcpClient())
                 {
-                    await client.ConnectAsync(ip.Address, ip.Port);
+                    await client.ConnectAsync(ip.Address, ip.Port).ConfigureAwait(false);
                     var stream = client.GetStream();
 
                     var lengthBytes = BitConverter.GetBytes(bytes.Length);
-                    await stream.WriteAsync(lengthBytes, 0, 4);
-                    await stream.WriteAsync(bytes, 0, bytes.Length);
+                    await stream.WriteAsync(lengthBytes, 0, 4).ConfigureAwait(false);
+                    await stream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
 
                     client.Close();
                 }

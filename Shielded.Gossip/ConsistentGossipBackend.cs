@@ -258,7 +258,7 @@ namespace Shielded.Gossip
                     Shield.InTransaction(() => _transactions.Add(id, ourState));
                     async Task<PrepareResult> PreparationProcess()
                     {
-                        var prepare = await PrepareInternal(ourState, transaction, true);
+                        var prepare = await PrepareInternal(ourState, transaction, true).ConfigureAwait(false);
                         if (!prepare.Success)
                             return prepare;
                         Shield.InTransaction(() =>
@@ -266,7 +266,7 @@ namespace Shielded.Gossip
                             if (_transactions.ContainsKey(id))
                                 _wrapped.Set(id, transaction);
                         });
-                        return await ourState.PrepareCompleter.Task;
+                        return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
                     }
                     var prepTask = PreparationProcess();
                     var resTask = await Task.WhenAny(prepTask, Task.Delay(GetNewTimeout()));
