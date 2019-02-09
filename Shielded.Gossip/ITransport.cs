@@ -35,13 +35,13 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// Sends a message to a specific server. Fire and forget, should not throw.
-        /// The replyExpected argument can be used to keep any connection open, which
-        /// is more efficient with transports like TCP.
+        /// The replyExpected argument can be used to keep a connection open, if the
+        /// transport has such a concept, which may be more efficient.
         /// </summary>
         void Send(string server, object msg, bool replyExpected);
 
         /// <summary>
-        /// Handler for incoming messages. Backends will se this. The result of calling
+        /// Handler for incoming messages. Backends will set this. The result of calling
         /// it will be the reply message, or null if no reply is needed.
         /// </summary>
         MessageHandler MessageHandler { get; set; }
