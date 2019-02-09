@@ -3,9 +3,7 @@
 Shielded.Gossip is a Distributed Transactional Memory for .NET Standard.
 It comes with a Gossip Protocol-based key/value store with support for both eventually
 and strongly consistent transactions. It is based on the
-[Shielded STM library](https://github.com/jbakic/Shielded). A new version of Shielded
-is included here, in the namespace Shielded.Standard, which targets .NET Standard, but
-does not include the proxy subclass generation feature.
+[Shielded STM library](https://github.com/jbakic/Shielded).
 
 If you only need eventually consistent transactions, use the GossipBackend class.
 Changes are done inside ordinary Shielded transactions, and they get propagated
