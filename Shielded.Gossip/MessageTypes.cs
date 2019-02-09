@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Runtime.Serialization;
+using System.Threading;
 
 namespace Shielded.Gossip
 {
@@ -17,13 +18,17 @@ namespace Shielded.Gossip
         public string From { get; set; }
         [DataMember]
         public VersionHash DatabaseHash { get; set; }
+
+        private static int _msgIdGenerator = new Random().Next();
+
         [DataMember]
-        public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
+        public int MessageId { get; set; } = Interlocked.Increment(ref _msgIdGenerator);
+
         /// <summary>
         /// Will always be set on reply and end messages.
         /// </summary>
         [DataMember]
-        public DateTimeOffset? LastTime { get; set; }
+        public int? ReplyToId { get; set; }
     }
 
     [DataContract(Namespace = ""), Serializable]

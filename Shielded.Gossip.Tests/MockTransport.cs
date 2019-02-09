@@ -15,17 +15,20 @@ namespace Shielded.Gossip.Tests
         public string OwnId { get; }
         public ICollection<string> Servers { get; }
 
-        public event EventHandler<object> MessageReceived;
+        public MessageHandler MessageHandler { get; set; }
 
         public void Receive(object msg)
         {
-            MessageReceived?.Invoke(this, msg);
+            var from = (msg as GossipMessage).From;
+            var reply = MessageHandler(msg).Result;
+            if (from != null && reply != null)
+                Send(from, reply, false);
         }
 
         public object ReceiveAndGetReply(object msg)
         {
             var prevCount = SentMessages.Count;
-            MessageReceived?.Invoke(this, msg);
+            Receive(msg);
             if (SentMessages.Count == prevCount)
                 return null;
             if (SentMessages.Count > prevCount + 1)
@@ -46,7 +49,7 @@ namespace Shielded.Gossip.Tests
 
         public void Dispose() { }
 
-        public void Send(string server, object msg)
+        public void Send(string server, object msg, bool replyExpected)
         {
             SentMessages.Add((server, msg));
         }

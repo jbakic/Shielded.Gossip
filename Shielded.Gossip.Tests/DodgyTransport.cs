@@ -24,7 +24,7 @@ namespace Shielded.Gossip.Tests
             _repeatLimit = repeatLimit;
             _repeatRisk = repeatRisk;
             _repeatDelayMaxMs = repeatDelayMaxMs;
-            _wrapped.MessageReceived += _wrapped_MessageReceived;
+            _wrapped.MessageHandler += _wrapped_MessageHandler;
             _wrapped.Error += _wrapped_Error;
         }
 
@@ -42,21 +42,30 @@ namespace Shielded.Gossip.Tests
             return rnd.Next(_repeatDelayMaxMs);
         }
 
-        private async void _wrapped_MessageReceived(object sender, object msg)
+        private Task<object> _wrapped_MessageHandler(object msg)
         {
-            int count = _repeatLimit;
-            while (count --> 0)
+            var from = (msg as GossipMessage).From;
+            Task.Run(async () =>
             {
-                if (!ShouldLoseMsg())
-                    MessageReceived?.Invoke(this, msg);
-                else
-                    Interlocked.Increment(ref CountLosses);
-                var delay = GetMsgDelay();
-                if (delay == null)
-                    return;
-                Interlocked.Increment(ref CountRepeats);
-                await Task.Delay(delay.Value);
-            }
+                int count = _repeatLimit;
+                while (count-- > 0)
+                {
+                    if (!ShouldLoseMsg())
+                    {
+                        var reply = await MessageHandler?.Invoke(msg);
+                        if (reply != null && from != null)
+                            _wrapped.Send(from, reply, false);
+                    }
+                    else
+                        Interlocked.Increment(ref CountLosses);
+                    var delay = GetMsgDelay();
+                    if (delay == null)
+                        return;
+                    Interlocked.Increment(ref CountRepeats);
+                    await Task.Delay(delay.Value);
+                }
+            });
+            return Task.FromResult<object>(null);
         }
 
         private void _wrapped_Error(object sender, Exception e)
@@ -68,7 +77,8 @@ namespace Shielded.Gossip.Tests
         public ICollection<string> Servers => _wrapped.Servers;
         public IDictionary<string, IPEndPoint> ServerIPs => _wrapped.ServerIPs;
 
-        public event EventHandler<object> MessageReceived;
+        public MessageHandler MessageHandler { get; set; }
+
         public event EventHandler<Exception> Error;
 
         public void Broadcast(object msg)
@@ -81,9 +91,9 @@ namespace Shielded.Gossip.Tests
             _wrapped.Dispose();
         }
 
-        public void Send(string server, object msg)
+        public void Send(string server, object msg, bool replyExpected)
         {
-            _wrapped.Send(server, msg);
+            _wrapped.Send(server, msg, false);
         }
     }
 }

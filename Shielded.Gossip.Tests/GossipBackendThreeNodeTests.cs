@@ -37,12 +37,19 @@ namespace Shielded.Gossip.Tests
             _backends = new Dictionary<string, TBackend>(_addresses.Select(kvp =>
             {
                 var transport = CreateTransport(kvp.Key, kvp.Value, _addresses.Where(inner => inner.Key != kvp.Key));
-                transport.MessageReceived += (_, msg) => OnMessage(kvp.Key, msg);
-
-                return new KeyValuePair<string, TBackend>(kvp.Key, CreateBackend(transport, new GossipConfiguration
+                var backend = CreateBackend(transport, new GossipConfiguration
                 {
                     GossipInterval = 250,
-                }));
+                });
+
+                var backendHandler = transport.MessageHandler;
+                transport.MessageHandler = msg =>
+                {
+                    OnMessage(kvp.Key, msg);
+                    return backendHandler(msg);
+                };
+
+                return new KeyValuePair<string, TBackend>(kvp.Key, backend);
             }), StringComparer.InvariantCultureIgnoreCase);
         }
 
