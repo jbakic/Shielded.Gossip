@@ -117,7 +117,7 @@ namespace Shielded.Gossip
                     if (!await ReceiveBuffer(stream, buffer).ConfigureAwait(false))
                         return;
 
-                    var reply = await Receive(buffer).ConfigureAwait(false);
+                    var reply = Receive(buffer);
                     if (reply == null)
                         break;
                     await SendFramed(stream, reply).ConfigureAwait(false);
@@ -133,11 +133,11 @@ namespace Shielded.Gossip
             }
         }
 
-        private async Task<byte[]> Receive(byte[] msg)
+        private byte[] Receive(byte[] msg)
         {
             if (MessageHandler == null)
                 return null;
-            var response = await MessageHandler(Serializer.Deserialize(msg)).ConfigureAwait(false);
+            var response = MessageHandler(Serializer.Deserialize(msg));
             return response == null ? null : Serializer.Serialize(response);
         }
 

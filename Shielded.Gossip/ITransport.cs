@@ -9,7 +9,7 @@ namespace Shielded.Gossip
     /// Doing it this way helps reuse the same connection for replying, for transports
     /// which have a connection concept.
     /// </summary>
-    public delegate Task<object> MessageHandler(object message);
+    public delegate object MessageHandler(object message);
 
     /// <summary>
     /// The interface to implement if you wish to use a custom means of communication

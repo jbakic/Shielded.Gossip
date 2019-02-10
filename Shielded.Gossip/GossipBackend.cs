@@ -197,13 +197,13 @@ namespace Shielded.Gossip
             return true;
         });
 
-        private Task<object> Transport_MessageHandler(object msg)
+        private object Transport_MessageHandler(object msg)
         {
             switch (msg)
             {
                 case DirectMail trans:
                     ApplyItems(trans.Items, true);
-                    return Task.FromResult<object>(null);
+                    return null;
 
                 case GossipMessage gossip:
                     var pkg = gossip as NewGossip;
@@ -233,7 +233,15 @@ namespace Shielded.Gossip
                             }
                         });
                     }
-                    return Task.FromResult<object>(GetReply(gossip, ignoreUpToFreshness, keysToIgnore));
+                    return GetReply(gossip, ignoreUpToFreshness, keysToIgnore);
+
+                case KillGossip kill:
+                    Shield.InTransaction(() =>
+                    {
+                        if (_gossipStates.TryGetValue(kill.From, out var state) && state.LastSentMsgId == kill.ReplyToId)
+                            _gossipStates.Remove(kill.From);
+                    });
+                    return null;
 
                 default:
                     throw new ApplicationException($"Unexpected message type: {msg.GetType()}");
@@ -305,13 +313,18 @@ namespace Shielded.Gossip
             return true;
         }
 
-        private bool ShouldReply(GossipMessage msg, out GossipState currentState)
+        private bool ShouldReply(GossipMessage msg, out GossipState currentState, out bool sendKill)
         {
             currentState = null;
+            sendKill = false;
             var isStarter = msg is GossipStart;
+            var hisReply = msg as GossipReply;
             // if our state is obsolete, we will only accept starter messages.
             if (!_gossipStates.TryGetValue(msg.From, out var state) || HasTimedOut(state))
+            {
+                sendKill = hisReply != null;
                 return isStarter;
+            }
 
             // we have an active state. handling starter messages first.
             if (isStarter)
@@ -330,7 +343,10 @@ namespace Shielded.Gossip
 
             // in all non-starter messages, he must send us a correct ReplyToId
             if (state.LastSentMsgId != msg.ReplyToId)
+            {
+                sendKill = hisReply != null && hisReply.MessageId != state.LastReceivedMsgId;
                 return false;
+            }
 
             // so, he's replying. this is just a safety check, to see if the windows match. they will.
             var ourLastStart = (msg as GossipReply)?.LastWindowStart ?? 0;
@@ -342,16 +358,20 @@ namespace Shielded.Gossip
             return true;
         }
 
-        private GossipMessage GetReply(GossipMessage replyTo,
-            long? ignoreUpToFreshness = null, HashSet<string> keysToIgnore = null) => Shield.InTransaction<GossipMessage>(() =>
+        private object GetReply(GossipMessage replyTo,
+            long? ignoreUpToFreshness = null, HashSet<string> keysToIgnore = null) => Shield.InTransaction<object>(() =>
         {
             var server = replyTo.From;
             var hisNews = replyTo as NewGossip;
             var hisReply = replyTo as GossipReply;
             var hisEnd = replyTo as GossipEnd;
 
-            if (!ShouldReply(replyTo, out var currentState))
+            if (!ShouldReply(replyTo, out var currentState, out var sendKill))
+            {
+                if (sendKill)
+                    return new KillGossip { From = Transport.OwnId, ReplyToId = replyTo.MessageId };
                 return null;
+            }
 
             var lastWindowStart = hisReply?.LastWindowStart ?? 0;
             var lastWindowEnd = hisReply?.LastWindowEnd ?? hisEnd?.LastWindowEnd;

@@ -518,10 +518,15 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNotNull(msgB2);
 
                 // now let's see if B will correctly ignore already processed messages
-                Assert.IsNull(transportB.ReceiveAndGetReply(msgA2));
-                Assert.IsNull(transportB.ReceiveAndGetReply(msgA1));
+                var killB1 = transportB.ReceiveAndGetReply(msgA1);
+                // kills are sent back only for GossipReply messages, and msgA1 was a starter
+                Assert.IsNull(killB1);
+                var killB2 = transportB.ReceiveAndGetReply(msgA2);
+                // this one does not cause KillGossip, because msgA2 is the last message from A that we replied to, and if
+                // that KillGossip would reach A before our reply did, it would kill a perfectly good chain.
+                Assert.IsNull(killB2);
 
-                // the old messages should not have screwed up his state - he should reply to the correct message
+                // and now, we should be able to continue despite the above disturbances
                 var msgA3 = transportA.ReceiveAndGetReply(msgB2);
                 Assert.IsNotNull(msgA3);
                 var msgB3 = transportB.ReceiveAndGetReply(msgA3);
@@ -561,13 +566,13 @@ namespace Shielded.Gossip.Tests
                 Assert.AreNotEqual(msgB1, msgBX);
                 Assert.IsInstanceOfType(msgBX, typeof(GossipStart));
 
-                // A will accept his message, because B included in his GossipStart the same LastTime he sent
+                // A will accept his message, because B included in his GossipStart the ReplyToId he sent
                 // in his GossipEnd. this is meant for this case exactly. A can then recognize that he did
                 // not (yet) receive the GossipEnd message, and will just accept the new chain.
                 var msgAX = transportA.ReceiveAndGetReply(msgBX);
                 Assert.IsInstanceOfType(msgAX, typeof(GossipReply));
 
-                // the delayed end msg will now be rejected by A.
+                // the delayed end msg will now be rejected by A, and end msgs cause no kill reply.
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
 
                 // from this point on, all is well - they both accept the new chain only.
@@ -631,12 +636,12 @@ namespace Shielded.Gossip.Tests
                 Assert.IsInstanceOfType(msgBX, typeof(GossipStart));
 
                 // behavior here the same as above, A can recognize that he missed a GossipEnd, and
-                // behaves as if he had received it. in a way, a GossipStart that has LastTime doubles as
+                // behaves as if he had received it. in a way, a GossipStart that has ReplyToId doubles as
                 // a GossipEnd message too.
                 var msgAX = transportA.ReceiveAndGetReply(msgBX);
                 Assert.IsInstanceOfType(msgAX, typeof(GossipReply));
 
-                // the delayed end msg will now be rejected by A.
+                // the delayed end msg will now be rejected by A, and end msgs cause no kill reply.
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB2));
 
                 // from this point on, all is well - they both accept the new chain only.
@@ -652,8 +657,8 @@ namespace Shielded.Gossip.Tests
         {
             // the ShouldAcceptMsg became so strict at one point, that it did not accept any
             // GossipStart message coming after we sent a GossipEnd unless that new starter
-            // contained the correct LastTime. this is of course not necessary, we can always
-            // accept a starter if our last msg was an End...
+            // contained the correct ReplyToId (it was LastTime then). this is of course not
+            // necessary, we can always accept a starter if our last msg was an End...
             var transportA = new MockTransport(A, new List<string> { B });
             var transportB = new MockTransport(B, new List<string> { A });
             using (var backendA = new GossipBackend(transportA, new GossipConfiguration
@@ -674,13 +679,91 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
 
                 // we now make another change on A, so that it sends a GossipStart to B. that GossipStart will
-                // have LastTime == null, because A accepted the GossipEnd from B and cleared his state. B should
+                // have ReplyToId == null, because A accepted the GossipEnd from B and cleared his state. B should
                 // accept that new gossip.
                 backendA.SetVc("trigger", false.Clock(A, 2));
                 var msgA2 = transportA.LastSentMessage.Msg;
                 var msgB2 = transportB.ReceiveAndGetReply(msgA2);
                 Assert.IsInstanceOfType(msgB2, typeof(GossipEnd));
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB2));
+            }
+        }
+
+        [TestMethod]
+        public void GossipMessaging_ObsoleteStartMsg()
+        {
+            // this is the main reason for KillGossip - if a server receives an obsolete start
+            // message, it replies and enters gossip state, and then refuses to answer a GossipStart
+            // that it should answer to. so by replying KillGossip to "unwanted" messages, they
+            // help each other shake off the bad state.
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+                AntiEntropyIdleTimeout = 200,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+                AntiEntropyIdleTimeout = 200,
+            }))
+            {
+                backendA.SetVc("trigger", true.Clock(A));
+                var msgA1 = transportA.LastSentMessage.Msg;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
+                Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
+
+                // unexpected GossipEnd messages should not cause kill replies
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
+
+                // this is an already seen GossipStart, and it has the same hash we currently have, so it actually just
+                // causes a GossipEnd to be replied. this is harmless.
+                var msgBX1 = transportB.ReceiveAndGetReply(msgA1);
+                Assert.IsInstanceOfType(msgBX1, typeof(GossipEnd));
+                // again, no kill reply to a GossipEnd, pls.
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgBX1));
+
+                // now we will change something on B, so that his hash will not be equal to the one in the delayed GossipStart.
+                // he should reply, but for A that reply is unexpected.
+                backendB.SetVc("changed", true.Clock(B));
+                var msgBX2 = transportB.ReceiveAndGetReply(msgA1);
+                Assert.IsInstanceOfType(msgBX2, typeof(GossipReply));
+                var msgAX2 = transportA.ReceiveAndGetReply(msgBX2);
+                Assert.IsInstanceOfType(msgAX2, typeof(KillGossip));
+                Assert.IsNull(transportB.ReceiveAndGetReply(msgAX2));
+
+                // to confirm that the kill worked, let's run a small exchange
+                backendA.SetVc("another", true.Clock(A));
+                var msgA3 = transportA.LastSentMessage.Msg as GossipStart;
+                Assert.IsNotNull(msgA3);
+                // B replies GossipEnd, because A already knew about his changes - even though A previously
+                // replied with KillGossip, it first applied the items from that message.
+                var msgB3 = transportB.ReceiveAndGetReply(msgA3) as GossipEnd;
+                Assert.IsNotNull(msgB3);
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB3));
+
+                // and now another variant - a proper start message, but delayed too much.
+                backendA.SetVc("again", true.Clock(A));
+                backendB.SetVc("againB", true.Clock(B));
+                var msgA5 = transportA.LastSentMessage.Msg as GossipStart;
+                // let it time out
+                Thread.Sleep(250);
+                var msgB5 = transportB.ReceiveAndGetReply(msgA5) as GossipReply;
+                Assert.IsNotNull(msgB5);
+                var msgA6 = transportA.ReceiveAndGetReply(msgB5) as KillGossip;
+                Assert.IsNotNull(msgA6);
+                Assert.IsNull(transportB.ReceiveAndGetReply(msgA6));
+
+                // and again, to confirm that the kill worked:
+                backendA.SetVc("yet again", true.Clock(A));
+                var msgA7 = transportA.LastSentMessage.Msg as GossipStart;
+                Assert.IsNotNull(msgA7);
+                var msgB7 = transportB.ReceiveAndGetReply(msgA7) as GossipEnd;
+                Assert.IsNotNull(msgB7);
             }
         }
 

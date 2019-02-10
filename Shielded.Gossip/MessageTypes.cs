@@ -67,6 +67,15 @@ namespace Shielded.Gossip
     }
 
     [DataContract(Namespace = ""), Serializable]
+    public class KillGossip
+    {
+        [DataMember]
+        public string From { get; set; }
+        [DataMember]
+        public int ReplyToId { get; set; }
+    }
+
+    [DataContract(Namespace = ""), Serializable]
     public class MessageItem
     {
         [DataMember]

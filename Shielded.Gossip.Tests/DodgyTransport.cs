@@ -42,9 +42,9 @@ namespace Shielded.Gossip.Tests
             return rnd.Next(_repeatDelayMaxMs);
         }
 
-        private Task<object> _wrapped_MessageHandler(object msg)
+        private object _wrapped_MessageHandler(object msg)
         {
-            var from = (msg as GossipMessage).From;
+            var from = (msg as GossipMessage)?.From;
             Task.Run(async () =>
             {
                 int count = _repeatLimit;
@@ -52,7 +52,7 @@ namespace Shielded.Gossip.Tests
                 {
                     if (!ShouldLoseMsg())
                     {
-                        var reply = await MessageHandler?.Invoke(msg);
+                        var reply = MessageHandler?.Invoke(msg);
                         if (reply != null && from != null)
                             _wrapped.Send(from, reply, false);
                     }
@@ -65,7 +65,7 @@ namespace Shielded.Gossip.Tests
                     await Task.Delay(delay.Value);
                 }
             });
-            return Task.FromResult<object>(null);
+            return null;
         }
 
         private void _wrapped_Error(object sender, Exception e)

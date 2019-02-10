@@ -19,8 +19,8 @@ namespace Shielded.Gossip.Tests
 
         public void Receive(object msg)
         {
-            var from = (msg as GossipMessage).From;
-            var reply = MessageHandler(msg).Result;
+            var from = (msg as GossipMessage)?.From;
+            var reply = MessageHandler(msg);
             if (from != null && reply != null)
                 Send(from, reply, false);
         }
