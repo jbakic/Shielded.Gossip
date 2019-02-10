@@ -86,7 +86,7 @@ namespace Shielded.Gossip
             }
         }
 
-        private async void MessageLoop(TcpClient client, NetworkStream stream = null)
+        private async void MessageLoop(TcpClient client)
         {
             async Task<bool> ReceiveBuffer(NetworkStream ns, byte[] buff)
             {
@@ -104,24 +104,24 @@ namespace Shielded.Gossip
             try
             {
                 client.ReceiveTimeout = ReceiveTimeout;
-                using (stream = stream ?? client.GetStream())
-                    while (client.Connected)
-                    {
-                        byte[] buffer = null;
-                        var lengthBytes = new byte[4];
-                        if (!await ReceiveBuffer(stream, lengthBytes).ConfigureAwait(false))
-                            return;
-                        var length = BitConverter.ToInt32(lengthBytes, 0);
+                var stream = client.GetStream();
+                while (client.Connected)
+                {
+                    byte[] buffer = null;
+                    var lengthBytes = new byte[4];
+                    if (!await ReceiveBuffer(stream, lengthBytes).ConfigureAwait(false))
+                        return;
+                    var length = BitConverter.ToInt32(lengthBytes, 0);
 
-                        buffer = new byte[length];
-                        if (!await ReceiveBuffer(stream, buffer).ConfigureAwait(false))
-                            return;
+                    buffer = new byte[length];
+                    if (!await ReceiveBuffer(stream, buffer).ConfigureAwait(false))
+                        return;
 
-                        var reply = await Receive(buffer).ConfigureAwait(false);
-                        if (reply == null)
-                            break;
-                        await SendFramed(stream, reply).ConfigureAwait(false);
-                    }
+                    var reply = await Receive(buffer).ConfigureAwait(false);
+                    if (reply == null)
+                        break;
+                    await SendFramed(stream, reply).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
@@ -129,12 +129,7 @@ namespace Shielded.Gossip
             }
             finally
             {
-                try
-                {
-                    if (client.Connected)
-                        client.Close();
-                }
-                catch { }
+                client.Close();
             }
         }
 
@@ -178,19 +173,14 @@ namespace Shielded.Gossip
                 await SendFramed(stream, bytes).ConfigureAwait(false);
 
                 if (replyExpected)
-                    MessageLoop(client, stream);
+                    MessageLoop(client);
                 else
                     client.Close();
             }
             catch (Exception ex)
             {
+                client.Close();
                 Error?.Invoke(this, ex);
-                try
-                {
-                    if (client.Connected)
-                        client.Close();
-                }
-                catch { }
             }
         }
 
