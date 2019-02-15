@@ -119,17 +119,20 @@ namespace Shielded.Gossip
             public ReverseTimeIndex.Enumerator LastWindowStart { get; private set; }
             public readonly int LastPackageSize;
             public readonly MessageType LastSentMsgType;
+            // used only when LastSentMsgType == MessageType.Start
+            public readonly int? PreviousSentEndMsgId;
 
             public readonly int CreationTickCount = Environment.TickCount;
 
             public GossipState(int? lastReceivedMsgId, int lastSentMsgId, ReverseTimeIndex.Enumerator lastWindowStart,
-                int lastPackageSize, MessageType lastSentMsgType)
+                int lastPackageSize, MessageType lastSentMsgType, int? previousSentEndMsgId = null)
             {
                 LastReceivedMsgId = lastReceivedMsgId;
                 LastSentMsgId = lastSentMsgId;
                 LastWindowStart = lastWindowStart;
                 LastPackageSize = lastPackageSize;
                 LastSentMsgType = lastSentMsgType;
+                PreviousSentEndMsgId = previousSentEndMsgId;
             }
 
             public void ReleaseEnumerator()
@@ -192,7 +195,8 @@ namespace Shielded.Gossip
                 WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness,
                 ReplyToId = lastReceivedId,
             };
-            _gossipStates[server] = new GossipState(null, msg.MessageId, newWindowStart, Configuration.AntiEntropyInitialSize, MessageType.Start);
+            _gossipStates[server] = new GossipState(null, msg.MessageId, newWindowStart, Configuration.AntiEntropyInitialSize,
+                MessageType.Start, oldState?.LastSentMsgType == MessageType.End ? (int?)oldState.LastSentMsgId : null);
             Shield.SideEffect(() => Transport.Send(server, msg, true));
             return true;
         });
@@ -341,7 +345,17 @@ namespace Shielded.Gossip
                             StringComparer.InvariantCultureIgnoreCase.Compare(msg.From, Transport.OwnId) < 0;
             }
 
-            // in all non-starter messages, he must send us a correct ReplyToId
+            // he's replying. special case: he's replying to our end message, and we already sent a GossipStart after
+            // that end message. we give preference to continuing the old chain in that case.
+            if (state.LastSentMsgType == MessageType.Start &&
+                state.PreviousSentEndMsgId != null && state.PreviousSentEndMsgId == msg.ReplyToId)
+            {
+                // when replying to our end message, it must be a GossipReply and he should send us LastWindowStart == 0.
+                if (hisReply == null || hisReply.LastWindowStart > 0)
+                    throw new ApplicationException("Reply chain logic failure.");
+                return true;
+            }
+            // otherwise if he's replying to something else, he must send us a correct ReplyToId
             if (state.LastSentMsgId != msg.ReplyToId)
             {
                 sendKill = hisReply != null && hisReply.MessageId != state.LastReceivedMsgId;
@@ -349,7 +363,7 @@ namespace Shielded.Gossip
             }
 
             // so, he's replying. this is just a safety check, to see if the windows match. they will.
-            var ourLastStart = (msg as GossipReply)?.LastWindowStart ?? 0;
+            var ourLastStart = hisReply?.LastWindowStart ?? 0;
             if (ourLastStart > 0 && ourLastStart != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
                 throw new ApplicationException("Reply chain logic failure.");
 

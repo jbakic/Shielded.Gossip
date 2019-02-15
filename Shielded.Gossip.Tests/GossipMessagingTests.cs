@@ -809,6 +809,54 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void GossipMessaging_SimultaneousStartAndReplyToEnd()
+        {
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string> { A });
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.StartGossip,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                backendA.SetVc("trigger", true.Clock(A));
+                backendB.SetVc("trigger", false.Clock(B));
+                var msgA1 = transportA.LastSentMessage.Msg;
+                var msgB1 = transportB.ReceiveAndGetReply(msgA1);
+                Assert.IsInstanceOfType(msgB1, typeof(GossipReply));
+                var msgA2 = transportA.ReceiveAndGetReply(msgB1);
+                Assert.IsInstanceOfType(msgA2, typeof(GossipEnd));
+
+                // before B receives the End, both get new changes.
+                backendA.SetVc("trigger", false.Clock((VectorClock)(A, 2) | (B, 1)));
+                var msgA3 = transportA.LastSentMessage.Msg;
+                // A launches a new gossip, because he thinks the old one is done
+                Assert.IsInstanceOfType(msgA3, typeof(GossipStart));
+                backendB.SetVc("trigger", true.Clock((VectorClock)(A, 1) | (B, 2)));
+                // B does nothing, because he thinks they're still gossiping
+                Assert.AreEqual(msgB1, transportB.LastSentMessage.Msg);
+
+                // B will reply to the delayed end message
+                var msgB2 = transportB.ReceiveAndGetReply(msgA2);
+                Assert.IsInstanceOfType(msgB2, typeof(GossipReply));
+                // and it will ignore the new GossipStart!
+                Assert.IsNull(transportB.ReceiveAndGetReply(msgA3));
+
+                // A will recognize the reply to the old End message, and both will correctly continue the old chain.
+                var msgA4 = transportA.ReceiveAndGetReply(msgB2);
+                Assert.IsInstanceOfType(msgA4, typeof(GossipReply));
+                var msgB3 = transportB.ReceiveAndGetReply(msgA4);
+                Assert.IsInstanceOfType(msgB3, typeof(GossipEnd));
+                Assert.IsNull(transportA.ReceiveAndGetReply(msgB3));
+            }
+        }
+
+        [TestMethod]
         public void GossipMessaging_NeedlessItemsCheckWhenNoChangesHappened()
         {
             // the check for needless reply items involves accessing the LastFreshness in a SyncSideEffect.
