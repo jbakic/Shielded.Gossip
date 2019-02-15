@@ -33,21 +33,25 @@ namespace Shielded.Gossip
         public MessageHandler MessageHandler { get; set; }
 
         private TcpListener _listener;
+        private readonly object _listenerLock = new object();
 
         /// <summary>
         /// Stop the server. Safe to call if already stopped.
         /// </summary>
         public void StopListening()
         {
-            var listener = _listener;
-            if (listener != null)
+            lock (_listenerLock)
             {
-                try
+                var listener = _listener;
+                if (listener != null)
                 {
-                    listener.Stop();
+                    try
+                    {
+                        listener.Stop();
+                    }
+                    catch { }
+                    _listener = null;
                 }
-                catch { }
-                _listener = null;
             }
         }
 
@@ -64,11 +68,13 @@ namespace Shielded.Gossip
         /// </summary>
         public async void StartListening()
         {
-            if (_listener != null)
-                return;
-            var listener = new TcpListener(LocalEndpoint);
-            if (Interlocked.CompareExchange(ref _listener, listener, null) != null)
-                return;
+            TcpListener listener;
+            lock (_listenerLock)
+            {
+                if (_listener != null)
+                    return;
+                listener = _listener = new TcpListener(LocalEndpoint);
+            }
             try
             {
                 listener.Start();
