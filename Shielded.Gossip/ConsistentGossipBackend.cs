@@ -26,13 +26,22 @@ namespace Shielded.Gossip
         public GossipConfiguration Configuration => _wrapped.Configuration;
 
         /// <summary>
+        /// Event raised when an unexpected error occurs on one of the background tasks of the backend.
+        /// </summary>
+        public event EventHandler<GossipBackendException> Error
+        {
+            add { _wrapped.Error += value; }
+            remove { _wrapped.Error -= value; }
+        }
+
+        /// <summary>
         /// Constructor.
         /// </summary>
         /// <param name="transport">The message transport to use.</param>
         /// <param name="configuration">The configuration.</param>
         public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
         {
-            _wrapped = new GossipBackend(transport, configuration);
+            _wrapped = new GossipBackend(transport, configuration, this);
             Shield.InTransaction(() =>
                 _wrapped.Changed.Subscribe(_wrapped_Changed));
         }
@@ -499,9 +508,10 @@ namespace Shielded.Gossip
                         SetRejected(id);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
                     SetRejected(id);
+                    _wrapped.RaiseError(new GossipBackendException("Unexpected error while preparing external transaction.", ex));
                 }
             });
         }

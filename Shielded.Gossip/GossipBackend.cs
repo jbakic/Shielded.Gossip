@@ -29,12 +29,28 @@ namespace Shielded.Gossip
         public readonly GossipConfiguration Configuration;
 
         /// <summary>
+        /// Event raised when an unexpected error occurs on one of the background tasks of the backend.
+        /// </summary>
+        public event EventHandler<GossipBackendException> Error;
+
+        private readonly object _owner;
+
+        internal void RaiseError(GossipBackendException ex)
+        {
+            Error?.Invoke(_owner, ex);
+        }
+
+        /// <summary>
         /// Constructor.
         /// </summary>
         /// <param name="transport">The message transport to use. The backend will dispose it when it gets disposed.</param>
         /// <param name="configuration">The configuration.</param>
         public GossipBackend(ITransport transport, GossipConfiguration configuration)
+            : this(transport, configuration, null) { }
+
+        internal GossipBackend(ITransport transport, GossipConfiguration configuration, object owner)
         {
+            _owner = owner ?? this;
             Transport = transport;
             Configuration = configuration;
             _freshIndex = new ReverseTimeIndex(GetItem);
@@ -71,6 +87,10 @@ namespace Shielded.Gossip
                                 _local.Remove(item.Key);
                         lastFreshness.Value = freshness;
                     });
+                }
+                catch (Exception ex)
+                {
+                    RaiseError(new GossipBackendException("Unexpected error on deletable timer task.", ex));
                 }
                 finally
                 {
@@ -177,7 +197,10 @@ namespace Shielded.Gossip
                     while (!StartGossip(server) && --limit >= 0);
                 });
             }
-            catch { } // TODO
+            catch (Exception ex)
+            {
+                RaiseError(new GossipBackendException("Unexpected error on gossip timer task.", ex));
+            }
         }
 
         private bool StartGossip(string server) => Shield.InTransaction(() =>

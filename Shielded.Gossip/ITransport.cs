@@ -24,7 +24,7 @@ namespace Shielded.Gossip
         string OwnId { get; }
 
         /// <summary>
-        /// Gets a collection of all known servers participating in the cluster.
+        /// Gets a collection of all other servers participating in the cluster.
         /// </summary>
         ICollection<string> Servers { get; }
 
