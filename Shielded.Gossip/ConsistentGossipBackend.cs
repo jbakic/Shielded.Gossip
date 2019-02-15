@@ -107,7 +107,7 @@ namespace Shielded.Gossip
                     return cmp;
                 val = oldVal.MergeWith(val);
                 if (val == null)
-                    throw new ApplicationException("IMergeable.MergeWith should not return null for non-null arguments.");
+                    throw new ApplicationException("IMergeable.MergeWith should not return null.");
             }
 
             var local = _currentState.Value;

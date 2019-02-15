@@ -650,7 +650,7 @@ namespace Shielded.Gossip
                 // in case someone screws up the MergeWith impl, we call it after extracting the critical info above.
                 val = oldVal.MergeWith(val);
                 if (val == null)
-                    throw new ApplicationException("IMergeable.MergeWith should not return null for non-null arguments.");
+                    throw new ApplicationException("IMergeable.MergeWith should not return null.");
 
                 var deletable = val is IDeletable del && del.CanDelete;
                 var newItem = new MessageItem
