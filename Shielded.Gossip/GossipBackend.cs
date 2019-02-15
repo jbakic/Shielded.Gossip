@@ -699,7 +699,7 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Fired when any key changes.
+        /// Fired after any key changes.
         /// </summary>
         public readonly ShieldedEvent<ChangedEventArgs> Changed = new ShieldedEvent<ChangedEventArgs>();
 

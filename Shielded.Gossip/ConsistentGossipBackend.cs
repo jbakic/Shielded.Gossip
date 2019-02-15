@@ -185,7 +185,7 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Fired during any change, allowing the change to be cancelled.
+        /// Fired after any key changes.
         /// </summary>
         public readonly ShieldedEvent<ChangedEventArgs> Changed = new ShieldedEvent<ChangedEventArgs>();
 
