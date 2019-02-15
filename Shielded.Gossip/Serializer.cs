@@ -37,7 +37,6 @@ namespace Shielded.Gossip
         /// <summary>
         /// Replace the serializer used by this library.
         /// </summary>
-        /// <param name="serializer"></param>
         public static void Use(ISerializer serializer)
         {
             _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
