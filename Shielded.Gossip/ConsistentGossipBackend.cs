@@ -316,7 +316,8 @@ namespace Shielded.Gossip
         /// transaction, but not from a non-consistent one.
         /// </summary>
         /// <param name="trans">The lambda to run as a distributed transaction.</param>
-        /// <param name="attempts">The number of attempts to make.</param>
+        /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
+        /// transaction, this argument is ignored.</param>
         /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
         /// the result that the lambda returned.</returns>
         public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10)
