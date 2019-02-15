@@ -319,7 +319,7 @@ namespace Shielded.Gossip
         /// <param name="attempts">The number of attempts to make.</param>
         /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
         /// the result that the lambda returned.</returns>
-        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 1)
+        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10)
         {
             T res = default;
             var success = await RunConsistent(() => { res = trans(); }, attempts);

@@ -62,8 +62,7 @@ namespace Shielded.Gossip.Tests
 
             var (success, value) = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value),
-                100).Result;
+                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
 
             Assert.IsTrue(success);
             Assert.AreEqual(expected, value);
@@ -105,8 +104,7 @@ namespace Shielded.Gossip.Tests
 
             var (success, value) = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value),
-                100).Result;
+                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
 
             Assert.IsTrue(success);
             Assert.AreEqual(expected, value);

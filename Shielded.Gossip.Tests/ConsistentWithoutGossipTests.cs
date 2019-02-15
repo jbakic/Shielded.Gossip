@@ -70,17 +70,17 @@ namespace Shielded.Gossip.Tests
 
             // the field will now have two versions on all servers, due to the C server transmitting his version
             // as part of rejecting the transaction.
-            var readA = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"), 100)
+            var readA = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"))
                 .Result.Value;
 
             Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readA.MergedClock);
 
-            var readB = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"), 100)
+            var readB = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"))
                 .Result.Value;
 
             Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readB.MergedClock);
 
-            var readC = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"), 100)
+            var readC = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"))
                 .Result.Value;
 
             Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readC.MergedClock);
@@ -154,7 +154,7 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var (success, read) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"), 100).Result;
+            var (success, read) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key")).Result;
 
             Assert.IsTrue(success);
             Assert.AreEqual("rejected", read.Single().Value);

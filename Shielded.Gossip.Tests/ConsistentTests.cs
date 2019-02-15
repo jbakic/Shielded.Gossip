@@ -41,7 +41,7 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
+            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
                 .Result;
 
             Assert.IsTrue(success);
@@ -67,7 +67,7 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"), 100)
+            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"))
                 .Result;
 
             Assert.IsTrue(success);
@@ -76,7 +76,7 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual(testEntity.Name, read.Value.Name);
             Assert.AreEqual((A, 1), read.Clock);
 
-            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
+            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
                 .Result;
             Assert.IsTrue(success);
             Assert.IsFalse(multi.Any());
@@ -122,13 +122,13 @@ namespace Shielded.Gossip.Tests
                 Assert.IsFalse(cont.Committed);
             }
 
-            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"), 100)
+            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"))
                 .Result;
 
             Assert.IsTrue(success);
             Assert.IsFalse(multi.Any());
 
-            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"), 100)
+            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
                 .Result;
 
             CheckProtocols();
@@ -170,8 +170,7 @@ namespace Shielded.Gossip.Tests
 
             var read = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter),
-                100).Result;
+                    _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
 
             Assert.IsTrue(read.Success);
             Assert.AreEqual(expected, read.Value);
