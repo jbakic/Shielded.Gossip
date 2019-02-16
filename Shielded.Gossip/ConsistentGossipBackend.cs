@@ -35,18 +35,16 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// The IDs of servers that decide transactions. If null, the backend will use all
-        /// servers visible to the transport and himself.
+        /// Yields the IDs of servers that decide consistent transactions. If set to null, the backend
+        /// will use all servers visible to the transport and himself. This will be enumerated in every
+        /// transaction, so it may, if you wish, introduce further reads/writes into each transaction...
         /// </summary>
-        public string[] TransactionParticipants
+        public IEnumerable<string> TransactionParticipants
         {
-            get => _transactionParticipants.Value.ToArray();
-            set => Shield.InTransaction(() =>
-                _transactionParticipants.Value = value?
-                    .Distinct(StringComparer.InvariantCultureIgnoreCase)
-                    .ToArray());
+            get => _transactionParticipants.Value;
+            set => Shield.InTransaction(() => _transactionParticipants.Value = value);
         }
-        private readonly Shielded<string[]> _transactionParticipants = new Shielded<string[]>();
+        private readonly Shielded<IEnumerable<string>> _transactionParticipants = new Shielded<IEnumerable<string>>();
 
         /// <summary>
         /// Constructor.
@@ -251,17 +249,16 @@ namespace Shielded.Gossip
                         var ourChanges = _currentState.Value = new Dictionary<string, MessageItem>();
                         trans();
 
-                        var ourReads = _wrapped.Reads;
-                        if (ourChanges.Any() || ourReads.Any())
+                        if (ourChanges.Any() || _wrapped.Reads.Any())
                         {
-                            var transParticipants = _transactionParticipants.Value ?? Transport.Servers;
+                            var transParticipants = TransactionParticipants?.ToArray() ?? Transport.Servers;
                             var exceptMe = transParticipants.Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId));
                             transaction = new TransactionInfo
                             {
                                 Initiator = Transport.OwnId,
-                                InitiatorVotes = _transactionParticipants.Value?
-                                    .Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase) ?? true,
-                                Reads = ourReads
+                                InitiatorVotes = TransactionParticipants == null ||
+                                    transParticipants.Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase),
+                                Reads = _wrapped.Reads
                                     .Where(key => !ourChanges.ContainsKey(key))
                                     .Select(key => _wrapped.GetItem(key) ?? new MessageItem { Key = key })
                                     .ToArray(),
