@@ -36,15 +36,13 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// The IDs of servers that decide transactions. If null, the backend will use all
-        /// servers visible to the transport. This set may arbitrarily differ from the transport's
-        /// servers. It may contain this server's ID, but that will be automatically removed.
+        /// servers visible to the transport and himself.
         /// </summary>
         public string[] TransactionParticipants
         {
             get => _transactionParticipants.Value.ToArray();
             set => Shield.InTransaction(() =>
                 _transactionParticipants.Value = value?
-                    .Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId))
                     .Distinct(StringComparer.InvariantCultureIgnoreCase)
                     .ToArray());
         }
@@ -257,9 +255,12 @@ namespace Shielded.Gossip
                         if (ourChanges.Any() || ourReads.Any())
                         {
                             var transParticipants = _transactionParticipants.Value ?? Transport.Servers;
+                            var exceptMe = transParticipants.Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId));
                             transaction = new TransactionInfo
                             {
                                 Initiator = Transport.OwnId,
+                                InitiatorVotes = _transactionParticipants.Value?
+                                    .Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase) ?? true,
                                 Reads = ourReads
                                     .Where(key => !ourChanges.ContainsKey(key))
                                     .Select(key => _wrapped.GetItem(key) ?? new MessageItem { Key = key })
@@ -267,7 +268,7 @@ namespace Shielded.Gossip
                                 Changes = ourChanges.Values.ToArray(),
                                 State = new TransactionVector(
                                     new[] { new VectorItem<TransactionState>(Transport.OwnId, TransactionState.Prepared) }
-                                    .Concat(transParticipants.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
+                                    .Concat(exceptMe.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
                                     .ToArray()),
                             };
                             ourState = new BackendState(WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString()),
@@ -495,11 +496,11 @@ namespace Shielded.Gossip
         {
             if (!newVal.State.Items.Any(i => StringComparer.InvariantCultureIgnoreCase.Equals(i.ServerId, Transport.OwnId)))
             {
-                if (newVal.State.IsSuccess)
+                if (newVal.IsSuccess)
                     Apply(newVal);
                 return;
             }
-            if (newVal.State[Transport.OwnId] != TransactionState.None || newVal.State.IsDone || _transactions.ContainsKey(id))
+            if (newVal.State[Transport.OwnId] != TransactionState.None || newVal.IsDone || _transactions.ContainsKey(id))
             {
                 OnStateChange(id, newVal);
                 return;
@@ -537,7 +538,7 @@ namespace Shielded.Gossip
         {
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 current.State[Transport.OwnId] != TransactionState.None ||
-                current.State.IsDone)
+                current.IsDone)
                 return false;
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
             return true;
@@ -547,7 +548,7 @@ namespace Shielded.Gossip
         {
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 current.State[Transport.OwnId] != TransactionState.None ||
-                current.State.IsDone)
+                current.IsDone)
                 return false;
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Rejected));
             return true;
@@ -576,19 +577,19 @@ namespace Shielded.Gossip
             if ((current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 return;
             _transactions.TryGetValue(id, out var ourState);
-            if (current.State.IsFail || current.State.IsRejected)
+            if (current.IsFail || current.IsRejected)
             {
                 SetFail(id);
                 if (ourState != null)
                     ourState.Complete(false);
             }
-            else if (current.State.IsSuccess)
+            else if (current.IsSuccess)
             {
                 ApplyAndSetSuccess(id);
                 if (ourState != null)
                     ourState.Complete(true);
             }
-            else if (current.State.IsPrepared &&
+            else if (current.IsPrepared &&
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
             {
                 if (ourState != null)

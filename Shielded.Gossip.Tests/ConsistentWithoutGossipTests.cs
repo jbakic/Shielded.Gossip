@@ -64,7 +64,7 @@ namespace Shielded.Gossip.Tests
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }, 1).Result);
 
             CheckProtocols();
 

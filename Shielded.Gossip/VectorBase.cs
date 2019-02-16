@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
@@ -35,7 +36,7 @@ namespace Shielded.Gossip
     /// <typeparam name="TVec">The type of the vector, i.e. of the child class itself.</typeparam>
     /// <typeparam name="T">The type of an individual server's value.</typeparam>
     [DataContract(Namespace = ""), Serializable]
-    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec>
+    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec>, IEnumerable<VectorItem<T>>
         where TVec : VectorBase<TVec, T>, new()
     {
         public VectorBase() { }
@@ -189,6 +190,9 @@ namespace Shielded.Gossip
             return (Items ?? Enumerable.Empty<VectorItem<T>>())
                 .Where(i => !i.ServerId.Equals(serverId, StringComparison.InvariantCultureIgnoreCase));
         }
+
+        public IEnumerator<VectorItem<T>> GetEnumerator() => (Items ?? Enumerable.Empty<VectorItem<T>>()).GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable<VectorItem<T>>)this).GetEnumerator();
 
         public T this[string serverId]
         {

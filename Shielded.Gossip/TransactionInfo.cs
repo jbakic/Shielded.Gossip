@@ -36,12 +36,6 @@ namespace Shielded.Gossip
 
         protected override TransactionState Merge(TransactionState left, TransactionState right) =>
             right > left ? right : left;
-
-        public bool IsPrepared => Items.Count(i => (i.Value & TransactionState.Prepared) != 0) > (Items.Length / 2);
-        public bool IsRejected => Items.Count(i => (i.Value & TransactionState.Rejected) != 0) > (Items.Length / 2);
-        public bool IsDone => Items.Any(i => (i.Value & TransactionState.Done) != 0);
-        public bool IsSuccess => Items.Any(i => i.Value == TransactionState.Success);
-        public bool IsFail => Items.Any(i => i.Value == TransactionState.Fail);
     }
 
     /// <summary>
@@ -57,6 +51,8 @@ namespace Shielded.Gossip
         [DataMember]
         public string Initiator { get; set; }
         [DataMember]
+        public bool InitiatorVotes { get; set; }
+        [DataMember]
         public MessageItem[] Reads { get; set; }
         [DataMember]
         public MessageItem[] Changes { get; set; }
@@ -66,9 +62,30 @@ namespace Shielded.Gossip
         /// <summary>
         /// An enumerable of all keys involved in the transaction, reads and writes.
         /// </summary>
-        public IEnumerable<string> AllKeys => 
+        public IEnumerable<string> AllKeys =>
             (Reads?.Select(r => r.Key) ?? Enumerable.Empty<string>())
             .Concat(Changes?.Select(w => w.Key) ?? Enumerable.Empty<string>());
+
+        private IEnumerable<TransactionState> VotingStates =>
+            (InitiatorVotes ? State : State.Without(Initiator)).Select(vi => vi.Value);
+
+        public bool IsPrepared => VotingStates.Count(s => (s & TransactionState.Prepared) != 0) > (VotingStates.Count() / 2);
+        public bool IsRejected
+        {
+            get
+            {
+                var voterCount = VotingStates.Count();
+                var rejectVotes = VotingStates.Count(s => (s & TransactionState.Rejected) != 0);
+                // if the voterCount is even, the threshold for rejection is exactly 1/2, i.e. in case we ever have
+                // equal number of Prepared and Rejected votes, we reject.
+                var rejectThreshold = voterCount / 2 + voterCount % 2;
+                return rejectVotes >= rejectThreshold;
+            }
+        }
+
+        public bool IsDone => State.Items.Any(i => (i.Value & TransactionState.Done) != 0);
+        public bool IsSuccess => State.Items.Any(i => i.Value == TransactionState.Success);
+        public bool IsFail => State.Items.Any(i => i.Value == TransactionState.Fail);
 
         /// <summary>
         /// True if a majority of servers has reached the Success or the Fail state. It is safe to
@@ -86,6 +103,7 @@ namespace Shielded.Gossip
             return new TransactionInfo
             {
                 Initiator = Initiator,
+                InitiatorVotes = InitiatorVotes,
                 Reads = Reads,
                 Changes = Changes,
                 State = (State ?? new TransactionVector()).MergeWith(newState)
