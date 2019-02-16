@@ -51,8 +51,8 @@ namespace Shielded.Gossip
         internal GossipBackend(ITransport transport, GossipConfiguration configuration, object owner)
         {
             _owner = owner ?? this;
-            Transport = transport;
-            Configuration = configuration;
+            Transport = transport ?? throw new ArgumentNullException(nameof(transport));
+            Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _freshIndex = new ReverseTimeIndex(GetItem);
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
             _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.DeletableCleanUpInterval, Configuration.DeletableCleanUpInterval);

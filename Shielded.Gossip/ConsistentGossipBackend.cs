@@ -21,7 +21,6 @@ namespace Shielded.Gossip
     public class ConsistentGossipBackend : IGossipBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
-        private readonly string[] _transactionParticipants;
 
         public ITransport Transport => _wrapped.Transport;
         public GossipConfiguration Configuration => _wrapped.Configuration;
@@ -36,26 +35,28 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
+        /// The IDs of servers that decide transactions. If null, the backend will use all
+        /// servers visible to the transport. This set may arbitrarily differ from the transport's
+        /// servers. It may contain this server's ID, but that will be automatically removed.
+        /// </summary>
+        public string[] TransactionParticipants
+        {
+            get => _transactionParticipants.Value.ToArray();
+            set => Shield.InTransaction(() =>
+                _transactionParticipants.Value = value?
+                    .Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId))
+                    .Distinct(StringComparer.InvariantCultureIgnoreCase)
+                    .ToArray());
+        }
+        private readonly Shielded<string[]> _transactionParticipants = new Shielded<string[]>();
+
+        /// <summary>
         /// Constructor.
         /// </summary>
         /// <param name="transport">The message transport to use.</param>
         /// <param name="configuration">The configuration.</param>
-        /// <param name="transactionParticipants">IDs of the servers that decide transactions. If not given, the
-        /// backend will use all servers visible to the transport. This set may arbitrarily differ from the
-        /// transport's servers. It may not repeat the same IDs. It may contain this server's ID.</param>
-        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration,
-            ICollection<string> transactionParticipants = null)
+        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
         {
-            if (transactionParticipants != null)
-            {
-                if (transactionParticipants.Distinct(StringComparer.InvariantCultureIgnoreCase).Count() < transactionParticipants.Count)
-                    throw new ArgumentException("Transaction participants should contain unique IDs.", nameof(transactionParticipants));
-                // we always clone it. thus, the private collection _transactionParticipants is unchangeable, at least for now.
-                _transactionParticipants = transactionParticipants
-                    .Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, transport.OwnId))
-                    .ToArray();
-            }
-
             _wrapped = new GossipBackend(transport, configuration, this);
             Shield.InTransaction(() =>
                 _wrapped.Changed.Subscribe(_wrapped_Changed));
@@ -255,7 +256,7 @@ namespace Shielded.Gossip
                         var ourReads = _wrapped.Reads;
                         if (ourChanges.Any() || ourReads.Any())
                         {
-                            var transParticipants = _transactionParticipants ?? Transport.Servers;
+                            var transParticipants = _transactionParticipants.Value ?? Transport.Servers;
                             transaction = new TransactionInfo
                             {
                                 Initiator = Transport.OwnId,

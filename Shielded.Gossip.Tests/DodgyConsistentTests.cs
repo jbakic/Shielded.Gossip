@@ -20,7 +20,10 @@ namespace Shielded.Gossip.Tests
 
         protected override ConsistentGossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
-            return new ConsistentGossipBackend(transport, configuration, new List<string> { A, B, C });
+            return new ConsistentGossipBackend(transport, configuration)
+            {
+                TransactionParticipants = new string[] { A, B, C }
+            };
         }
 
         protected override DodgyTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
