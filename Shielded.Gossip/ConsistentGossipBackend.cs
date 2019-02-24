@@ -59,12 +59,12 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Tries to read the value under the given key. The type of the value must be a CRDT.
+        /// Try to read the value under the given key.
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("key");
+                throw new ArgumentNullException(nameof(key));
             key = WrapPublicKey(key);
             return TryGetInternal(key, out item);
         }
@@ -74,12 +74,32 @@ namespace Shielded.Gossip
             if (!IsInConsistentTransaction)
                 return _wrapped.TryGet(key, out item);
             var local = _currentState.Value;
-            if (local.TryGetValue(key, out MessageItem i))
+            if (!local.TryGetValue(key, out MessageItem i))
+                return _wrapped.TryGet(key, out item);
+            if (i.Deleted)
             {
-                item = (TItem)i.Value;
-                return true;
+                item = default;
+                return false;
             }
-            return _wrapped.TryGet(key, out item);
+            item = (TItem)i.Value;
+            return true;
+        }
+
+        /// <summary>
+        /// Try to read the value under the given key. Will return deleted and expired values as well,
+        /// in case they are still present in the storage for communicating the removal to other servers.
+        /// </summary>
+        public FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            key = WrapPublicKey(key);
+            if (!IsInConsistentTransaction)
+                return _wrapped.TryGetWithInfo<TItem>(key);
+            var local = _currentState.Value;
+            if (!local.TryGetValue(key, out var item))
+                return _wrapped.TryGetWithInfo<TItem>(key);
+            return new FieldInfo<TItem>(item);
         }
 
         private string WrapPublicKey(string key)
@@ -98,44 +118,60 @@ namespace Shielded.Gossip
         private const string TransactionPfx = "transaction|";
 
         /// <summary>
-        /// Sets the given value under the given key, merging it with any already existing value
+        /// Set a value under the given key, merging it with any already existing value
         /// there. Returns the relationship of the new to the old value, or
-        /// <see cref="VectorRelationship.Greater"/> if there is no old value. In a consistent
-        /// transaction, only the calls which return Greater or Conflict, that actually affect the
-        /// storage, get transmitted to other servers. If the result was Greater, we will insist
-        /// that it's Greater on all servers.
+        /// <see cref="VectorRelationship.Greater"/> if there is no old value.
         /// </summary>
-        public VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
+        public VectorRelationship Set<TItem>(string key, TItem item, int? expireInMs = null) where TItem : IMergeable<TItem>
             => Shield.InTransaction(() =>
         {
             if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("key");
+                throw new ArgumentNullException(nameof(key));
             if (item == null)
-                throw new ArgumentNullException("val");
+                throw new ArgumentNullException(nameof(item));
+            if (expireInMs <= 0)
+                throw new ArgumentOutOfRangeException(nameof(expireInMs));
             key = WrapPublicKey(key);
             if (!IsInConsistentTransaction)
-                return _wrapped.Set(key, item);
-            return SetInternal(key, item);
+                return _wrapped.Set(key, item, expireInMs);
+            return SetInternal(key, item, expireInMs);
         });
 
-        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+        private VectorRelationship SetInternal<TItem>(string key, TItem val, int? expireInMs = null) where TItem : IMergeable<TItem>
         {
-            var cmp = VectorRelationship.Greater;
-            if (TryGetInternal(key, out TItem oldVal))
+            var local = _currentState.Value;
+            var oldValue = local.TryGetValue(key, out var oldItem)
+                ? new FieldInfo<TItem>(oldItem)
+                : _wrapped.TryGetWithInfo<TItem>(key);
+            if (oldValue != null)
             {
-                cmp = val.VectorCompare(oldVal);
+                var (mergedValue, cmp) = new FieldInfo<TItem>(val, expireInMs)
+                    .MergeWith(oldValue);
                 if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
-                val = oldVal.MergeWith(val);
-                if (val == null)
-                    throw new ApplicationException("IMergeable.MergeWith should not return null.");
+                local[key] = new MessageItem
+                {
+                    Key = key,
+                    Value = mergedValue.Value,
+                    Deleted = mergedValue.Deleted,
+                    ExpiresInMs = mergedValue.ExpiresInMs,
+                };
+                OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
+                return cmp;
             }
-
-            var local = _currentState.Value;
-            local[key] = new MessageItem { Key = key, Value = val };
-
-            OnChanged(key, oldVal, val);
-            return cmp;
+            else
+            {
+                if (val is IDeletable del && del.CanDelete)
+                    return VectorRelationship.Equal;
+                local[key] = new MessageItem
+                {
+                    Key = key,
+                    Value = val,
+                    ExpiresInMs = expireInMs,
+                };
+                OnChanged(key, null, val, false);
+                return VectorRelationship.Greater;
+            }
         }
 
         /// <summary>
@@ -146,13 +182,46 @@ namespace Shielded.Gossip
         public void Touch(string key)
         {
             if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("key");
+                throw new ArgumentNullException(nameof(key));
             key = WrapPublicKey(key);
             if (IsInConsistentTransaction)
                 // we just need to read the field, because a consistent transaction transmits reads too.
                 _wrapped.GetItem(key);
             else
                 _wrapped.Touch(key);
+        }
+
+        /// <summary>
+        /// Remove the given key from the storage.
+        /// </summary>
+        public bool Remove(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            key = WrapPublicKey(key);
+            if (IsInConsistentTransaction)
+                return RemoveInternal(key);
+            else
+                return _wrapped.Remove(key);
+        }
+
+        private bool RemoveInternal(string key)
+        {
+            var local = _currentState.Value;
+            if (!local.TryGetValue(key, out var oldItem) && (oldItem = _wrapped.GetActiveItem(key)) == null)
+                return false;
+            if (oldItem.Deleted)
+                return false;
+
+            local[key] = new MessageItem
+            {
+                Key = key,
+                Data = oldItem.Data,
+                Deleted = true,
+            };
+            var val = oldItem.Value;
+            OnChanged(key, val, val, true);
+            return true;
         }
 
         private struct PrepareResult
@@ -199,9 +268,9 @@ namespace Shielded.Gossip
 
         private readonly ShieldedLocal<Dictionary<string, MessageItem>> _currentState = new ShieldedLocal<Dictionary<string, MessageItem>>();
 
-        private void OnChanged(string key, object oldVal, object newVal)
+        private void OnChanged(string key, object oldVal, object newVal, bool deleted)
         {
-            var ev = new ChangedEventArgs(key, oldVal, newVal);
+            var ev = new ChangedEventArgs(key, oldVal, newVal, deleted);
             Changed.Raise(this, ev);
         }
 
@@ -231,9 +300,9 @@ namespace Shielded.Gossip
         public async Task<CommitContinuation> Prepare(Action trans, int attempts = 10)
         {
             if (trans == null)
-                throw new ArgumentNullException("trans");
+                throw new ArgumentNullException(nameof(trans));
             if (attempts <= 0)
-                throw new ArgumentOutOfRangeException();
+                throw new ArgumentOutOfRangeException(nameof(attempts));
             if (Shield.IsInTransaction)
                 throw new InvalidOperationException("Prepare cannot be called within a transaction.");
 
@@ -260,7 +329,7 @@ namespace Shielded.Gossip
                                     transParticipants.Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase),
                                 Reads = _wrapped.Reads
                                     .Where(key => !ourChanges.ContainsKey(key))
-                                    .Select(key => _wrapped.GetItem(key) ?? new MessageItem { Key = key })
+                                    .Select(key => _wrapped.GetActiveItem(key) ?? new MessageItem { Key = key })
                                     .ToArray(),
                                 Changes = ourChanges.Values.ToArray(),
                                 State = new TransactionVector(
@@ -415,11 +484,13 @@ namespace Shielded.Gossip
         private readonly ApplyMethods _compareMethods = new ApplyMethods(
             typeof(ConsistentGossipBackend).GetMethod("CheckOne", BindingFlags.NonPublic | BindingFlags.Instance));
 
-        private VectorRelationship CheckOne<TItem>(string key, TItem item) where TItem : IMergeable<TItem>
+        private VectorRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
+            where TItem : IMergeable<TItem>
         {
-            if (!_wrapped.TryGet(key, out TItem current))
-                return VectorRelationship.Greater;
-            return item.VectorCompare(current);
+            var curr = _wrapped.TryGetWithInfo<TItem>(key);
+            if (curr == null)
+                return value.Deleted ? VectorRelationship.Equal : VectorRelationship.Greater;
+            return value.VectorCompare(curr);
         }
 
         private bool Check(string id, TransactionInfo transaction, bool initiatedLocally) => Shield.InTransaction(() =>
@@ -432,7 +503,7 @@ namespace Shielded.Gossip
                     var obj = read.Value;
                     if (obj == null)
                     {
-                        if (_wrapped.GetItem(read.Key) == null)
+                        if (_wrapped.GetActiveItem(read.Key) == null)
                             continue;
                         if (initiatedLocally)
                             return false;
@@ -458,7 +529,7 @@ namespace Shielded.Gossip
                 {
                     var obj = change.Value;
                     var comparer = _compareMethods.Get(this, obj.GetType());
-                    if (comparer(change.Key, obj) != VectorRelationship.Greater)
+                    if (comparer(change.Key, obj, change.Deleted, change.ExpiresInMs) != VectorRelationship.Greater)
                     {
                         if (initiatedLocally)
                             return false;
@@ -485,7 +556,7 @@ namespace Shielded.Gossip
             }
             else if (e.Key.StartsWith(PublicPfx))
             {
-                OnChanged(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue);
+                OnChanged(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue, e.Deleted);
             }
         }
 

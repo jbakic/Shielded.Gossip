@@ -116,10 +116,12 @@ namespace Shielded.Gossip
         private void AppendCommute(ref ListElement cell)
         {
             var newFresh = (cell?.Freshness ?? 0) + 1;
+            var referenceTickCount = Environment.TickCount;
             foreach (var kvp in _toAppend.Value.OrderBy(kvp => kvp.Value.FreshnessOffset))
             {
                 var item = kvp.Value;
                 item.Freshness = newFresh + item.FreshnessOffset;
+                item.ActivateExpiry(referenceTickCount);
                 cell = new ListElement
                 {
                     Item = item,

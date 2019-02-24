@@ -11,12 +11,14 @@ namespace Shielded.Gossip
     /// the gossip backends.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Vc<T> : IHasVectorClock
+    public struct Vc<T> : IHasVectorClock, IDeletable
     {
         [DataMember]
         public T Value { get; set; }
         [DataMember]
         public VectorClock Clock { get; set; }
+
+        public bool CanDelete => Value is IDeletable del && del.CanDelete;
 
         /// <summary>
         /// Produces a new wrapper with the same value, but with the version moved up by one

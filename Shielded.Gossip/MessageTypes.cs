@@ -102,18 +102,54 @@ namespace Shielded.Gossip
         [NonSerialized]
         private long _freshnessOffset;
 
-        [IgnoreDataMember]
-        public bool Deletable
+        [DataMember]
+        public bool Deleted { get; set; }
+
+        [DataMember]
+        public int? ExpiresInMs
         {
-            get => _deletable;
-            set => _deletable = value;
+            get
+            {
+                if (!_expiresInMs.HasValue)
+                    return null;
+                if (!_referenceTickCount.HasValue)
+                    return _expiresInMs;
+                return unchecked(_expiresInMs.Value + _referenceTickCount.Value - GetEnvironmentTickCount());
+            }
+            set
+            {
+                _referenceTickCount = null;
+                _expiresInMs = value;
+            }
         }
+        private int? _expiresInMs;
         [NonSerialized]
-        private bool _deletable;
+        private int? _referenceTickCount;
+
+        private static ShieldedLocal<int> _transactionTickCount = new ShieldedLocal<int>();
+
+        /// <summary>
+        /// Like Environment.TickCount, but does not change within one Shielded transaction run.
+        /// </summary>
+        private int GetEnvironmentTickCount()
+        {
+            if (!Shield.IsInTransaction)
+                return Environment.TickCount;
+            if (!_transactionTickCount.HasValue)
+                return _transactionTickCount.Value = Environment.TickCount;
+            return _transactionTickCount.Value;
+        }
+
+        public void ActivateExpiry(int referenceTickCount)
+        {
+            if (_expiresInMs.HasValue)
+                _referenceTickCount = referenceTickCount;
+        }
 
         public override string ToString()
         {
-            return $"\"{Key}\"{(Deletable ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}: {Value}";
+            return $"\"{Key}\"{(Deleted ? "*" : "")}{(Freshness != 0 ? " at " + Freshness : "")}" +
+                $"{(ExpiresInMs.HasValue ? " exp " + ExpiresInMs : "")}: {Value}";
         }
     }
 }

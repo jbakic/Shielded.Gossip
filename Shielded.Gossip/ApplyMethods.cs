@@ -6,11 +6,13 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
-    public delegate VectorRelationship ApplyDelegate(string key, object obj);
+    public delegate VectorRelationship ApplyDelegate(string key, object obj, bool delete = false, int? expiryMs = null);
 
     /// <summary>
-    /// Helper for generic methods of signature: VectorRelationship SomeMethod&lt;TItem&gt;(string key, TItem item).
-    /// Produces a delegate which receives an object arg, and calls the appropriate version of the generic method.
+    /// Helper for generic methods of signature:
+    /// VectorRelationship SomeMethod&lt;TItem&gt;(string key, FieldInfo&lt;TItem&gt; value).
+    /// Produces a delegate which receives an object arg and separate info fields, and
+    /// calls the appropriate version of the generic method.
     /// </summary>
     public class ApplyMethods
     {
@@ -36,11 +38,11 @@ namespace Shielded.Gossip
         }
 
         private ApplyDelegate CreateSetterGeneric<TItem>(object self, MethodInfo setter)
-            where TItem : IMergeable<TItem, TItem>
+            where TItem : IMergeable<TItem>
         {
-            var setterTypedDelegate = (Func<string, TItem, VectorRelationship>)
-                Delegate.CreateDelegate(typeof(Func<string, TItem, VectorRelationship>), self, setter);
-            ApplyDelegate res = (key, obj) => setterTypedDelegate(key, (TItem)obj);
+            var setterTypedDelegate = (Func<string, FieldInfo<TItem>, VectorRelationship>)
+                Delegate.CreateDelegate(typeof(Func<string, FieldInfo<TItem>, VectorRelationship>), self, setter);
+            ApplyDelegate res = (key, obj, del, exp) => setterTypedDelegate(key, new FieldInfo<TItem>((TItem)obj, del, exp));
             return res;
         }
     }

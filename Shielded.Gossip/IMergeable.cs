@@ -3,6 +3,21 @@
 namespace Shielded.Gossip
 {
     /// <summary>
+    /// Base interface of <see cref="IMergeable{TIn, TOut}"/>, used for providing access to
+    /// the version bytes used for the DB hash, without having to know which mergeable type
+    /// we're dealing with - this is non-generic.
+    /// </summary>
+    public interface IHasVersionBytes
+    {
+        /// <summary>
+        /// Gets the bytes of fields which take part in determining the version of the data. Used
+        /// when determining the hash of the whole database. We will add a zero byte between every
+        /// two byte arrays in the returned enumerable.
+        /// </summary>
+        IEnumerable<byte[]> GetVersionBytes();
+    }
+
+    /// <summary>
     /// Interface for CRDTs - types which have a merge operation that is idempotent,
     /// commutative and associative. Such an operation allows multiple servers to eventually
     /// reach the same state regardless of the order or the number of messages which they
@@ -12,7 +27,7 @@ namespace Shielded.Gossip
     /// general case may be different from the merge result type.</typeparam>
     /// <typeparam name="TOut">The merge result type, which typically is the same type
     /// implementing this interface.</typeparam>
-    public interface IMergeable<in TIn, out TOut> where TOut : IMergeable<TIn, TOut>
+    public interface IMergeable<in TIn, out TOut> : IHasVersionBytes where TOut : IMergeable<TIn, TOut>
     {
         /// <summary>
         /// Merge the value with another, returning the result. Must be idempotent, commutative
@@ -26,13 +41,6 @@ namespace Shielded.Gossip
         /// original values must return Greater or Equal.
         /// </summary>
         VectorRelationship VectorCompare(TIn other);
-
-        /// <summary>
-        /// Gets the bytes of fields which take part in determining the version of the data. Used
-        /// when determining the hash of the whole database. We will add a zero byte between every
-        /// two byte arrays in the returned enumerable.
-        /// </summary>
-        IEnumerable<byte[]> GetVersionBytes();
     }
 
     /// <summary>

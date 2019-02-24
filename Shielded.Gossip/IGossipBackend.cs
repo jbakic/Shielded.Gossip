@@ -5,14 +5,35 @@
     /// </summary>
     public interface IGossipBackend
     {
+        /// <summary>
+        /// Try to read the value under the given key.
+        /// </summary>
         bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>;
-        VectorRelationship Set<TItem>(string key, TItem item) where TItem : IMergeable<TItem>;
+
+        /// <summary>
+        /// Try to read the value under the given key. Will return deleted and expired values as well,
+        /// in case they are still present in the storage for communicating the removal to other servers.
+        /// </summary>
+        FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>;
+
+        /// <summary>
+        /// Set a value under the given key, merging it with any already existing value
+        /// there. Returns the relationship of the new to the old value, or
+        /// <see cref="VectorRelationship.Greater"/> if there is no old value.
+        /// </summary>
+        /// <param name="expireInMs">If given, the item will expire and be removed from the storage in
+        /// this many milliseconds. If not null, must be > 0. Ignored if the result was Less or Equal.</param>
+        VectorRelationship Set<TItem>(string key, TItem value, int? expireInMs = null) where TItem : IMergeable<TItem>;
+
+        /// <summary>
+        /// Remove the given key from the storage.
+        /// </summary>
+        bool Remove(string key);
 
         /// <summary>
         /// A non-update, which ensures that when your local transaction is transmitted to other servers, this
         /// field will be transmitted as well, even if you did not change its value.
         /// </summary>
-        /// <param name="key">The key to touch.</param>
         void Touch(string key);
     }
 
@@ -23,10 +44,10 @@
         /// wrapper. The value will be readable by <see cref="TryGetMultiple{T}(IGossipBackend, string)"/> or
         /// <see cref="TryGetClocked{T}(IGossipBackend, string)"/>, respectively.
         /// </summary>
-        public static VectorRelationship SetVc<TItem>(this IGossipBackend backend, string key, TItem item)
+        public static VectorRelationship SetVc<TItem>(this IGossipBackend backend, string key, TItem item, int? expireInMs = null)
             where TItem : IHasVectorClock
         {
-            return backend.Set(key, (Multiple<TItem>)item);
+            return backend.Set(key, (Multiple<TItem>)item, expireInMs);
         }
 
         /// <summary>

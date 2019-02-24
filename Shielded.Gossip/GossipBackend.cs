@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Shielded.Gossip
 {
@@ -35,10 +34,7 @@ namespace Shielded.Gossip
 
         private readonly object _owner;
 
-        internal void RaiseError(GossipBackendException ex)
-        {
-            Error?.Invoke(_owner, ex);
-        }
+        internal void RaiseError(GossipBackendException ex) => Error?.Invoke(_owner, ex);
 
         /// <summary>
         /// Constructor.
@@ -73,8 +69,8 @@ namespace Shielded.Gossip
                     if (!lockTaken)
                         return;
                     var (toRemove, freshness) = Shield.InTransaction(() =>
-                        (_freshIndex.SkipWhile(i => i.Freshness > lastFreshness)
-                            .Where(i => i.Item.Deletable)
+                        (_freshIndex
+                            .Where(i => i.Item.Deleted ? i.Freshness <= lastFreshness : i.Item.ExpiresInMs <= 0)
                             .Select(i => i.Item)
                             .ToArray(),
                         _freshIndex.LastFreshness));
@@ -84,7 +80,12 @@ namespace Shielded.Gossip
                     {
                         foreach (var item in toRemove)
                             if (_local.TryGetValue(item.Key, out var mi) && mi == item)
-                                _local.Remove(item.Key);
+                            {
+                                if (item.Deleted)
+                                    _local.Remove(item.Key);
+                                else
+                                    Remove(item.Key, false);
+                            }
                         lastFreshness.Value = freshness;
                     });
                 }
@@ -299,7 +300,7 @@ namespace Shielded.Gossip
                 var item = items[i];
                 if (item.Data == null)
                     continue;
-                if (_local.TryGetValue(item.Key, out var curr) && IsByteEqual(curr.Data, item.Data))
+                if (_local.TryGetValue(item.Key, out var curr) && item.Deleted == curr.Deleted && IsByteEqual(curr.Data, item.Data))
                 {
                     if (equalKeys == null)
                         equalKeys = new HashSet<string>();
@@ -315,7 +316,7 @@ namespace Shielded.Gossip
                 }
                 var obj = item.Value;
                 var method = _applyMethods.Get(this, obj.GetType());
-                var itemResult = method(item.Key, obj);
+                var itemResult = method(item.Key, obj, item.Deleted, item.ExpiresInMs);
                 freshnessUtilized |= (itemResult & VectorRelationship.Greater) != 0;
                 if (itemResult == VectorRelationship.Greater || itemResult == VectorRelationship.Equal)
                 {
@@ -511,7 +512,6 @@ namespace Shielded.Gossip
             int cutoff = Configuration.AntiEntropyCutoff;
             ReverseTimeIndex.Enumerator prevFreshnessStart = default;
             var result = new List<MessageItem>();
-            bool interrupted = false;
 
             newWindowStart = _freshIndex.GetCloneableEnumerator();
             while (newWindowStart.MoveNext())
@@ -557,10 +557,7 @@ namespace Shielded.Gossip
                 if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
                     if (result.Count >= cutoff || result.Count >= packageSize)
-                    {
-                        interrupted = true;
-                        break;
-                    }
+                        return result.ToArray();
                     prevFreshnessStart = newWindowStart;
                 }
                 if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
@@ -572,24 +569,37 @@ namespace Shielded.Gossip
                 }
                 result.Add(item.Item);
             } while (newWindowStart.MoveNext());
-            if (!interrupted)
-            {
-                newWindowStart.Dispose();
-                newWindowStart = default;
-            }
+
+            newWindowStart.Dispose();
+            newWindowStart = default;
             return result.ToArray();
         }
 
         /// <summary>
-        /// Tries to read the value under the given key. The type of the value must be a CRDT.
+        /// Try to read the value under the given key.
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
             item = default;
-            if (!_local.TryGetValue(key, out MessageItem i))
+            var mi = GetActiveItem(key);
+            if (mi == null)
                 return false;
-            item = (TItem)i.Value;
+            item = (TItem)mi.Value;
             return true;
+        }
+
+        /// <summary>
+        /// Try to read the value under the given key. Will return deleted and expired values as well,
+        /// in case they are still present in the storage for communicating the removal to other servers.
+        /// </summary>
+        public FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            var mi = GetItem(key);
+            return mi == null ? null : new FieldInfo<TItem>(mi);
         }
 
         internal MessageItem GetItem(string key)
@@ -597,7 +607,12 @@ namespace Shielded.Gossip
             return _local.TryGetValue(key, out MessageItem i) ? i : null;
         }
 
-        private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IMergeable<TItem>
+        internal MessageItem GetActiveItem(string key)
+        {
+            return _local.TryGetValue(key, out MessageItem i) && !i.Deleted && !(i.ExpiresInMs <= 0) ? i : null;
+        }
+
+        private VersionHash GetHash(string key, IHasVersionBytes i)
         {
             return VersionHash.Hash(
                 new[] { Encoding.UTF8.GetBytes(key) }
@@ -612,15 +627,16 @@ namespace Shielded.Gossip
         public void Touch(string key) => Shield.InTransaction(() =>
         {
             if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("key");
+                throw new ArgumentNullException(nameof(key));
             if (!_local.TryGetValue(key, out var mi))
                 return;
             var newItem = new MessageItem
             {
                 Key = key,
                 Data = mi.Data,
-                Deletable = mi.Deletable,
-                FreshnessOffset = _freshnessContext.GetValueOrDefault()
+                Deleted = mi.Deleted,
+                FreshnessOffset = _freshnessContext.GetValueOrDefault(),
+                ExpiresInMs = mi.ExpiresInMs,
             };
             _local[key] = newItem;
             _freshIndex.Append(newItem);
@@ -639,85 +655,114 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Sets the given value under the given key, merging it with any already existing value
+        /// Set a value under the given key, merging it with any already existing value
         /// there. Returns the relationship of the new to the old value, or
-        /// <see cref="VectorRelationship.Greater"/> if there is no old value. The storage gets affected
-        /// only if the result of comparison is Greater or Conflict.
+        /// <see cref="VectorRelationship.Greater"/> if there is no old value.
         /// </summary>
-        public VectorRelationship Set<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+        /// <param name="expireInMs">If given, the item will expire and be removed from the storage in
+        /// this many milliseconds. If not null, must be > 0. Ignored if the result was Less or Equal.</param>
+        public VectorRelationship Set<TItem>(string key, TItem value, int? expireInMs = null) where TItem : IMergeable<TItem>
             => Shield.InTransaction(() =>
         {
-            return SetInternalWithAddToMail(key, val, true);
+            if (expireInMs <= 0)
+                throw new ArgumentOutOfRangeException(nameof(expireInMs));
+            return SetInternalWithAddToMail(key, new FieldInfo<TItem>(value, expireInMs), addToMail: true);
         });
 
-        private VectorRelationship SetInternal<TItem>(string key, TItem val) where TItem : IMergeable<TItem>
+        private VectorRelationship SetInternal<TItem>(string key, FieldInfo<TItem> value)
+            where TItem : IMergeable<TItem>
         {
-            return SetInternalWithAddToMail(key, val, false);
+            return SetInternalWithAddToMail(key, value, addToMail: false);
         }
 
-        private VectorRelationship SetInternalWithAddToMail<TItem>(string key, TItem val, bool addToMail) where TItem : IMergeable<TItem>
+        private VectorRelationship SetInternalWithAddToMail<TItem>(string key, FieldInfo<TItem> value, bool addToMail)
+            where TItem : IMergeable<TItem>
         {
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("key");
-            if (val == null)
-                throw new ArgumentNullException("val");
-            if (_local.TryGetValue(key, out MessageItem oldItem))
+            if (value == null)
+                throw new ArgumentNullException(nameof(value));
+            if (_local.TryGetValue(key, out var oldItem))
             {
-                var oldVal = (TItem)oldItem.Value;
-                var cmp = val.VectorCompare(oldVal);
+                var oldValue = new FieldInfo<TItem>(oldItem);
+                // when the hash is concerned, MessageItem.Deleted is relevant, not FieldInfo.Deleted!
+                var oldHash = oldItem.Deleted ? default : GetHash(key, oldValue.Value);
+                var (mergedValue, cmp) = value.MergeWith(oldValue);
                 if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
                     return cmp;
-                // we support this only for safety - a CanDelete should never accept any changes, nor switch to !CanDelete.
-                var oldDeletable = oldVal is IDeletable oldDel && oldDel.CanDelete;
-                var oldHash = oldDeletable ? default : GetHash(key, oldVal);
-                // in case someone screws up the MergeWith impl, we call it after extracting the critical info above.
-                val = oldVal.MergeWith(val);
-                if (val == null)
-                    throw new ApplicationException("IMergeable.MergeWith should not return null.");
-
-                var deletable = val is IDeletable del && del.CanDelete;
                 var newItem = new MessageItem
                 {
                     Key = key,
-                    Value = val,
-                    Deletable = deletable,
+                    Value = mergedValue.Value,
+                    Deleted = mergedValue.Deleted,
                     FreshnessOffset = _freshnessContext.GetValueOrDefault(),
+                    ExpiresInMs = mergedValue.ExpiresInMs,
                 };
                 _local[key] = newItem;
                 _freshIndex.Append(newItem);
                 if (addToMail)
                     AddToMail(newItem);
-                var hash = oldHash ^ (deletable ? default : GetHash(key, val));
+                var hash = oldHash ^ (mergedValue.Deleted ? default : GetHash(key, mergedValue.Value));
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, oldVal, val);
+                OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
                 return cmp;
             }
             else
             {
-                if (val is IDeletable del && del.CanDelete)
+                if (value.Deleted || value.ExpiresInMs <= 0)
                     return VectorRelationship.Equal;
                 var newItem = new MessageItem
                 {
                     Key = key,
-                    Value = val,
+                    Value = value.Value,
                     FreshnessOffset = _freshnessContext.GetValueOrDefault(),
+                    ExpiresInMs = value.ExpiresInMs,
                 };
                 _local[key] = newItem;
                 _freshIndex.Append(newItem);
                 if (addToMail)
                     AddToMail(newItem);
-                var hash = GetHash(key, val);
+                var hash = GetHash(key, value.Value);
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, default(TItem), val);
+                OnChanged(key, null, value.Value, false);
                 return VectorRelationship.Greater;
             }
         }
 
-        private void OnChanged(string key, object oldVal, object newVal)
+        /// <summary>
+        /// Remove the given key from the storage.
+        /// </summary>
+        public bool Remove(string key) => Shield.InTransaction(() => Remove(key, true));
+
+        private bool Remove(string key, bool addToMail)
         {
-            var ev = new ChangedEventArgs(key, oldVal, newVal);
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            var oldItem = GetItem(key);
+            if (oldItem == null || oldItem.Deleted)
+                return false;
+            var hash = GetHash(key, (IHasVersionBytes)oldItem.Value);
+            var newItem = new MessageItem
+            {
+                Key = key,
+                Data = oldItem.Data,
+                Deleted = true,
+                FreshnessOffset = _freshnessContext.GetValueOrDefault(),
+            };
+            _local[key] = newItem;
+            _freshIndex.Append(newItem);
+            if (addToMail)
+                AddToMail(newItem);
+            _databaseHash.Commute((ref VersionHash h) => h ^= hash);
+
+            var val = oldItem.Value;
+            OnChanged(key, val, val, true);
+            return !(oldItem.ExpiresInMs <= 0);
+        }
+
+        private void OnChanged(string key, object oldVal, object newVal, bool deleted)
+        {
+            var ev = new ChangedEventArgs(key, oldVal, newVal, deleted);
             Changed.Raise(this, ev);
         }
 
