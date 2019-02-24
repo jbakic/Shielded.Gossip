@@ -11,8 +11,7 @@ namespace Shielded.Gossip
     /// A backend supporting a key/value store which is distributed using a simple gossip protocol
     /// implementation. Use it in ordinary <see cref="Shield"/> transactions.
     /// Values should be CRDTs, implementing <see cref="IMergeable{T}"/>, or you can use the
-    /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT. If a type
-    /// implements <see cref="IDeletable"/>, it can be deleted from the storage.
+    /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT.
     /// </summary>
     public class GossipBackend : IGossipBackend, IDisposable
     {
