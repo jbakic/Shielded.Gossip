@@ -51,17 +51,8 @@ namespace Shielded.Gossip
             (Items ?? Enumerable.Empty<VectorItem<Item>>())
                 .Aggregate(0L, (acc, next) => acc + (next.Value.Increments - next.Value.Decrements));
 
-        protected override VectorRelationship Compare(Item left, Item right)
-        {
-            VectorRelationship OneCompare(long a, long b)
-            {
-                var cmp = a.CompareTo(b);
-                return
-                    cmp == 0 ? VectorRelationship.Equal :
-                    cmp > 0 ? VectorRelationship.Greater : VectorRelationship.Less;
-            };
-            return OneCompare(left.Increments, right.Increments) | OneCompare(left.Decrements, right.Decrements);
-        }
+        protected override VectorRelationship Compare(Item left, Item right) =>
+            left.Increments.VectorCompare(right.Increments) | left.Decrements.VectorCompare(right.Decrements);
 
         public static implicit operator long(CountVector cv) => cv.Value;
 

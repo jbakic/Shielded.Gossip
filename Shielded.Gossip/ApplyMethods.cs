@@ -6,7 +6,8 @@ using System.Text;
 
 namespace Shielded.Gossip
 {
-    public delegate VectorRelationship ApplyDelegate(string key, object obj, bool delete = false, int? expiryMs = null);
+    internal delegate ComplexRelationship ApplyDelegate(string key, object obj, bool deleted = false,
+        bool expired = false, int? expiryMs = null);
 
     /// <summary>
     /// Helper for generic methods of signature:
@@ -14,7 +15,7 @@ namespace Shielded.Gossip
     /// Produces a delegate which receives an object arg and separate info fields, and
     /// calls the appropriate version of the generic method.
     /// </summary>
-    public class ApplyMethods
+    internal class ApplyMethods
     {
         public ApplyMethods(MethodInfo itemMsgMethod)
         {
@@ -40,9 +41,9 @@ namespace Shielded.Gossip
         private ApplyDelegate CreateSetterGeneric<TItem>(object self, MethodInfo setter)
             where TItem : IMergeable<TItem>
         {
-            var setterTypedDelegate = (Func<string, FieldInfo<TItem>, VectorRelationship>)
-                Delegate.CreateDelegate(typeof(Func<string, FieldInfo<TItem>, VectorRelationship>), self, setter);
-            ApplyDelegate res = (key, obj, del, exp) => setterTypedDelegate(key, new FieldInfo<TItem>((TItem)obj, del, exp));
+            var setterTypedDelegate = (Func<string, FieldInfo<TItem>, ComplexRelationship>)
+                Delegate.CreateDelegate(typeof(Func<string, FieldInfo<TItem>, ComplexRelationship>), self, setter);
+            ApplyDelegate res = (key, obj, del, exp, expMs) => setterTypedDelegate(key, new FieldInfo<TItem>((TItem)obj, del, exp, expMs));
             return res;
         }
     }

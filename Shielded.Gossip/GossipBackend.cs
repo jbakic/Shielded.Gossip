@@ -69,7 +69,7 @@ namespace Shielded.Gossip
                         return;
                     var (toRemove, freshness) = Shield.InTransaction(() =>
                         (_freshIndex
-                            .Where(i => i.Item.Deleted ? i.Freshness <= lastFreshness : i.Item.ExpiresInMs <= 0)
+                            .Where(i => i.Item.Deleted || i.Item.Expired ? i.Freshness <= lastFreshness : i.Item.ExpiresInMs <= 0)
                             .Select(i => i.Item)
                             .ToArray(),
                         _freshIndex.LastFreshness));
@@ -80,10 +80,10 @@ namespace Shielded.Gossip
                         foreach (var item in toRemove)
                             if (_local.TryGetValue(item.Key, out var mi) && mi == item)
                             {
-                                if (item.Deleted)
+                                if (item.Deleted || item.Expired)
                                     _local.Remove(item.Key);
                                 else
-                                    Remove(item.Key, false);
+                                    Expire(item);
                             }
                         lastFreshness.Value = freshness;
                     });
@@ -98,6 +98,20 @@ namespace Shielded.Gossip
                         Monitor.Exit(lockObj);
                 }
             };
+        }
+
+        private void Expire(MessageItem item)
+        {
+            var hash = GetHash(item.Key, (IHasVersionBytes)item.Value);
+            var newItem = new MessageItem
+            {
+                Key = item.Key,
+                Data = item.Data,
+                Expired = true,
+            };
+            _local[item.Key] = newItem;
+            _freshIndex.Append(newItem);
+            _databaseHash.Commute((ref VersionHash h) => h ^= hash);
         }
 
         private void DoDirectMail(MessageItem[] items)
@@ -299,7 +313,9 @@ namespace Shielded.Gossip
                 var item = items[i];
                 if (item.Data == null)
                     continue;
-                if (_local.TryGetValue(item.Key, out var curr) && item.Deleted == curr.Deleted && IsByteEqual(curr.Data, item.Data))
+                if (_local.TryGetValue(item.Key, out var curr) &&
+                    item.Deleted == curr.Deleted && item.Expired == curr.Expired &&
+                    IsByteEqual(curr.Data, item.Data))
                 {
                     if (equalKeys == null)
                         equalKeys = new HashSet<string>();
@@ -315,9 +331,11 @@ namespace Shielded.Gossip
                 }
                 var obj = item.Value;
                 var method = _applyMethods.Get(this, obj.GetType());
-                var itemResult = method(item.Key, obj, item.Deleted, item.ExpiresInMs);
-                freshnessUtilized |= (itemResult & VectorRelationship.Greater) != 0;
-                if (itemResult == VectorRelationship.Greater || itemResult == VectorRelationship.Equal)
+                var itemResult = method(item.Key, obj, item.Deleted, item.Expired, item.ExpiresInMs);
+                freshnessUtilized |= itemResult != ComplexRelationship.Less && itemResult != ComplexRelationship.Equal &&
+                    itemResult != ComplexRelationship.EqualButLess;
+                if (itemResult == ComplexRelationship.Greater || itemResult == ComplexRelationship.Equal ||
+                    itemResult == ComplexRelationship.EqualButGreater)
                 {
                     if (equalKeys == null)
                         equalKeys = new HashSet<string>();
@@ -608,7 +626,7 @@ namespace Shielded.Gossip
 
         internal MessageItem GetActiveItem(string key)
         {
-            return _local.TryGetValue(key, out MessageItem i) && !i.Deleted && !(i.ExpiresInMs <= 0) ? i : null;
+            return _local.TryGetValue(key, out MessageItem i) && !i.Deleted && !i.Expired && !(i.ExpiresInMs <= 0) ? i : null;
         }
 
         private VersionHash GetHash(string key, IHasVersionBytes i)
@@ -634,8 +652,9 @@ namespace Shielded.Gossip
                 Key = key,
                 Data = mi.Data,
                 Deleted = mi.Deleted,
-                FreshnessOffset = _freshnessContext.GetValueOrDefault(),
+                Expired = mi.Expired,
                 ExpiresInMs = mi.ExpiresInMs,
+                FreshnessOffset = _freshnessContext.GetValueOrDefault(),
             };
             _local[key] = newItem;
             _freshIndex.Append(newItem);
@@ -665,16 +684,16 @@ namespace Shielded.Gossip
         {
             if (expireInMs <= 0)
                 throw new ArgumentOutOfRangeException(nameof(expireInMs));
-            return SetInternalWithAddToMail(key, new FieldInfo<TItem>(value, expireInMs), addToMail: true);
+            return SetInternalWithAddToMail(key, new FieldInfo<TItem>(value, expireInMs), addToMail: true).GetValueRelationship();
         });
 
-        private VectorRelationship SetInternal<TItem>(string key, FieldInfo<TItem> value)
+        private ComplexRelationship SetInternal<TItem>(string key, FieldInfo<TItem> value)
             where TItem : IMergeable<TItem>
         {
             return SetInternalWithAddToMail(key, value, addToMail: false);
         }
 
-        private VectorRelationship SetInternalWithAddToMail<TItem>(string key, FieldInfo<TItem> value, bool addToMail)
+        private ComplexRelationship SetInternalWithAddToMail<TItem>(string key, FieldInfo<TItem> value, bool addToMail)
             where TItem : IMergeable<TItem>
         {
             if (value == null)
@@ -682,16 +701,16 @@ namespace Shielded.Gossip
             if (_local.TryGetValue(key, out var oldItem))
             {
                 var oldValue = new FieldInfo<TItem>(oldItem);
-                // when the hash is concerned, MessageItem.Deleted is relevant, not FieldInfo.Deleted!
-                var oldHash = oldItem.Deleted ? default : GetHash(key, oldValue.Value);
+                var oldHash = oldItem.Deleted || oldItem.Expired ? default : GetHash(key, oldValue.Value);
                 var (mergedValue, cmp) = value.MergeWith(oldValue);
-                if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
+                if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.Equal || cmp == ComplexRelationship.EqualButLess)
                     return cmp;
                 var newItem = new MessageItem
                 {
                     Key = key,
                     Value = mergedValue.Value,
                     Deleted = mergedValue.Deleted,
+                    Expired = mergedValue.Expired,
                     FreshnessOffset = _freshnessContext.GetValueOrDefault(),
                     ExpiresInMs = mergedValue.ExpiresInMs,
                 };
@@ -699,16 +718,18 @@ namespace Shielded.Gossip
                 _freshIndex.Append(newItem);
                 if (addToMail)
                     AddToMail(newItem);
-                var hash = oldHash ^ (mergedValue.Deleted ? default : GetHash(key, mergedValue.Value));
-                _databaseHash.Commute((ref VersionHash h) => h ^= hash);
+                var hash = oldHash ^ (mergedValue.Deleted || mergedValue.Expired ? default : GetHash(key, mergedValue.Value));
+                if (hash != default)
+                    _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
+                if (cmp.GetValueRelationship() != VectorRelationship.Equal)
+                    OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
                 return cmp;
             }
             else
             {
-                if (value.Deleted || value.ExpiresInMs <= 0)
-                    return VectorRelationship.Equal;
+                if (value.Deleted || value.Expired)
+                    return ComplexRelationship.Equal;
                 var newItem = new MessageItem
                 {
                     Key = key,
@@ -723,8 +744,9 @@ namespace Shielded.Gossip
                 var hash = GetHash(key, value.Value);
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                OnChanged(key, null, value.Value, false);
-                return VectorRelationship.Greater;
+                if (value.ExpiresInMs > 0)
+                    OnChanged(key, null, value.Value, false);
+                return ComplexRelationship.Greater;
             }
         }
 

@@ -106,6 +106,9 @@ namespace Shielded.Gossip
         public bool Deleted { get; set; }
 
         [DataMember]
+        public bool Expired { get; set; }
+
+        [DataMember]
         public int? ExpiresInMs
         {
             get

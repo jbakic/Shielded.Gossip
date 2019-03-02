@@ -151,5 +151,18 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsFalse(_backends[B].TryGetClocked<bool>("test").Any());
         }
+
+        [TestMethod]
+        public void Expiry_ReviveSameVersion()
+        {
+            _backends[A].SetVc("test", true.Clock(A, 1), 1);
+            Thread.Sleep(20);
+            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+
+            Assert.AreEqual(VectorRelationship.Equal, _backends[A].SetVc("test", true.Clock(A, 1), 100));
+
+            Thread.Sleep(20);
+            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+        }
     }
 }

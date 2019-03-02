@@ -147,8 +147,8 @@ namespace Shielded.Gossip
             {
                 var (mergedValue, cmp) = new FieldInfo<TItem>(val, expireInMs)
                     .MergeWith(oldValue);
-                if (cmp == VectorRelationship.Less || cmp == VectorRelationship.Equal)
-                    return cmp;
+                if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.Equal || cmp == ComplexRelationship.EqualButLess)
+                    return cmp.GetValueRelationship();
                 local[key] = new MessageItem
                 {
                     Key = key,
@@ -157,7 +157,7 @@ namespace Shielded.Gossip
                     ExpiresInMs = mergedValue.ExpiresInMs,
                 };
                 OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
-                return cmp;
+                return cmp.GetValueRelationship();
             }
             else
             {
@@ -484,12 +484,12 @@ namespace Shielded.Gossip
         private readonly ApplyMethods _compareMethods = new ApplyMethods(
             typeof(ConsistentGossipBackend).GetMethod("CheckOne", BindingFlags.NonPublic | BindingFlags.Instance));
 
-        private VectorRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
+        private ComplexRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
             where TItem : IMergeable<TItem>
         {
             var curr = _wrapped.TryGetWithInfo<TItem>(key);
             if (curr == null)
-                return value.Deleted ? VectorRelationship.Equal : VectorRelationship.Greater;
+                return value.Deleted ? ComplexRelationship.Equal : ComplexRelationship.Greater;
             return value.VectorCompare(curr);
         }
 
@@ -514,7 +514,7 @@ namespace Shielded.Gossip
                     {
                         var comparer = _compareMethods.Get(this, obj.GetType());
                         // what you read must be Greater or Equal to what we have.
-                        if ((comparer(read.Key, obj) | VectorRelationship.Greater) != VectorRelationship.Greater)
+                        if ((comparer(read.Key, obj).GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
                         {
                             if (initiatedLocally)
                                 return false;
@@ -529,7 +529,8 @@ namespace Shielded.Gossip
                 {
                     var obj = change.Value;
                     var comparer = _compareMethods.Get(this, obj.GetType());
-                    if (comparer(change.Key, obj, change.Deleted, change.ExpiresInMs) != VectorRelationship.Greater)
+                    if (comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs)
+                        .GetValueRelationship() != VectorRelationship.Greater)
                     {
                         if (initiatedLocally)
                             return false;

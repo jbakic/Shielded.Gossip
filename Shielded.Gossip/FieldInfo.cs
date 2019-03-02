@@ -12,17 +12,23 @@ namespace Shielded.Gossip
     {
         public readonly T Value;
         public readonly bool Deleted;
+        /// <summary>
+        /// For internal use. Set to true when the item has been excluded from the database
+        /// hash, which may happen some time after its expiry time runs out.
+        /// </summary>
+        public readonly bool Expired;
         public readonly int? ExpiresInMs;
 
-        public FieldInfo(T value, int? expiresInMs) : this(value, false, expiresInMs) { }
+        public FieldInfo(T value, int? expiresInMs) : this(value, false, false, expiresInMs) { }
 
-        public FieldInfo(T value, bool deleted, int? expiresInMs)
+        public FieldInfo(T value, bool deleted, bool expired, int? expiresInMs)
         {
             if (value == null)
                 throw new ArgumentNullException(nameof(value));
             Value = value;
-            Deleted = deleted || expiresInMs <= 0 || value is IDeletable del && del.CanDelete;
-            ExpiresInMs = Deleted ? null : expiresInMs;
+            Deleted = deleted || value is IDeletable del && del.CanDelete;
+            Expired = expired;
+            ExpiresInMs = expiresInMs;
         }
 
         public FieldInfo(MessageItem item)
@@ -30,41 +36,56 @@ namespace Shielded.Gossip
             if (item == null)
                 throw new ArgumentNullException(nameof(item));
             Value = (T)item.Value;
-            Deleted = item.Deleted || item.ExpiresInMs <= 0 || Value is IDeletable del && del.CanDelete;
-            ExpiresInMs = Deleted ? null : item.ExpiresInMs;
+            Deleted = item.Deleted || Value is IDeletable del && del.CanDelete;
+            Expired = item.Expired;
+            ExpiresInMs = item.ExpiresInMs;
         }
 
-        public static VectorRelationship CompareWithDeletes(T leftVal, bool leftDelete, T rightVal, bool rightDelete)
-        {
-            var cmp = leftVal.VectorCompare(rightVal);
-            if (cmp == VectorRelationship.Equal)
-            {
-                if (leftDelete && !rightDelete)
-                    cmp = VectorRelationship.Greater;
-                else if (!leftDelete && rightDelete)
-                    cmp = VectorRelationship.Less;
-            }
-            return cmp;
-        }
-
-        public (FieldInfo<T> Result, VectorRelationship Relation) MergeWith(FieldInfo<T> other)
+        // this is one long signature...
+        internal (FieldInfo<T> Result, ComplexRelationship Relation) MergeWith(FieldInfo<T> other)
         {
             var cmp = VectorCompare(other);
-            if (cmp == VectorRelationship.Greater || cmp == VectorRelationship.Equal)
+            if (cmp == ComplexRelationship.Greater || cmp == ComplexRelationship.EqualButGreater || cmp == ComplexRelationship.Equal)
                 return (this, cmp);
-            if (cmp == VectorRelationship.Less)
+            if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.EqualButLess)
                 return (other, cmp);
 
-            var expire = ExpiresInMs == null || other.ExpiresInMs == null ? (int?)null :
-                Math.Max(ExpiresInMs.Value, other.ExpiresInMs.Value);
             var val = Value.MergeWith(other.Value);
-            var delete = Deleted && other.Deleted;
             if (val == null)
                 throw new ApplicationException("IMergeable.MergeWith should not return null.");
-            return (new FieldInfo<T>(val, delete, expire), cmp);
+            var del = Deleted && other.Deleted;
+            var exp = Expired && other.Expired;
+            var expInMs =
+                ExpiresInMs != null && other.ExpiresInMs != null ? Math.Max(ExpiresInMs.Value, other.ExpiresInMs.Value) :
+                ExpiresInMs != null ? ExpiresInMs :
+                other.ExpiresInMs;
+            return (new FieldInfo<T>(val, del, exp, expInMs), cmp);
         }
 
-        public VectorRelationship VectorCompare(FieldInfo<T> other) =>
-            CompareWithDeletes(Value, Deleted, other.Value, other.Deleted);
+        internal ComplexRelationship VectorCompare(FieldInfo<T> other)
+        {
+            if (other == null)
+                throw new ArgumentNullException(nameof(other));
+
+            var cmp = Value.VectorCompare(other.Value);
+            if (cmp != VectorRelationship.Equal)
+                return (ComplexRelationship)cmp;
+
+            if (Deleted && !other.Deleted)
+                return ComplexRelationship.Greater;
+            if (!Deleted && other.Deleted)
+                return ComplexRelationship.Less;
+
+            if (ExpiresInMs > 0 && other.ExpiresInMs > 0)
+                return ExpiresInMs.Value.CompareTo(other.ExpiresInMs.Value).AsSecondaryRelation();
+
+            var leftRating =
+                ExpiresInMs > 0 ? 3 :
+                Expired ? 2 : 1;
+            var rightRating =
+                other.ExpiresInMs > 0 ? 3 :
+                Expired ? 2 : 1;
+            return leftRating.CompareTo(rightRating).AsSecondaryRelation();
+        }
     }
 }
