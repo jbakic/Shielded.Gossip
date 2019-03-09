@@ -147,8 +147,9 @@ namespace Shielded.Gossip
             {
                 var (mergedValue, cmp) = new FieldInfo<TItem>(val, expireInMs)
                     .MergeWith(oldValue);
-                if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.Equal || cmp == ComplexRelationship.EqualButLess)
-                    return cmp.GetValueRelationship();
+                var valueCmp = cmp.GetValueRelationship();
+                if (valueCmp == VectorRelationship.Less || valueCmp == VectorRelationship.Equal)
+                    return valueCmp;
                 local[key] = new MessageItem
                 {
                     Key = key,
