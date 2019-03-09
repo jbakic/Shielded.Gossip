@@ -40,6 +40,7 @@ namespace Shielded.Gossip.Tests
                 var backend = CreateBackend(transport, new GossipConfiguration
                 {
                     GossipInterval = 250,
+                    AntiEntropyIdleTimeout = 2000,
                 });
 
                 var backendHandler = transport.MessageHandler;

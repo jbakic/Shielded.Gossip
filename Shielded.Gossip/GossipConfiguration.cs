@@ -32,7 +32,7 @@
         /// Every this many milliseconds, the backend will try to start a new gossip session with a
         /// randomly selected other server.
         /// </summary>
-        public int GossipInterval { get; set; } = 1000;
+        public int GossipInterval { get; set; } = 5000;
 
         /// <summary>
         /// Number of key/value pairs to send in the opening message when beginning a new gossip exchange.
@@ -55,7 +55,7 @@
         /// the same server. Also, if we receive a gossip reply with an RTT longer than this, we
         /// will not answer.
         /// </summary>
-        public int AntiEntropyIdleTimeout { get; set; } = 2000;
+        public int AntiEntropyIdleTimeout { get; set; } = 5000;
 
         /// <summary>
         /// When choosing a server for gossiping, we might pick one who we're already in a conversation
