@@ -122,6 +122,8 @@ namespace Shielded.Gossip
                 var item = kvp.Value;
                 item.Freshness = newFresh + item.FreshnessOffset;
                 item.ActivateExpiry(referenceTickCount);
+                if (item.Deleted || item.Expired)
+                    item.RemovableSince = referenceTickCount;
                 cell = new ListElement
                 {
                     Item = item,

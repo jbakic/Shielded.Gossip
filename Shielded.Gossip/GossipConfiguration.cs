@@ -72,10 +72,15 @@
         public (int Min, int Max) ConsistentPrepareTimeoutRange { get; set; } = (10000, 30000);
 
         /// <summary>
-        /// <see cref="IDeletable"/> implementors get cleaned up from the database every this many
-        /// milliseconds, in a way that each deletable key/value will linger in the DB for at least
-        /// this much time.
+        /// How often should the garbage collection take place.
         /// </summary>
-        public int DeletableCleanUpInterval { get; set; } = 5000;
+        public int CleanUpInterval { get; set; } = 2000;
+
+        /// <summary>
+        /// Items which are deletable, removed, or have expired will linger around in the database for
+        /// this much time, after which the garbage collection will finally remove them. They must linger
+        /// to communicate their removable state to other servers.
+        /// </summary>
+        public int RemovableItemLingerMs { get; set; } = 60000;
     }
 }

@@ -28,7 +28,7 @@ namespace Shielded.Gossip.Tests
         {
             var transport = new TcpTransport("Node", new IPEndPoint(IPAddress.Loopback, 2001), new Dictionary<string, IPEndPoint>());
             transport.StartListening();
-            _backend = new GossipBackend(transport, new GossipConfiguration { DeletableCleanUpInterval = 200 });
+            _backend = new GossipBackend(transport, new GossipConfiguration { CleanUpInterval = 200 });
         }
 
         [TestCleanup]

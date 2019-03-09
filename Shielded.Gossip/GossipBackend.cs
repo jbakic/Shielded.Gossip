@@ -50,14 +50,13 @@ namespace Shielded.Gossip
             Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _freshIndex = new ReverseTimeIndex(GetItem);
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
-            _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.DeletableCleanUpInterval, Configuration.DeletableCleanUpInterval);
+            _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.CleanUpInterval, Configuration.CleanUpInterval);
 
             Transport.MessageHandler = Transport_MessageHandler;
         }
 
         private TimerCallback GetDeletableTimerMethod()
         {
-            var lastFreshness = new Shielded<long>();
             var lockObj = new object();
             return _ =>
             {
@@ -67,25 +66,25 @@ namespace Shielded.Gossip
                     Monitor.TryEnter(lockObj, ref lockTaken);
                     if (!lockTaken)
                         return;
+                    var currTickCount = Environment.TickCount;
                     var (toRemove, freshness) = Shield.InTransaction(() =>
                         (_freshIndex
-                            .Where(i => i.Item.Deleted || i.Item.Expired ? i.Freshness <= lastFreshness : i.Item.ExpiresInMs <= 0)
+                            .Where(i => i.Item.RemovableSince.HasValue
+                                ? unchecked(currTickCount - i.Item.RemovableSince.Value) > Configuration.RemovableItemLingerMs
+                                : i.Item.ExpiresInMs <= 0)
                             .Select(i => i.Item)
                             .ToArray(),
                         _freshIndex.LastFreshness));
-                    // minor issue - the following transaction will make all the deletable items removable
-                    // from the time index, but they won't be actually removed until the next iteration.
                     Shield.InTransaction(() =>
                     {
                         foreach (var item in toRemove)
                             if (_local.TryGetValue(item.Key, out var mi) && mi == item)
                             {
-                                if (item.Deleted || item.Expired)
+                                if (item.RemovableSince.HasValue)
                                     _local.Remove(item.Key);
                                 else
                                     Expire(item);
                             }
-                        lastFreshness.Value = freshness;
                     });
                 }
                 catch (Exception ex)
@@ -554,7 +553,6 @@ namespace Shielded.Gossip
                     result.Add(item.Item);
                 }
             }
-            newWindowStart.Dispose();
 
             newWindowStart = lastWindowStart;
             if (newWindowStart.IsDefault)
@@ -564,7 +562,6 @@ namespace Shielded.Gossip
             // will be a do/while. but first, let's see if that item is still up to date.
             if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
             {
-                newWindowStart.Dispose();
                 newWindowStart = default;
                 return result.ToArray();
             }
@@ -587,7 +584,6 @@ namespace Shielded.Gossip
                 result.Add(item.Item);
             } while (newWindowStart.MoveNext());
 
-            newWindowStart.Dispose();
             newWindowStart = default;
             return result.ToArray();
         }

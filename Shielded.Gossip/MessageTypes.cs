@@ -108,6 +108,15 @@ namespace Shielded.Gossip
         [DataMember]
         public bool Expired { get; set; }
 
+        [IgnoreDataMember]
+        public int? RemovableSince
+        {
+            get => _removableSince;
+            set => _removableSince = value;
+        }
+        [NonSerialized]
+        private int? _removableSince;
+
         [DataMember]
         public int? ExpiresInMs
         {
