@@ -30,20 +30,20 @@ All the values the eventually consistent gossip backend works with should be CRD
 Using CRDTs provides great guarantees - CRDTs are mergable in an idempotent, commutative and
 associative way, which means that the servers must eventually agree on the same version of the
 data, regardless of the order or number of messages they exchange. Currently included are
-the VectorClock, and a distributed counter implemented in the CountVector class. VectorBase
+the VersionVector, and a distributed counter implemented in the CountVector class. VectorBase
 can be used as a base class to easily implement vector clock-like CRDT types.
 
-If you wish to use any other types, which are not CRDTs, you can add the IHasVectorClock
+If you wish to use any other types, which are not CRDTs, you can add the IHasVersionVector
 interface to them, and use the Multiple&lt;T&gt; wrapper to make them CRDTs. You can also
-use the Vc&lt;T&gt; wrapper to add a vector clock to any type you cannot modify. The backends
-have helper methods to make this easier.
+use the VecVersioned&lt;T&gt; wrapper to add a vector clock to any type you cannot modify. The
+backends have helper methods to make this easier.
 
-[Vector clocks](https://en.wikipedia.org/wiki/Vector_clock) reliably detect conflicting edits
+[Version vectors](https://en.wikipedia.org/wiki/Version_vector) reliably detect conflicting edits
 to the same key, and the Multiple keeps the conflicting versions, allowing you to resolve
 conflicts using any strategy that works best for your use case. Of course, if you only use
 consistent transactions on a field, you won't have to deal with that.
 
-The library also has Lww&lt;T&gt;, for last-write-wins semantics, and Versioned&lt;T&gt;, for a
+The library also has Lww&lt;T&gt;, for last-write-wins semantics, and IntVersioned&lt;T&gt;, for a
 simple int-versioned field. These two are fake CRDTs - they implement IMergeable, but their merge
 operations do not meet the CRDT criteria. They are not safe if used in eventually consistent
 transactions. They're meant to be used with fields which you only change through consistent
