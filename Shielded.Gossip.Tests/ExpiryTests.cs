@@ -30,15 +30,15 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void Expiry_Basics()
         {
-            _backends[A].SetVc("test", true.Clock(A, 1), 100);
+            _backends[A].SetHasVec("test", true.Version(A, 1), 100);
 
-            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(50);
-            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(70);
-            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
@@ -46,30 +46,30 @@ namespace Shielded.Gossip.Tests
         {
             Shield.InTransaction(() =>
             {
-                _backends[A].SetVc("test", true.Clock(A, 1), 50);
+                _backends[A].SetHasVec("test", true.Version(A, 1), 50);
 
                 Thread.Sleep(70);
-                Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+                Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
             });
-            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(70);
-            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
         public void Expiry_NoExpiryDuringReadTransaction()
         {
-            _backends[A].SetVc("test", true.Clock(A, 1), 50);
+            _backends[A].SetHasVec("test", true.Version(A, 1), 50);
             Shield.InTransaction(() =>
             {
-                Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+                Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
                 // a Shielded transaction guarantees repeatable reads, and the expiry mechanism must respect that.
                 Thread.Sleep(70);
-                Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+                Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
             });
-            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
@@ -77,10 +77,10 @@ namespace Shielded.Gossip.Tests
         {
             using (var cont = await _backends[A].Prepare(() =>
             {
-                _backends[A].SetVc("test", true.Clock(A, 1), 50);
+                _backends[A].SetHasVec("test", true.Version(A, 1), 50);
 
                 Thread.Sleep(70);
-                Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+                Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
             }))
             {
                 Assert.IsNotNull(cont);
@@ -89,10 +89,10 @@ namespace Shielded.Gossip.Tests
                 Thread.Sleep(70);
                 cont.Commit();
             }
-            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(70);
-            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
@@ -100,69 +100,69 @@ namespace Shielded.Gossip.Tests
         {
             _backends[A].RunConsistent(() =>
             {
-                _backends[A].SetVc("test", true.Clock(A, 1), 50);
+                _backends[A].SetHasVec("test", true.Version(A, 1), 50);
 
                 Thread.Sleep(70);
-                Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+                Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
             }).Wait();
-            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(70);
-            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
         public void Expiry_CrossServerExpiry()
         {
-            _backends[A].SetVc("test", true.Clock(A, 1), 100);
+            _backends[A].SetHasVec("test", true.Version(A, 1), 100);
 
             // have to give direct mail some time
             Thread.Sleep(50);
-            Assert.IsTrue(_backends[B].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[B].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(70);
-            Assert.IsFalse(_backends[B].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[B].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
         public void Expiry_CrossServerConsistentExpiry()
         {
-            _backends[A].RunConsistent(() => _backends[A].SetVc("test", true.Clock(A, 1), 100)).Wait();
+            _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1), 100)).Wait();
 
-            Assert.IsTrue(_backends[B].RunConsistent(() => _backends[B].TryGetClocked<bool>("test"))
+            Assert.IsTrue(_backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<bool>("test"))
                 // well, this is special.
                 .Result.Value.Single().Value);
 
             Thread.Sleep(120);
-            Assert.IsFalse(_backends[B].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[B].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
         public void Expiry_DeleteByExpiry()
         {
-            _backends[A].RunConsistent(() => _backends[A].SetVc("test", true.Clock(A, 1))).Wait();
+            _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1))).Wait();
 
-            Assert.IsTrue(_backends[B].RunConsistent(() => _backends[B].TryGetClocked<bool>("test"))
+            Assert.IsTrue(_backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<bool>("test"))
                 .Result.Value.Single().Value);
 
-            _backends[A].SetVc("test", true.Clock(A, 2), 1);
+            _backends[A].SetHasVec("test", true.Version(A, 2), 1);
 
             Thread.Sleep(100);
 
-            Assert.IsFalse(_backends[B].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[B].TryGetVecVersioned<bool>("test").Any());
         }
 
         [TestMethod]
         public void Expiry_ReviveSameVersion()
         {
-            _backends[A].SetVc("test", true.Clock(A, 1), 1);
+            _backends[A].SetHasVec("test", true.Version(A, 1), 1);
             Thread.Sleep(20);
-            Assert.IsFalse(_backends[A].TryGetClocked<bool>("test").Any());
+            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
 
-            Assert.AreEqual(VectorRelationship.Equal, _backends[A].SetVc("test", true.Clock(A, 1), 100));
+            Assert.AreEqual(VectorRelationship.Equal, _backends[A].SetHasVec("test", true.Version(A, 1), 100));
 
             Thread.Sleep(20);
-            Assert.IsTrue(_backends[A].TryGetClocked<bool>("test").Single().Value);
+            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
         }
     }
 }

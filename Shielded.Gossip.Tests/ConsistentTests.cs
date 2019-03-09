@@ -37,18 +37,18 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
 
             CheckProtocols();
 
-            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
+            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
             Assert.IsTrue(success);
             var read = multi.Single();
             Assert.AreEqual(testEntity.Id, read.Value.Id);
             Assert.AreEqual(testEntity.Name, read.Value.Name);
-            Assert.AreEqual((A, 1), read.Clock);
+            Assert.AreEqual((A, 1), read.Version);
         }
 
         [TestMethod]
@@ -63,20 +63,20 @@ namespace Shielded.Gossip.Tests
 
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
 
             CheckProtocols();
 
-            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"))
+            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
             Assert.IsTrue(success);
             var read = multi.Single();
             Assert.AreEqual(testEntity.Id, read.Value.Id);
             Assert.AreEqual(testEntity.Name, read.Value.Name);
-            Assert.AreEqual((A, 1), read.Clock);
+            Assert.AreEqual((A, 1), read.Version);
 
-            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
+            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
                 .Result;
             Assert.IsTrue(success);
             Assert.IsFalse(multi.Any());
@@ -87,24 +87,24 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
 
             var testEntity2 = new TestClass { Id = 1, Name = "One, Bs version" };
 
             // even though this is a conflicting edit, the merged data - a Multiple which will contain both
             // versions of the data - gets actually saved and transmitted, and it is Greater than both versions.
-            var (success, comp) = _backends[B].RunConsistent(() => _backends[B].SetVc("key", testEntity2.Clock(B))).Result;
+            var (success, comp) = _backends[B].RunConsistent(() => _backends[B].SetHasVec("key", testEntity2.Version(B))).Result;
 
             CheckProtocols();
 
             Assert.IsTrue(success);
             Assert.AreEqual(VectorRelationship.Conflict, comp);
 
-            var saved = _backends[B].TryGetClocked<TestClass>("key");
+            var saved = _backends[B].TryGetVecVersioned<TestClass>("key");
 
-            Assert.AreEqual(VectorRelationship.Greater, saved.VectorCompare(testEntity.Clock(A)));
-            Assert.AreEqual(VectorRelationship.Greater, saved.VectorCompare(testEntity2.Clock(B)));
-            Assert.AreEqual((VectorClock)(A, 1) | (B, 1), saved.MergedClock);
+            Assert.AreEqual(VectorRelationship.Greater, saved.VectorCompare(testEntity.Version(A)));
+            Assert.AreEqual(VectorRelationship.Greater, saved.VectorCompare(testEntity2.Version(B)));
+            Assert.AreEqual((VersionVector)(A, 1) | (B, 1), saved.MergedClock);
         }
 
         [TestMethod]
@@ -112,7 +112,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            using (var cont = _backends[A].Prepare(() => { _backends[A].SetVc("key", testEntity.Clock(A)); }).Result)
+            using (var cont = _backends[A].Prepare(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result)
             {
                 Assert.IsNotNull(cont);
                 Assert.IsFalse(cont.Completed);
@@ -122,13 +122,13 @@ namespace Shielded.Gossip.Tests
                 Assert.IsFalse(cont.Committed);
             }
 
-            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<TestClass>("key"))
+            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
             Assert.IsTrue(success);
             Assert.IsFalse(multi.Any());
 
-            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<TestClass>("key"))
+            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
             CheckProtocols();
@@ -155,13 +155,13 @@ namespace Shielded.Gossip.Tests
                 var key = "key" + id;
                 return backend.RunConsistent(() =>
                 {
-                    var newVal = backend.TryGetClocked<TestClass>(key)
+                    var newVal = backend.TryGetVecVersioned<TestClass>(key)
                         .SingleOrDefault()
                         .NextVersion(backend.Transport.OwnId);
                     if (newVal.Value == null)
                         newVal.Value = new TestClass { Id = id };
                     newVal.Value.Counter = newVal.Value.Counter + 1;
-                    backend.SetVc(key, newVal);
+                    backend.SetHasVec(key, newVal);
                 }, 100);
             })).Result;
             var expected = bools.Count(b => b);
@@ -170,7 +170,7 @@ namespace Shielded.Gossip.Tests
 
             var read = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetClocked<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
+                    _backends[B].TryGetVecVersioned<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
 
             Assert.IsTrue(read.Success);
             Assert.AreEqual(expected, read.Value);
@@ -184,10 +184,10 @@ namespace Shielded.Gossip.Tests
 
             _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version(1)); }).Wait();
 
-            Versioned<TestClass> read = default, next = default;
+            IntVersioned<TestClass> read = default, next = default;
             var (success, readName) = _backends[B].RunConsistent(() =>
             {
-                read = _backends[B].TryGetVersioned<TestClass>("key");
+                read = _backends[B].TryGetIntVersioned<TestClass>("key");
                 var res = read.Value?.Name;
 
                 next = read.NextVersion();
@@ -198,7 +198,7 @@ namespace Shielded.Gossip.Tests
             Assert.IsTrue(success);
             Assert.AreEqual(testEntity.Name, readName);
 
-            read = _backends[C].RunConsistent(() => _backends[C].TryGetVersioned<TestClass>("key")).Result.Value;
+            read = _backends[C].RunConsistent(() => _backends[C].TryGetIntVersioned<TestClass>("key")).Result.Value;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
         }
     }

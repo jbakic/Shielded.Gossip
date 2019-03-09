@@ -9,13 +9,13 @@ namespace Shielded.Gossip
     /// only increment. The CRDT merge operation is simply Max.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public class VectorClock : VectorBase<VectorClock, int>
+    public class VersionVector : VectorBase<VersionVector, int>
     {
-        public VectorClock() : base() { }
-        public VectorClock(params VectorItem<int>[] items) : base(items) { }
-        public VectorClock(string ownServerId, int init) : base(ownServerId, init) { }
+        public VersionVector() : base() { }
+        public VersionVector(params VectorItem<int>[] items) : base(items) { }
+        public VersionVector(string ownServerId, int init) : base(ownServerId, init) { }
 
-        public static implicit operator VectorClock((string, int) t) => new VectorClock(t.Item1, t.Item2);
+        public static implicit operator VersionVector((string, int) t) => new VersionVector(t.Item1, t.Item2);
 
         protected override int Merge(int left, int right) => Math.Max(left, right);
 
@@ -23,7 +23,7 @@ namespace Shielded.Gossip
         /// Produce next version for this server, returning the result in a new VectorClock.
         /// </summary>
         /// <param name="ownServerId">ID of the local server producing the new version.</param>
-        public VectorClock Next(string ownServerId)
+        public VersionVector Next(string ownServerId)
         {
             if (string.IsNullOrWhiteSpace(ownServerId))
                 throw new ArgumentNullException();

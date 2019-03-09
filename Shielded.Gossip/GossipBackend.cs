@@ -11,7 +11,7 @@ namespace Shielded.Gossip
     /// A backend supporting a key/value store which is distributed using a simple gossip protocol
     /// implementation. Use it in ordinary <see cref="Shield"/> transactions.
     /// Values should be CRDTs, implementing <see cref="IMergeable{T}"/>, or you can use the
-    /// <see cref="Multiple{T}"/> and <see cref="Vc{T}"/> wrappers to make them a CRDT.
+    /// <see cref="Multiple{T}"/> and <see cref="VecVersioned{T}"/> wrappers to make them a CRDT.
     /// </summary>
     public class GossipBackend : IGossipBackend, IDisposable
     {
@@ -678,7 +678,7 @@ namespace Shielded.Gossip
         /// <see cref="VectorRelationship.Greater"/> if there is no old value.
         /// </summary>
         /// <param name="expireInMs">If given, the item will expire and be removed from the storage in
-        /// this many milliseconds. If not null, must be > 0. Ignored if the result was Less or Equal.</param>
+        /// this many milliseconds. If not null, must be > 0.</param>
         public VectorRelationship Set<TItem>(string key, TItem value, int? expireInMs = null) where TItem : IMergeable<TItem>
             => Shield.InTransaction(() =>
         {
@@ -744,7 +744,7 @@ namespace Shielded.Gossip
                 var hash = GetHash(key, value.Value);
                 _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-                if (value.ExpiresInMs > 0)
+                if (value.ExpiresInMs == null || value.ExpiresInMs > 0)
                     OnChanged(key, null, value.Value, false);
                 return ComplexRelationship.Greater;
             }

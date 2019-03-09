@@ -106,11 +106,11 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class GossipBackendThreeNodeTests : GossipBackendThreeNodeTestsBase<GossipBackend, TcpTransport>
     {
-        public class TestClass : IHasVectorClock
+        public class TestClass : IHasVersionVector
         {
             public int Id { get; set; }
             public string Name { get; set; }
-            public VectorClock Clock { get; set; }
+            public VersionVector Version { get; set; }
         }
 
         protected override GossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
@@ -131,18 +131,18 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_Basics()
         {
-            var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
+            var testEntity = new TestClass { Id = 1, Name = "One", Version = (A, 1) };
 
-            Shield.InTransaction(() => _backends[A].SetVc("key", testEntity));
+            Shield.InTransaction(() => _backends[A].SetHasVec("key", testEntity));
 
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = Shield.InTransaction(() => _backends[B].TryGetMultiple<TestClass>("key").Single());
+            var read = Shield.InTransaction(() => _backends[B].TryGetHasVec<TestClass>("key").Single());
 
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
-            Assert.AreEqual(testEntity.Clock, read.Clock);
+            Assert.AreEqual(testEntity.Version, read.Version);
         }
 
         [TestMethod]
@@ -182,18 +182,18 @@ namespace Shielded.Gossip.Tests
                 ((TcpTransport)_backends[C].Transport).ServerIPs.Remove(A);
             });
 
-            var testEntity = new TestClass { Id = 1, Name = "One", Clock = (A, 1) };
+            var testEntity = new TestClass { Id = 1, Name = "One", Version = (A, 1) };
 
-            Shield.InTransaction(() => _backends[A].SetVc("key", testEntity));
+            Shield.InTransaction(() => _backends[A].SetHasVec("key", testEntity));
 
             Thread.Sleep(500);
             CheckProtocols();
 
-            var read = Shield.InTransaction(() => _backends[C].TryGetMultiple<TestClass>("key").Single());
+            var read = Shield.InTransaction(() => _backends[C].TryGetHasVec<TestClass>("key").Single());
 
             Assert.AreEqual(testEntity.Id, read.Id);
             Assert.AreEqual(testEntity.Name, read.Name);
-            Assert.AreEqual(testEntity.Clock, read.Clock);
+            Assert.AreEqual(testEntity.Version, read.Version);
         }
 
         [TestMethod]

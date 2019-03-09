@@ -1,7 +1,7 @@
 ﻿namespace Shielded.Gossip
 {
     /// <summary>
-    /// Interface for classes that have a <see cref="VectorClock"/> property, allowing
+    /// Interface for classes that have a <see cref="VersionVector"/> property, allowing
     /// them to be wrapped in a <see cref="Multiple{T}"/> and used as values with the
     /// gossip backend.
     /// </summary>
@@ -16,11 +16,11 @@
     /// The vector clock algorithm always correctly recognizes this, and the Multiple
     /// allows the library user to resolve the conflicts in a way best suited to the
     /// use case.</para></remarks>
-    public interface IHasVectorClock
+    public interface IHasVersionVector
     {
         /// <summary>
         /// The version of this data item.
         /// </summary>
-        VectorClock Clock { get; set; }
+        VersionVector Version { get; set; }
     }
 }

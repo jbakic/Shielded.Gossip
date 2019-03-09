@@ -46,7 +46,7 @@ namespace Shielded.Gossip.Tests
                 GossipInterval = Timeout.Infinite,
             }))
             {
-                backendA.SetVc("key", (25.5m).Clock(A));
+                backendA.SetHasVec("key", (25.5m).Version(A));
                 var (to, msg) = transportA.LastSentMessage;
                 Assert.AreEqual(B, to);
                 var starter = msg as GossipStart;
@@ -88,7 +88,7 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendA.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
@@ -211,7 +211,7 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendA.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
@@ -234,7 +234,7 @@ namespace Shielded.Gossip.Tests
                         for (int j = 0; j < 10; j++)
                         {
                             var key = $"key-{i:00}-{j:00}";
-                            backendA.SetVc(key, backendA.TryGetClocked<bool>(key).Single().NextVersion(A));
+                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A));
                         }
                     });
                 }
@@ -252,7 +252,7 @@ namespace Shielded.Gossip.Tests
                     .SequenceEqual(
                         Enumerable.Range(0, 10).Select(j => $"key-98-{j:00}")
                         .Concat(Enumerable.Range(0, 10).Select(j => $"key-00-{j:00}"))));
-                Assert.AreEqual((A, 2), ((Multiple<Vc<bool>>)msgA2.Items[0].Value).Single().Clock);
+                Assert.AreEqual((A, 2), ((Multiple<VecVersioned<bool>>)msgA2.Items[0].Value).Single().Version);
                 // the window grows. this time, the end expands as well, due to new changes.
                 Assert.IsTrue(msgA2.WindowStart < msgA1.WindowStart && msgA2.WindowEnd > msgA1.WindowEnd);
 
@@ -268,7 +268,7 @@ namespace Shielded.Gossip.Tests
                         for (int j = 0; j < 10; j++)
                         {
                             var key = $"key-{i:00}-{j:00}";
-                            backendA.SetVc(key, backendA.TryGetClocked<bool>(key).Single().NextVersion(A));
+                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A));
                         }
                     });
                 }
@@ -303,7 +303,7 @@ namespace Shielded.Gossip.Tests
                         for (int j = 0; j < 10; j++)
                         {
                             var key = $"key-{i:00}-{j:00}";
-                            backendA.SetVc(key, backendA.TryGetClocked<bool>(key).Single().NextVersion(A));
+                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A));
                         }
                     });
                 }
@@ -386,7 +386,7 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendA.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
@@ -399,23 +399,23 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(21, msgA1.Items.Length);
 
                 // before B receives the message, we change some keys on it
-                backendB.SetVc("key-01-05", false.Clock(B));
+                backendB.SetHasVec("key-01-05", false.Version(B));
                 // this one we make equal to the value on A. this means B does have a change on it, but
                 // the value is identical to the one received, and he will not transmit it in the reply.
-                backendB.SetVc("key-01-06", true.Clock(A));
+                backendB.SetHasVec("key-01-06", true.Version(A));
                 // this one we have a higher version. it would maybe make more sense if it was coming from
                 // some third server, but this is just a unit test, it's fine.
-                backendB.SetVc("key-01-07", false.Clock(A, 2));
+                backendB.SetHasVec("key-01-07", false.Version(A, 2));
                 // and we create a subscription that will change stuff when the A message comes in
                 Shield.InTransaction(() =>
                     backendB.Changed.Subscribe((sender, changed) =>
                     {
-                        // the value clock check means we do this only once, otherwise, we'll get a stack overflow.
-                        if (changed.Key == "key-00-06" && ((Multiple<Vc<bool>>)changed.NewValue).MergedClock[B] == 0)
+                        // the value Version check means we do this only once, otherwise, we'll get a stack overflow.
+                        if (changed.Key == "key-00-06" && ((Multiple<VecVersioned<bool>>)changed.NewValue).MergedClock[B] == 0)
                         {
                             // we'll change it and one unrelated key, just to be more evil.
-                            backendB.SetVc("key-00-06", ((Multiple<Vc<bool>>)changed.NewValue).Single().NextVersion(B));
-                            backendB.SetVc("key-00-04", backendB.TryGetClocked<bool>("key-00-04").SingleOrDefault().NextVersion(B));
+                            backendB.SetHasVec("key-00-06", ((Multiple<VecVersioned<bool>>)changed.NewValue).Single().NextVersion(B));
+                            backendB.SetHasVec("key-00-04", backendB.TryGetVecVersioned<bool>("key-00-04").SingleOrDefault().NextVersion(B));
                         }
                     }));
 
@@ -431,9 +431,9 @@ namespace Shielded.Gossip.Tests
                     .SequenceEqual(new[] { "key-01-07", "key-00-04", "key-00-06", "key-01-05" }));
                 Assert.IsTrue(
                     msgB1.Items
-                    .Select(i => (i.Key, ((Multiple<Vc<bool>>)i.Value).MergedClock))
+                    .Select(i => (i.Key, ((Multiple<VecVersioned<bool>>)i.Value).MergedClock))
                     .All(kc =>
-                         kc.Key != "key-01-07" && kc.MergedClock == ((VectorClock)(A, 1) | (B, 1)) ||
+                         kc.Key != "key-01-07" && kc.MergedClock == ((VersionVector)(A, 1) | (B, 1)) ||
                          kc.Key == "key-01-07" && kc.MergedClock == (A, 2)));
             }
         }
@@ -454,11 +454,11 @@ namespace Shielded.Gossip.Tests
                 GossipInterval = Timeout.Infinite,
             }))
             {
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
                 var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
 
-                backendB.SetVc("trigger", true.Clock(B));
+                backendB.SetHasVec("trigger", true.Version(B));
                 var msgB1 = transportB.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgB1);
 
@@ -502,7 +502,7 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendA.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
@@ -550,17 +550,17 @@ namespace Shielded.Gossip.Tests
                 GossipInterval = Timeout.Infinite,
             }))
             {
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
 
                 // both will now get new changes.
-                backendA.SetVc("additionalA", true.Clock(A));
+                backendA.SetHasVec("additionalA", true.Version(A));
                 // no new message, since A is in gossip with B already.
                 Assert.AreEqual(msgA1, transportA.LastSentMessage.Msg);
 
-                backendB.SetVc("additionalB", true.Clock(B));
+                backendB.SetHasVec("additionalB", true.Version(B));
                 // yes new message, because B sent a GossipEnd and he thinks the gossip is done.
                 var msgBX = transportB.LastSentMessage.Msg;
                 Assert.AreNotEqual(msgB1, msgBX);
@@ -609,12 +609,12 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendA.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
                 backendA.Configuration.DirectMail = DirectMailType.StartGossip;
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipReply));
@@ -625,11 +625,11 @@ namespace Shielded.Gossip.Tests
                 Assert.IsInstanceOfType(msgB2, typeof(GossipEnd));
 
                 // so, they are in sync, but before A receives the end msg, both will get new changes.
-                backendA.SetVc("additionalA", true.Clock(A));
+                backendA.SetHasVec("additionalA", true.Version(A));
                 // no new message, since A is in gossip with B already.
                 Assert.AreEqual(msgA2, transportA.LastSentMessage.Msg);
 
-                backendB.SetVc("additionalB", true.Clock(B));
+                backendB.SetHasVec("additionalB", true.Version(B));
                 // yes new message, because B sent a GossipEnd and he thinks the gossip is done.
                 var msgBX = transportB.LastSentMessage.Msg;
                 Assert.AreNotEqual(msgB2, msgBX);
@@ -672,7 +672,7 @@ namespace Shielded.Gossip.Tests
                 GossipInterval = Timeout.Infinite,
             }))
             {
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
@@ -681,7 +681,7 @@ namespace Shielded.Gossip.Tests
                 // we now make another change on A, so that it sends a GossipStart to B. that GossipStart will
                 // have ReplyToId == null, because A accepted the GossipEnd from B and cleared his state. B should
                 // accept that new gossip.
-                backendA.SetVc("trigger", false.Clock(A, 2));
+                backendA.SetHasVec("trigger", false.Version(A, 2));
                 var msgA2 = transportA.LastSentMessage.Msg;
                 var msgB2 = transportB.ReceiveAndGetReply(msgA2);
                 Assert.IsInstanceOfType(msgB2, typeof(GossipEnd));
@@ -711,7 +711,7 @@ namespace Shielded.Gossip.Tests
                 AntiEntropyIdleTimeout = 200,
             }))
             {
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
@@ -729,7 +729,7 @@ namespace Shielded.Gossip.Tests
 
                 // now we will change something on B, so that his hash will not be equal to the one in the delayed GossipStart.
                 // he should reply, but for A that reply is unexpected.
-                backendB.SetVc("changed", true.Clock(B));
+                backendB.SetHasVec("changed", true.Version(B));
                 var msgBX2 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgBX2, typeof(GossipReply));
                 var msgAX2 = transportA.ReceiveAndGetReply(msgBX2);
@@ -737,7 +737,7 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNull(transportB.ReceiveAndGetReply(msgAX2));
 
                 // to confirm that the kill worked, let's run a small exchange
-                backendA.SetVc("another", true.Clock(A));
+                backendA.SetHasVec("another", true.Version(A));
                 var msgA3 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA3);
                 // B replies GossipEnd, because A already knew about his changes - even though A previously
@@ -747,8 +747,8 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB3));
 
                 // and now another variant - a proper start message, but delayed too much.
-                backendA.SetVc("again", true.Clock(A));
-                backendB.SetVc("againB", true.Clock(B));
+                backendA.SetHasVec("again", true.Version(A));
+                backendB.SetHasVec("againB", true.Version(B));
                 var msgA5 = transportA.LastSentMessage.Msg as GossipStart;
                 // let it time out
                 Thread.Sleep(250);
@@ -759,7 +759,7 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNull(transportB.ReceiveAndGetReply(msgA6));
 
                 // and again, to confirm that the kill worked:
-                backendA.SetVc("yet again", true.Clock(A));
+                backendA.SetHasVec("yet again", true.Version(A));
                 var msgA7 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA7);
                 var msgB7 = transportB.ReceiveAndGetReply(msgA7) as GossipEnd;
@@ -783,16 +783,16 @@ namespace Shielded.Gossip.Tests
                 GossipInterval = Timeout.Infinite,
             }))
             {
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
                 var msgA1 = transportA.LastSentMessage.Msg;
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipEnd));
                 Assert.IsNull(transportA.ReceiveAndGetReply(msgB1));
 
                 // we now make another change on both, so they initiate simultaneous gossips
-                backendA.SetVc("trigger", false.Clock(A, 2));
+                backendA.SetHasVec("trigger", false.Version(A, 2));
                 var msgA2 = transportA.LastSentMessage.Msg;
-                backendB.SetVc("trigger", false.Clock((VectorClock)(A, 1) | (B, 1)));
+                backendB.SetHasVec("trigger", false.Version((VersionVector)(A, 1) | (B, 1)));
                 var msgB2 = transportB.LastSentMessage.Msg;
 
                 var msgA3 = transportA.ReceiveAndGetReply(msgB2);
@@ -824,8 +824,8 @@ namespace Shielded.Gossip.Tests
                 GossipInterval = Timeout.Infinite,
             }))
             {
-                backendA.SetVc("trigger", true.Clock(A));
-                backendB.SetVc("trigger", false.Clock(B));
+                backendA.SetHasVec("trigger", true.Version(A));
+                backendB.SetHasVec("trigger", false.Version(B));
                 var msgA1 = transportA.LastSentMessage.Msg;
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1);
                 Assert.IsInstanceOfType(msgB1, typeof(GossipReply));
@@ -833,11 +833,11 @@ namespace Shielded.Gossip.Tests
                 Assert.IsInstanceOfType(msgA2, typeof(GossipEnd));
 
                 // before B receives the End, both get new changes.
-                backendA.SetVc("trigger", false.Clock((VectorClock)(A, 2) | (B, 1)));
+                backendA.SetHasVec("trigger", false.Version((VersionVector)(A, 2) | (B, 1)));
                 var msgA3 = transportA.LastSentMessage.Msg;
                 // A launches a new gossip, because he thinks the old one is done
                 Assert.IsInstanceOfType(msgA3, typeof(GossipStart));
-                backendB.SetVc("trigger", true.Clock((VectorClock)(A, 1) | (B, 2)));
+                backendB.SetHasVec("trigger", true.Version((VersionVector)(A, 1) | (B, 2)));
                 // B does nothing, because he thinks they're still gossiping
                 Assert.AreEqual(msgB1, transportB.LastSentMessage.Msg);
 
@@ -884,12 +884,12 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendA.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendA.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
                 backendA.Configuration.DirectMail = DirectMailType.StartGossip;
-                backendA.SetVc("trigger", true.Clock(A));
+                backendA.SetHasVec("trigger", true.Version(A));
 
                 for (int i = 1; i < 2; i++)
                 {
@@ -897,11 +897,11 @@ namespace Shielded.Gossip.Tests
                     {
                         for (int j = 0; j < 10; j++)
                         {
-                            backendB.SetVc($"key-{i:00}-{j:00}", true.Clock(A));
+                            backendB.SetHasVec($"key-{i:00}-{j:00}", true.Version(A));
                         }
                     });
                 }
-                backendB.SetVc("trigger", true.Clock(A));
+                backendB.SetHasVec("trigger", true.Version(A));
 
                 var msgA1 = transportA.LastSentMessage.Msg;
                 Assert.IsInstanceOfType(msgA1, typeof(GossipStart));
@@ -942,7 +942,7 @@ namespace Shielded.Gossip.Tests
                 var x = new Shielded<int>();
                 using (Shield.PreCommit(() => { int a = x; return true; }, () =>
                 {
-                    backendA.SetVc("trigger", true.Clock(A));
+                    backendA.SetHasVec("trigger", true.Version(A));
                 }))
                 {
                     Shield.InTransaction(() => x.Value = 1);

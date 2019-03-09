@@ -122,6 +122,8 @@ namespace Shielded.Gossip
         /// there. Returns the relationship of the new to the old value, or
         /// <see cref="VectorRelationship.Greater"/> if there is no old value.
         /// </summary>
+        /// <param name="expireInMs">If given, the item will expire and be removed from the storage in
+        /// this many milliseconds. If not null, must be > 0.</param>
         public VectorRelationship Set<TItem>(string key, TItem item, int? expireInMs = null) where TItem : IMergeable<TItem>
             => Shield.InTransaction(() =>
         {

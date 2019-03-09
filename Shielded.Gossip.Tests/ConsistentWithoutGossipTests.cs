@@ -60,30 +60,30 @@ namespace Shielded.Gossip.Tests
             _backends[C].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[C].SetVc("key", "rejected".Clock(C));
+                _backends[C].SetHasVec("key", "rejected".Version(C));
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }, 1).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", "accepted".Version(A)); }, 1).Result);
 
             CheckProtocols();
 
             // the field will now have two versions on all servers, due to the C server transmitting his version
             // as part of rejecting the transaction.
-            var readA = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"))
+            var readA = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<string>("key"))
                 .Result.Value;
 
-            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readA.MergedClock);
+            Assert.AreEqual((VersionVector)(A, 1) | (C, 1), readA.MergedClock);
 
-            var readB = _backends[B].RunConsistent(() => _backends[B].TryGetClocked<string>("key"))
+            var readB = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<string>("key"))
                 .Result.Value;
 
-            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readB.MergedClock);
+            Assert.AreEqual((VersionVector)(A, 1) | (C, 1), readB.MergedClock);
 
-            var readC = _backends[C].RunConsistent(() => _backends[C].TryGetClocked<string>("key"))
+            var readC = _backends[C].RunConsistent(() => _backends[C].TryGetVecVersioned<string>("key"))
                 .Result.Value;
 
-            Assert.AreEqual((VectorClock)(A, 1) | (C, 1), readC.MergedClock);
+            Assert.AreEqual((VersionVector)(A, 1) | (C, 1), readC.MergedClock);
         }
 
         [TestMethod]
@@ -94,28 +94,28 @@ namespace Shielded.Gossip.Tests
             _backends[B].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[B].SetVc("key", "rejected".Clock(B));
+                _backends[B].SetHasVec("key", "rejected".Version(B));
             });
             _backends[B].Configuration.DirectMail = DirectMailType.GossipSupressed;
             _backends[C].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[C].SetVc("key", "rejected".Clock(B));
+                _backends[C].SetHasVec("key", "rejected".Version(B));
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
             // we can make only one attempt, because the B/C version will be sent to us as part of their rejection of
-            // the transaction. after that, this would succeed, but with SetVc result == Conflict.
-            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetVc("key", "accepted".Clock(A)); }, 1).Result);
+            // the transaction. after that, this would succeed, but with SetHasVec result == Conflict.
+            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", "accepted".Version(A)); }, 1).Result);
 
             CheckProtocols();
 
             // the A server should now see the other version.
-            var read = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key"))
+            var read = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<string>("key"))
                 .Result.Value.Single();
 
             Assert.AreEqual("rejected", read.Value);
-            Assert.AreEqual((B, 1), read.Clock);
+            Assert.AreEqual((B, 1), read.Version);
         }
 
         [TestMethod]
@@ -125,7 +125,7 @@ namespace Shielded.Gossip.Tests
             _backends[C].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[C].SetVc("key", "rejected".Clock(C));
+                _backends[C].SetHasVec("key", "rejected".Version(C));
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
@@ -134,7 +134,7 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(100);
             CheckProtocols();
 
-            var read = _backends[A].TryGetClocked<string>("key");
+            var read = _backends[A].TryGetVecVersioned<string>("key");
 
             Assert.AreEqual("rejected", read.Single().Value);
         }
@@ -146,7 +146,7 @@ namespace Shielded.Gossip.Tests
             _backends[C].Configuration.DirectMail = DirectMailType.Off;
             Shield.InTransaction(() =>
             {
-                _backends[C].SetVc("key", "rejected".Clock(C));
+                _backends[C].SetHasVec("key", "rejected".Version(C));
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
@@ -154,7 +154,7 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var (success, read) = _backends[A].RunConsistent(() => _backends[A].TryGetClocked<string>("key")).Result;
+            var (success, read) = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<string>("key")).Result;
 
             Assert.IsTrue(success);
             Assert.AreEqual("rejected", read.Single().Value);

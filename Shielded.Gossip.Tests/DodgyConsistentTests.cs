@@ -10,12 +10,12 @@ namespace Shielded.Gossip.Tests
     [TestClass]
     public class DodgyConsistentTests : GossipBackendThreeNodeTestsBase<ConsistentGossipBackend, DodgyTransport>
     {
-        public class TestClass : IHasVectorClock
+        public class TestClass : IHasVersionVector
         {
             public int Id { get; set; }
             public string Name { get; set; }
             public int Value { get; set; }
-            public VectorClock Clock { get; set; }
+            public VersionVector Version { get; set; }
         }
 
         protected override ConsistentGossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
@@ -51,11 +51,11 @@ namespace Shielded.Gossip.Tests
                 var key = "key" + id;
                 return backend.RunConsistent(() =>
                 {
-                    var newVal = backend.TryGetMultiple<TestClass>(key).SingleOrDefault() ??
-                        new TestClass { Id = id, Clock = new VectorClock() };
+                    var newVal = backend.TryGetHasVec<TestClass>(key).SingleOrDefault() ??
+                        new TestClass { Id = id, Version = new VersionVector() };
                     newVal.Value = newVal.Value + 1;
-                    newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
-                    backend.SetVc(key, newVal);
+                    newVal.Version = newVal.Version.Next(backend.Transport.OwnId);
+                    backend.SetHasVec(key, newVal);
                 }, 100);
             })).Result;
             var expected = bools.Count(b => b);
@@ -65,7 +65,7 @@ namespace Shielded.Gossip.Tests
 
             var (success, value) = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
+                    _backends[B].TryGetHasVec<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
 
             Assert.IsTrue(success);
             Assert.AreEqual(expected, value);
@@ -93,11 +93,11 @@ namespace Shielded.Gossip.Tests
                 var key = "key" + id;
                 return backend.RunConsistent(() =>
                 {
-                    var newVal = backend.TryGetMultiple<TestClass>(key).SingleOrDefault() ??
-                        new TestClass { Id = id, Clock = new VectorClock() };
+                    var newVal = backend.TryGetHasVec<TestClass>(key).SingleOrDefault() ??
+                        new TestClass { Id = id, Version = new VersionVector() };
                     newVal.Value = newVal.Value + 1;
-                    newVal.Clock = newVal.Clock.Next(backend.Transport.OwnId);
-                    backend.SetVc(key, newVal);
+                    newVal.Version = newVal.Version.Next(backend.Transport.OwnId);
+                    backend.SetHasVec(key, newVal);
                 }, 100);
             })).Result;
             var expected = bools.Count(b => b);
@@ -107,7 +107,7 @@ namespace Shielded.Gossip.Tests
 
             var (success, value) = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    _backends[B].TryGetMultiple<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
+                    _backends[B].TryGetHasVec<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
 
             Assert.IsTrue(success);
             Assert.AreEqual(expected, value);

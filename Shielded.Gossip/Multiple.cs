@@ -7,7 +7,7 @@ using System.Runtime.Serialization;
 namespace Shielded.Gossip
 {
     /// <summary>
-    /// A container type which turns <see cref="IHasVectorClock"/> implementors into CRDT types. Vector
+    /// A container type which turns <see cref="IHasVersionVector"/> implementors into CRDT types. Vector
     /// clocks are used for versioning, and in case of conflict, all conflicting versions are preserved,
     /// for the user of the library to resolve the conflict in a way best suited to the use case. If the
     /// wrapped type implements <see cref="IDeletable"/>, this will become deletable when all contained
@@ -15,7 +15,7 @@ namespace Shielded.Gossip
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>>, IDeletable, IEnumerable<T>
-        where T : IHasVectorClock
+        where T : IHasVersionVector
     {
         [DataMember]
         public T[] Items { get; set; }
@@ -26,7 +26,7 @@ namespace Shielded.Gossip
         /// The result of merging the vector clocks of all contained versions, or a new empty clock if
         /// we're empty.
         /// </summary>
-        public VectorClock MergedClock => Items?.Aggregate((VectorClock)null, (acc, n) => acc | n.Clock) ?? new VectorClock();
+        public VersionVector MergedClock => Items?.Aggregate((VersionVector)null, (acc, n) => acc | n.Version) ?? new VersionVector();
 
         /// <summary>
         /// True if the Items are empty, of if the wrapped type implements <see cref="IDeletable"/>
@@ -48,7 +48,7 @@ namespace Shielded.Gossip
                 Items = Filter(other == null ? Items : SafeConcat(new[] { other }, Items)).ToArray()
             };
 
-        public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Clock);
+        public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Version);
 
         public IEnumerable<byte[]> GetVersionBytes() => MergedClock.GetVersionBytes();
 
@@ -76,7 +76,7 @@ namespace Shielded.Gossip
                 {
                     if (skipCurrent)
                         return false;
-                    var comp = r.Clock.VectorCompare(v.Clock);
+                    var comp = r.Version.VectorCompare(v.Version);
                     if (comp == VectorRelationship.Greater)
                     {
                         skipCurrent = true;
