@@ -84,7 +84,7 @@ namespace Shielded.Gossip
                 Expired ? 2 : 1;
             var rightRating =
                 other.ExpiresInMs > 0 ? 3 :
-                Expired ? 2 : 1;
+                other.Expired ? 2 : 1;
             return leftRating.CompareTo(rightRating).AsSecondaryRelation();
         }
     }
