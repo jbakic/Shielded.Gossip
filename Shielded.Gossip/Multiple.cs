@@ -14,13 +14,15 @@ namespace Shielded.Gossip
     /// versions are deletable.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Multiple<T> : IMergeable<Multiple<T>>, IDeletable, IEnumerable<T>
+    public struct Multiple<T> : IMergeable<Multiple<T>>, IDeletable, IReadOnlyCollection<T>
         where T : IHasVersionVector
     {
         [DataMember]
         public T[] Items { get; set; }
 
         public T this[int index] => Items != null ? Items[index] : throw new ArgumentOutOfRangeException();
+
+        public int Count => Items?.Length ?? 0;
 
         /// <summary>
         /// The result of merging the vector clocks of all contained versions, or a new empty clock if

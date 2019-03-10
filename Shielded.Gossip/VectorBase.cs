@@ -36,7 +36,7 @@ namespace Shielded.Gossip
     /// <typeparam name="TVec">The type of the vector, i.e. of the child class itself.</typeparam>
     /// <typeparam name="T">The type of an individual server's value.</typeparam>
     [DataContract(Namespace = ""), Serializable]
-    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec>, IEnumerable<VectorItem<T>>
+    public abstract class VectorBase<TVec, T> : IEquatable<TVec>, IMergeable<TVec>, IReadOnlyCollection<VectorItem<T>>
         where TVec : VectorBase<TVec, T>, new()
     {
         public VectorBase() { }
@@ -50,6 +50,8 @@ namespace Shielded.Gossip
 
         [DataMember]
         public VectorItem<T>[] Items { get; set; }
+
+        public int Count => Items?.Length ?? 0;
 
         protected virtual IEqualityComparer<T> EqualityComparer => EqualityComparer<T>.Default;
 
