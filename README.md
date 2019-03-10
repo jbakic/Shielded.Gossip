@@ -247,8 +247,8 @@ using the ITransport.Broadcast method. Gossip anti-entropy exchanges are done ra
 2 seconds (configurable) a server randomly picks a gossip partner, and if they're not already
 in a gossip exchange, starts one. Direct mail will by default not be sent to a server who we're
 in a gossip exchange with right now, but this is configurable. The backends can also be
-configured to simply start gossip exchanges on every write instead of sending direct mail, or
-the direct mail can simply be turned off.
+configured to start gossip exchanges on every write instead of sending direct mail, or the
+direct mail can simply be turned off.
 
 The anti-entropy exchange begins by sending a small package of last changes on the server
 (default is 10 key/value pairs, but will vary because we send only whole transactions), and the
