@@ -5,14 +5,12 @@ support for eventually and strongly consistent transactions. It is based on the
 [Shielded STM library](https://github.com/jbakic/Shielded) and uses a gossip
 protocol for synchronizing between servers.
 
-*The library is still a work in progress, but should be ready for use. I would be
-grateful if you report any issues you encounter while using it.*
+*The library is still a work in progress. I would be grateful if you report any
+issues you encounter while using it.*
 
-It can be used to easily implement a distributed cache, or any kind of distributed
-database. It does not provide storage, it is meant to be combined with an external
-system for persistency, like a traditional relational DB. If the external storage
-supports consistent transactions, you will only need the eventually consistent
-features of this library.
+It can be used to implement a distributed cache, or any kind of distributed
+database. It does not provide storage - it is meant to be combined with an external
+system for persistency, like a traditional relational DB.
 
 ## Basics
 
@@ -20,8 +18,8 @@ The central class is the GossipBackend. You need to provide it with a message
 transport implementation and some configuration. The library has a basic transport
 using TCP, in the class TcpTransport, but by implementing ITransport you can use
 any communication means you want. It does not require any strong guarantees from the
-transport, since gossip-based communication is very resilient. It is enough that
-a majority of messages will make it through in some reasonable amount of time.
+transport, since gossip-based communication is resilient. It is enough that a
+majority of messages make it through in a reasonable amount of time.
 
 ```csharp
 var transport = new TcpTransport("Server1", new IPEndPoint(IPAddress.Parse("10.0.0.1"), 2001),
@@ -70,8 +68,8 @@ backend.Set("the key", newVal.Version(newVal.Version));
 ```
 
 Distributing the new data to other servers is done asynchronously, in the background,
-and does not block the backend in any way. If other servers changed the same key at the
-same time, those changes will be merged with yours eventually.
+and does not block. If other servers changed the same key at the same time, those
+changes will be merged with yours eventually.
 
 The backend supports transactions as well, which are done using ordinary Shielded library
 transactions.
@@ -102,11 +100,10 @@ number of messages they exchange. Currently included are the VersionVector, and 
 counter implemented in the CountVector class. VectorBase can be used as a base class to easily
 implement vector clock-like CRDT types.
 
-To achieve the same desirable characteristics with a type which is not a CRDT, you can simply
-add the IHasVersionVector interface to it, and use the Multiple&lt;T&gt; wrapper to make it a
-CRDT. If you cannot change the type to add the interface to it, you can use the
-VecVersioned&lt;T&gt; wrapper which pairs a value of any type with a version vector and which
-implements that interface.
+To achieve the same desirable characteristics with a type which is not a CRDT, you can add the
+IHasVersionVector interface to it, and use the Multiple&lt;T&gt; wrapper to make it a CRDT. If
+you cannot change the type to add the interface to it, you can use the VecVersioned&lt;T&gt;
+wrapper which pairs a value of any type with a version vector and which implements that interface.
 
 [Version vectors](https://en.wikipedia.org/wiki/Version_vector) reliably detect conflicting edits
 to the same key, and the Multiple will keep the conflicting versions, allowing you to resolve
@@ -145,10 +142,10 @@ backend.Remove("some key");
 ```
 
 Internally, the value under the key keeps the same version, but is marked as deleted. This is
-regarded as a higher version, and will be accepted by other servers. However, what happens if
-the key gets revived later is now fully up to you. You should probably react to Changed
-events, and check in some external tombstone storage whether any newly arriving item may be
-kept, and immediately remove it again if not.
+regarded as a higher version. Like the IDeletable, it will be kept around for one minute by
+default, to communicate the deletion, but what happens if the key gets revived later is up to
+you. You should probably react to Changed events, and check in some external tombstone
+storage whether any newly arriving item may be kept, and immediately remove it again if not.
 
 ## Expiry
 
@@ -160,7 +157,7 @@ backend.Set("some key", someMergeable, 5000);
 ```
 
 By writing the same value again with only a different expiry you can extend it, in case you
-wish to have sliding expiry. It is not however possible to reduce the expiry, for that you
+wish to have sliding expiry. It is not however possible to reduce the expiry. For that you
 must write a new, higher version of the data. This is due to the nature of the gossip
 implementation - when merging two values which are otherwise equal, the backend simply takes
 the max of the expiry values. An exception is if one side did not have expiry, in which case
@@ -169,8 +166,8 @@ the result of the merge will have the expiry of the other.
 It is important to note that, to avoid issues with server clock synchronization, the backends
 do not communicate about the exact time when an item must expire. Rather, they send each other
 the information on how many milliseconds a key has left before it expires. Since this number
-does not change during transmission of a message, then every time they exchange information
-about a key, its expiry can get extended. It is therefore not precise.
+does not change during transmission of a message, every time they exchange information about
+a key its expiry can get extended. It is therefore not precise.
 
 ## The Consistent Backend
 
@@ -229,11 +226,12 @@ success too, which could be important when combining consistent transactions wit
 systems.
 
 You should avoid using the same fields from both consistent and non-consistent transaction,
-but FYI, if you access the same fields from non-consistent transactions, the non-consistent transactions
-will proceed uninterrupted. Thus, when the other servers confirm your transaction, they guarantee
-only that at the point in time when they checked, your transaction was OK, and that no other consistent
-transaction can change the affected fields until you decide to commit or roll back. This
-behavior ensures that the non-consistent ops never block, which is a useful quality.
+but FYI, if you access the same fields from non-consistent transactions, the non-consistent
+transactions will proceed uninterrupted. Thus, when the other servers confirm your transaction,
+they guarantee only that at the point in time when they checked, your transaction was OK, and
+that no other consistent transaction can change the affected fields until you decide to commit
+or roll back. This behavior ensures that the non-consistent ops never block, which is a useful
+quality.
 
 ## The Gossip Protocol
 
@@ -243,3 +241,26 @@ anti-entropy exchange is incremental, and uses a reverse time index of all updat
 database, which makes it in effect similar to the "hot rumor" approach, but without the risk
 of deactivating a rumor before it gets transmitted to all servers. The article is a great read,
 and it explains all of this, accompanied with the results of many simulations and experiments.
+
+Direct mail is launched whenever a write is committed locally and is sent to all known servers
+using the ITransport.Broadcast method. Gossip anti-entropy exchanges are done randomly - every
+2 seconds (configurable) a server randomly picks a gossip partner, and if they're not already
+in a gossip exchange, starts one. Direct mail will by default not be sent to a server who we're
+in a gossip exchange with right now, but this is configurable. The backends can also be
+configured to simply start gossip exchanges on every write instead of sending direct mail, or
+the direct mail can simply be turned off.
+
+The anti-entropy exchange begins by sending a small package of last changes on the server
+(default is 10 key/value pairs, but will vary because we send only whole transactions), and the
+hash of the entire database. Upon receiving a gossip message, a server first applies the
+changes from the message, merging them with local data. Then it compares the hashes, and if they
+match, it replies with an end message. As long as they do not match, the servers will continue
+sending replies to each other, transmitting changes to their local DB starting from the most
+recent ones and moving back. Every further reply doubles in size, until they start hitting
+against the configurable cut-off limit, but NB that the cut-off will be exceeded if you commit
+any transactions whose number of affected fields is greater than the cut-off - the backends
+only transmit entire transactions. If the servers have not lost connectivity recently, then
+they will terminate quickly. If not, they will continue until they are both in sync.
+
+The database hash is a simple XOR of hashes of individual keys and the versions of their values.
+This enables it to be incrementaly updated, with no need to iterate over all the keys.
