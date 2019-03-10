@@ -116,11 +116,9 @@ namespace Shielded.Gossip
         public IEnumerable<TRes> Join<TRVec, TR, TRes>(VectorBase<TRVec, TR> rightVec, Func<string, T, TR, TRes> resultSelector)
             where TRVec : VectorBase<TRVec, TR>, new()
         {
-            var lefts = Items ?? Enumerable.Empty<VectorItem<T>>();
-            var rights = rightVec?.Items ?? Enumerable.Empty<VectorItem<TR>>();
-
-            foreach (var grp in lefts.Select(i => (left: true, server: i.ServerId, leftval: i.Value, rightval: default(TR)))
-                .Concat(rights.Select(i => (left: false, server: i.ServerId, leftval: default(T), rightval: i.Value)))
+            var rightEnum = rightVec?.Items ?? Enumerable.Empty<VectorItem<TR>>();
+            foreach (var grp in this.Select(i => (left: true, server: i.ServerId, leftval: i.Value, rightval: default(TR)))
+                .Concat(rightEnum.Select(i => (left: false, server: i.ServerId, leftval: default(T), rightval: i.Value)))
                 .GroupBy(t => t.server, StringComparer.InvariantCultureIgnoreCase))
             {
                 // note that this validates that the same server ID is not present multiple times in either.
@@ -150,7 +148,7 @@ namespace Shielded.Gossip
         protected IEnumerable<VectorItem<T>> GetModifiedItems(string ownServerId, Func<T, T> modifier)
         {
             bool foundIt = false;
-            foreach (var item in (Items ?? Enumerable.Empty<VectorItem<T>>()))
+            foreach (var item in this)
             {
                 if (string.IsNullOrWhiteSpace(item.ServerId))
                     throw new InvalidOperationException("Vector server IDs may not be empty.");
@@ -189,8 +187,7 @@ namespace Shielded.Gossip
         {
             if (string.IsNullOrWhiteSpace(serverId))
                 throw new ArgumentNullException();
-            return (Items ?? Enumerable.Empty<VectorItem<T>>())
-                .Where(i => !i.ServerId.Equals(serverId, StringComparison.InvariantCultureIgnoreCase));
+            return this.Where(i => !i.ServerId.Equals(serverId, StringComparison.InvariantCultureIgnoreCase));
         }
 
         public IEnumerator<VectorItem<T>> GetEnumerator() => (Items ?? Enumerable.Empty<VectorItem<T>>()).GetEnumerator();

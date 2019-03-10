@@ -83,16 +83,16 @@ namespace Shielded.Gossip
             }
         }
 
-        public bool IsDone => State.Items.Any(i => (i.Value & TransactionState.Done) != 0);
-        public bool IsSuccess => State.Items.Any(i => i.Value == TransactionState.Success);
-        public bool IsFail => State.Items.Any(i => i.Value == TransactionState.Fail);
+        public bool IsDone => State.Any(i => (i.Value & TransactionState.Done) != 0);
+        public bool IsSuccess => State.Any(i => i.Value == TransactionState.Success);
+        public bool IsFail => State.Any(i => i.Value == TransactionState.Fail);
 
         /// <summary>
         /// True if a majority of servers has reached the Success or the Fail state. It is safe to
         /// delete a done transaction, cause even if later revived, it is idempotent - a re-execution
         /// will simply fail with no effects, and the transaction will become deletable again.
         /// </summary>
-        public bool CanDelete => State.Items.Count(s => (s.Value & TransactionState.Done) != 0) > (State.Items.Length / 2);
+        public bool CanDelete => State.Count(s => (s.Value & TransactionState.Done) != 0) > (State.Count / 2);
 
         public IEnumerable<byte[]> GetVersionBytes() => (State ?? new TransactionVector()).GetVersionBytes();
 

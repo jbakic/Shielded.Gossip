@@ -566,7 +566,7 @@ namespace Shielded.Gossip
 
         private void OnTransactionChanged(string id, TransactionInfo newVal)
         {
-            if (!newVal.State.Items.Any(i => StringComparer.InvariantCultureIgnoreCase.Equals(i.ServerId, Transport.OwnId)))
+            if (!newVal.State.Any(i => StringComparer.InvariantCultureIgnoreCase.Equals(i.ServerId, Transport.OwnId)))
             {
                 if (newVal.IsSuccess)
                     Apply(newVal);

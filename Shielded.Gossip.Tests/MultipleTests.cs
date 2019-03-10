@@ -25,20 +25,20 @@ namespace Shielded.Gossip.Tests
             var merge1 = (Multiple<TestClass>)mvA1 | mvB1;
 
             Assert.AreEqual((VersionVector)(A, 1) | (B, 1), merge1.MergedClock);
-            Assert.AreEqual(2, merge1.Items.Length);
-            Assert.AreNotEqual(merge1.MergedClock, merge1.Items[0].Version);
-            Assert.AreNotEqual(merge1.MergedClock, merge1.Items[1].Version);
+            Assert.AreEqual(2, merge1.Count);
+            Assert.AreNotEqual(merge1.MergedClock, merge1[0].Version);
+            Assert.AreNotEqual(merge1.MergedClock, merge1[1].Version);
 
             var merge2 = merge1 | new TestClass { Version = mvA1.Version.Next(A) };
 
             Assert.AreEqual((VersionVector)(A, 2) | (B, 1), merge2.MergedClock);
-            Assert.AreEqual(2, merge2.Items.Length);
+            Assert.AreEqual(2, merge2.Count);
 
             var merge3 = merge2 | new TestClass { Version = merge2.MergedClock.Next(B) };
 
             Assert.AreEqual((VersionVector)(A, 2) | (B, 2), merge3.MergedClock);
-            Assert.AreEqual(1, merge3.Items.Length);
-            Assert.AreEqual(merge3.MergedClock, merge3.Items[0].Version);
+            Assert.AreEqual(1, merge3.Count);
+            Assert.AreEqual(merge3.MergedClock, merge3[0].Version);
         }
 
         [TestMethod]

@@ -47,9 +47,7 @@ namespace Shielded.Gossip
                 Decrements = Math.Max(left.Decrements, right.Decrements),
             };
 
-        public long Value =>
-            (Items ?? Enumerable.Empty<VectorItem<Item>>())
-                .Aggregate(0L, (acc, next) => acc + (next.Value.Increments - next.Value.Decrements));
+        public long Value => this.Aggregate(0L, (acc, next) => acc + (next.Value.Increments - next.Value.Decrements));
 
         protected override VectorRelationship Compare(Item left, Item right) =>
             left.Increments.VectorCompare(right.Increments) | left.Decrements.VectorCompare(right.Decrements);

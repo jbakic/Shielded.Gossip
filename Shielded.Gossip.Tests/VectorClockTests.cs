@@ -25,7 +25,7 @@ namespace Shielded.Gossip.Tests
 
             var a = new VersionVector(items);
 
-            Assert.IsTrue(a.Items.SequenceEqual(items));
+            Assert.IsTrue(a.SequenceEqual(items));
 
             var b = new VersionVector(
                 new VectorItem<int>(A, 4),
