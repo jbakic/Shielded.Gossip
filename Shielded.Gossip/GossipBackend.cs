@@ -746,7 +746,9 @@ namespace Shielded.Gossip
             var oldItem = GetItem(key);
             if (oldItem == null || oldItem.Deleted)
                 return false;
-            var hash = GetHash(key, (IHasVersionBytes)oldItem.Value);
+
+            var oldVal = oldItem.Expired ? default : (IHasVersionBytes)oldItem.Value;
+            var hash = oldItem.Expired ? default : GetHash(key, oldVal);
             var newItem = new MessageItem
             {
                 Key = key,
@@ -758,11 +760,13 @@ namespace Shielded.Gossip
             _freshIndex.Append(newItem);
             if (addToMail)
                 AddToMail(newItem);
-            _databaseHash.Commute((ref VersionHash h) => h ^= hash);
+            if (!oldItem.Expired)
+                _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
-            var val = oldItem.Value;
-            OnChanged(key, val, val, true);
-            return !(oldItem.ExpiresInMs <= 0);
+            if (oldItem.Expired || oldItem.ExpiresInMs <= 0)
+                return false;
+            OnChanged(key, oldVal, oldVal, true);
+            return true;
         }
 
         private void OnChanged(string key, object oldVal, object newVal, bool deleted)

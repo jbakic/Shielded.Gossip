@@ -122,7 +122,7 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNotNull(backend.TryGetWithInfo<IntVersioned<string>>("test"));
                 Thread.Sleep(250);
                 Assert.IsNotNull(backend.TryGetWithInfo<IntVersioned<string>>("test"));
-                Thread.Sleep(200);
+                Thread.Sleep(250);
                 Assert.IsNull(backend.TryGetWithInfo<IntVersioned<string>>("test"));
             }
         }
