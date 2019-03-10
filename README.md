@@ -179,7 +179,7 @@ and will succeed only if a majority of servers agree that it was indeed consiste
 ```csharp
 var consistentBackend = new ConsistentGossipBackend(someTransport, new GossipConfiguration());
 // ...
-var (success, withdrawn) = consistentBackend.RunConsistent(() =>
+var (success, withdrawn) = await consistentBackend.RunConsistent(() =>
 {
     var accountState = consistentBackend.TryGetIntVersioned<AccountState>("account-1234");
     if (accountState.Value == null || accountState.Value.Balance <= 0m)
