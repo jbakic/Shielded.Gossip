@@ -125,6 +125,21 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void Expiry_CrossServerExpiryChange()
+        {
+            _backends[A].SetHasVec("test", true.Version(A, 1));
+
+            Thread.Sleep(50);
+            _backends[A].SetHasVec("test", true.Version(A, 1), 100);
+
+            Thread.Sleep(50);
+            Assert.IsTrue(_backends[B].TryGetVecVersioned<bool>("test").Single().Value);
+
+            Thread.Sleep(70);
+            Assert.IsFalse(_backends[B].TryGetVecVersioned<bool>("test").Any());
+        }
+
+        [TestMethod]
         public void Expiry_CrossServerConsistentExpiry()
         {
             _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1), 100)).Wait();

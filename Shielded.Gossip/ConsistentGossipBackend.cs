@@ -148,7 +148,7 @@ namespace Shielded.Gossip
             if (oldValue != null)
             {
                 var (mergedValue, cmp) = new FieldInfo<TItem>(val, expireInMs)
-                    .MergeWith(oldValue);
+                    .MergeWith(oldValue, Configuration.ExpiryComparePrecision);
                 var valueCmp = cmp.GetValueRelationship();
                 if (valueCmp == VectorRelationship.Less || valueCmp == VectorRelationship.Equal)
                     return valueCmp;
@@ -493,7 +493,7 @@ namespace Shielded.Gossip
             var curr = _wrapped.TryGetWithInfo<TItem>(key);
             if (curr == null)
                 return value.Deleted ? ComplexRelationship.Equal : ComplexRelationship.Greater;
-            return value.VectorCompare(curr);
+            return value.VectorCompare(curr, Configuration.ExpiryComparePrecision);
         }
 
         private bool Check(string id, TransactionInfo transaction, bool initiatedLocally) => Shield.InTransaction(() =>

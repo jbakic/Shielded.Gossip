@@ -1,0 +1,31 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace Shielded.Gossip
+{
+    internal static class Util
+    {
+        internal static bool RoughlyEqual(int? num1, int? num2, int precision)
+        {
+            // this covers the case if both are null.
+            if (num1 == num2)
+                return true;
+            return num1.HasValue && num2.HasValue &&
+                Math.Abs(num1.Value - num2.Value) < precision;
+        }
+
+        internal static bool IsByteEqual(byte[] one, byte[] two)
+        {
+            if (one == null && two == null)
+                return true;
+            if (one == null || two == null || one.Length != two.Length)
+                return false;
+            var len = one.Length;
+            for (int i = 0; i < len; i++)
+                if (one[i] != two[i])
+                    return false;
+            return true;
+        }
+    }
+}

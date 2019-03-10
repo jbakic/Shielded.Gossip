@@ -42,9 +42,9 @@ namespace Shielded.Gossip
         }
 
         // this is one long signature...
-        internal (FieldInfo<T> Result, ComplexRelationship Relation) MergeWith(FieldInfo<T> other)
+        internal (FieldInfo<T> Result, ComplexRelationship Relation) MergeWith(FieldInfo<T> other, int expiryComparePrecision)
         {
-            var cmp = VectorCompare(other);
+            var cmp = VectorCompare(other, expiryComparePrecision);
             if (cmp == ComplexRelationship.Greater || cmp == ComplexRelationship.EqualButGreater || cmp == ComplexRelationship.Equal)
                 return (this, cmp);
             if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.EqualButLess)
@@ -62,7 +62,7 @@ namespace Shielded.Gossip
             return (new FieldInfo<T>(val, del, exp, expInMs), cmp);
         }
 
-        internal ComplexRelationship VectorCompare(FieldInfo<T> other)
+        internal ComplexRelationship VectorCompare(FieldInfo<T> other, int expiryComparePrecision)
         {
             if (other == null)
                 throw new ArgumentNullException(nameof(other));
@@ -76,8 +76,13 @@ namespace Shielded.Gossip
             if (!Deleted && other.Deleted)
                 return ComplexRelationship.Less;
 
-            if (ExpiresInMs > 0 && other.ExpiresInMs > 0)
-                return ExpiresInMs.Value.CompareTo(other.ExpiresInMs.Value).AsSecondaryRelation();
+            if (!Expired && !other.Expired)
+            {
+                if (Util.RoughlyEqual(ExpiresInMs, other.ExpiresInMs, expiryComparePrecision))
+                    return ComplexRelationship.Equal;
+                if (ExpiresInMs > 0 && other.ExpiresInMs > 0)
+                    return ExpiresInMs.Value.CompareTo(other.ExpiresInMs.Value).AsSecondaryRelation();
+            }
 
             var leftRating =
                 ExpiresInMs > 0 ? 3 :

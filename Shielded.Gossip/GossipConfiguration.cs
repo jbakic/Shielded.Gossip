@@ -82,5 +82,11 @@
         /// to communicate their removable state to other servers.
         /// </summary>
         public int RemovableItemLingerMs { get; set; } = 60000;
+
+        /// <summary>
+        /// When merging values, if their expiry times are within this many milliseconds of each other,
+        /// they will be considered equal.
+        /// </summary>
+        public int ExpiryComparePrecision { get; set; } = 100;
     }
 }

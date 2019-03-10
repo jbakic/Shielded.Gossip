@@ -314,7 +314,8 @@ namespace Shielded.Gossip
                     continue;
                 if (_local.TryGetValue(item.Key, out var curr) &&
                     item.Deleted == curr.Deleted && item.Expired == curr.Expired &&
-                    IsByteEqual(curr.Data, item.Data))
+                    Util.RoughlyEqual(item.ExpiresInMs, curr.ExpiresInMs, Configuration.ExpiryComparePrecision) &&
+                    Util.IsByteEqual(curr.Data, item.Data))
                 {
                     if (equalKeys == null)
                         equalKeys = new HashSet<string>();
@@ -343,19 +344,6 @@ namespace Shielded.Gossip
             }
             return equalKeys;
         });
-
-        private static bool IsByteEqual(byte[] one, byte[] two)
-        {
-            if (one == null && two == null)
-                return true;
-            if (one == null || two == null || one.Length != two.Length)
-                return false;
-            var len = one.Length;
-            for (int i = 0; i < len; i++)
-                if (one[i] != two[i])
-                    return false;
-            return true;
-        }
 
         private bool ShouldReply(GossipMessage msg, out GossipState currentState, out bool sendKill)
         {
@@ -698,7 +686,7 @@ namespace Shielded.Gossip
             {
                 var oldValue = new FieldInfo<TItem>(oldItem);
                 var oldHash = oldItem.Deleted || oldItem.Expired ? default : GetHash(key, oldValue.Value);
-                var (mergedValue, cmp) = value.MergeWith(oldValue);
+                var (mergedValue, cmp) = value.MergeWith(oldValue, Configuration.ExpiryComparePrecision);
                 if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.Equal || cmp == ComplexRelationship.EqualButLess)
                     return cmp;
                 var newItem = new MessageItem
