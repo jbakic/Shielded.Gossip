@@ -23,32 +23,19 @@ namespace Shielded.Gossip
     /// reach the same state regardless of the order or the number of messages which they
     /// exchange.
     /// </summary>
-    /// <typeparam name="TIn">The type of the input for the merge operation, which in the
-    /// general case may be different from the merge result type.</typeparam>
-    /// <typeparam name="TOut">The merge result type, which typically is the same type
-    /// implementing this interface.</typeparam>
-    public interface IMergeable<in TIn, out TOut> : IHasVersionBytes where TOut : IMergeable<TIn, TOut>
+    public interface IMergeable<T> : IHasVersionBytes where T : IMergeable<T>
     {
         /// <summary>
         /// Merge the value with another, returning the result. Must be idempotent, commutative
         /// and associative. Should not change the current object!
         /// </summary>
-        TOut MergeWith(TIn other);
+        T MergeWith(T other);
 
         /// <summary>
         /// Compare with the other value, returning their <see cref="VectorRelationship"/>. Connected
-        /// to <see cref="MergeWith(TIn)"/> - comparing the result of a merge with any of the two
+        /// to <see cref="MergeWith(T)"/> - comparing the result of a merge with any of the two
         /// original values must return Greater or Equal.
         /// </summary>
-        VectorRelationship VectorCompare(TIn other);
+        VectorRelationship VectorCompare(T other);
     }
-
-    /// <summary>
-    /// Interface for CRDTs - types which have a merge operation that is idempotent,
-    /// commutative and associative. Such an operation allows multiple servers to eventually
-    /// reach the same state regardless of the order or the number of messages which they
-    /// exchange.
-    /// </summary>
-    public interface IMergeable<T> : IMergeable<T, T> where T : IMergeable<T, T>
-    { }
 }

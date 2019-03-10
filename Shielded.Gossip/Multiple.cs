@@ -14,7 +14,7 @@ namespace Shielded.Gossip
     /// versions are deletable.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
-    public struct Multiple<T> : IMergeable<T, Multiple<T>>, IMergeable<Multiple<T>>, IDeletable, IEnumerable<T>
+    public struct Multiple<T> : IMergeable<Multiple<T>>, IDeletable, IEnumerable<T>
         where T : IHasVersionVector
     {
         [DataMember]
@@ -41,12 +41,6 @@ namespace Shielded.Gossip
             };
 
         public VectorRelationship VectorCompare(Multiple<T> other) => MergedClock.VectorCompare(other.MergedClock);
-
-        public Multiple<T> MergeWith(T other) =>
-            new Multiple<T>
-            {
-                Items = Filter(other == null ? Items : SafeConcat(new[] { other }, Items)).ToArray()
-            };
 
         public VectorRelationship VectorCompare(T other) => MergedClock.VectorCompare(other.Version);
 
