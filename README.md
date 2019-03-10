@@ -244,7 +244,7 @@ and it explains all of this, accompanied with the results of many simulations an
 
 Direct mail is launched whenever a write is committed locally and is sent to all known servers
 using the ITransport.Broadcast method. Gossip anti-entropy exchanges are done randomly - every
-2 seconds (configurable) a server randomly picks a gossip partner, and if they're not already
+5 seconds (configurable) a server randomly picks a gossip partner, and if they're not already
 in a gossip exchange, starts one. Direct mail will by default not be sent to a server who we're
 in a gossip exchange with right now, but this is configurable. The backends can also be
 configured to start gossip exchanges on every write instead of sending direct mail, or the
