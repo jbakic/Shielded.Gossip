@@ -704,6 +704,8 @@ namespace Shielded.Gossip
         private ComplexRelationship SetInternalWithAddToMail<TItem>(string key, FieldInfo<TItem> value, bool addToMail)
             where TItem : IMergeable<TItem>
         {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
             if (value == null)
                 throw new ArgumentNullException(nameof(value));
             if (_local.TryGetValue(key, out var oldItem))
