@@ -17,7 +17,6 @@ namespace Shielded.Gossip
     {
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ReverseTimeIndex _freshIndex;
-        private readonly Shielded<VersionHash> _databaseHash = new Shielded<VersionHash>();
         private readonly ShieldedLocal<Dictionary<string, MessageItem>> _toMail = new ShieldedLocal<Dictionary<string, MessageItem>>();
 
         private readonly Timer _gossipTimer;
@@ -110,8 +109,7 @@ namespace Shielded.Gossip
                 Expired = true,
             };
             _local[item.Key] = newItem;
-            _freshIndex.Append(newItem);
-            _databaseHash.Commute((ref VersionHash h) => h ^= hash);
+            _freshIndex.Append(newItem, hash);
         }
 
         private void DoDirectMail(MessageItem[] items)
@@ -222,11 +220,11 @@ namespace Shielded.Gossip
             if (IsGossipActive(server))
                 return false;
             var lastReceivedId = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedMsgId : null;
-            var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
+            var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, null, out var newWindowStart, out var _);
             var msg = new GossipStart
             {
                 From = Transport.OwnId,
-                DatabaseHash = _databaseHash.Value,
+                DatabaseHash = _freshIndex.DatabaseHash,
                 Items = toSend.Length == 0 ? null : toSend,
                 WindowStart = toSend.Length == 0 || newWindowStart.IsDefault ? 0 : newWindowStart.Current.Freshness,
                 WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness,
@@ -250,7 +248,7 @@ namespace Shielded.Gossip
                     var pkg = gossip as NewGossip;
                     long? ignoreUpToFreshness = null;
                     HashSet<string> keysToIgnore = null;
-                    if (pkg?.Items != null && gossip.DatabaseHash != _databaseHash.Value)
+                    if (pkg?.Items != null && gossip.DatabaseHash != _freshIndex.DatabaseHash)
                     {
                         Shield.InTransaction(() =>
                         {
@@ -418,7 +416,7 @@ namespace Shielded.Gossip
             var lastWindowStart = hisReply?.LastWindowStart ?? 0;
             var lastWindowEnd = hisReply?.LastWindowEnd ?? hisEnd?.LastWindowEnd;
 
-            var ownHash = _databaseHash.Value;
+            var ownHash = _freshIndex.DatabaseHash;
             if (ownHash == replyTo.DatabaseHash)
             {
                 if (hisEnd != null)
@@ -436,7 +434,7 @@ namespace Shielded.Gossip
                     Math.Min(Configuration.AntiEntropyCutoff, currentState.LastPackageSize * 2));
             var toSend = GetPackage(packageSize,
                 lastWindowStart > 0 ? currentState.LastWindowStart : default, lastWindowEnd,
-                ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
+                replyTo.DatabaseHash, ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator, out var historyMatch);
 
             if (toSend.Length == 0)
             {
@@ -455,7 +453,7 @@ namespace Shielded.Gossip
                         Items = null,
                         WindowStart = 0,
                         WindowEnd = _freshIndex.LastFreshness,
-                        LastWindowStart = hisNews.WindowStart,
+                        LastWindowStart = historyMatch ? 0 : hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         ReplyToId = replyTo.MessageId,
                     }, newStartEnumerator, currentState?.LastPackageSize ?? 0, currentState != null);
@@ -470,7 +468,7 @@ namespace Shielded.Gossip
                 Items = toSend,
                 WindowStart = windowStart,
                 WindowEnd = windowEnd,
-                LastWindowStart = hisNews?.WindowStart ?? 0,
+                LastWindowStart = historyMatch ? 0 : hisNews?.WindowStart ?? 0,
                 LastWindowEnd = (hisNews?.WindowEnd ?? hisEnd?.WindowEnd).Value,
                 ReplyToId = replyTo.MessageId,
             }, newStartEnumerator, packageSize, currentState != null);
@@ -478,7 +476,7 @@ namespace Shielded.Gossip
 
         private GossipEnd PrepareEnd(NewGossip hisNews, int lastPackageSize, bool success)
         {
-            var ourHash = _databaseHash.Value;
+            var ourHash = _freshIndex.DatabaseHash;
             var maxFresh = _freshIndex.LastFreshness;
             var endMsg = new GossipEnd
             {
@@ -517,14 +515,18 @@ namespace Shielded.Gossip
         }
 
         private MessageItem[] GetPackage(int packageSize, ReverseTimeIndex.Enumerator lastWindowStart, long? lastWindowEnd,
-            long? ignoreUpToFreshness, HashSet<string> keysToIgnore, out ReverseTimeIndex.Enumerator newWindowStart)
+            VersionHash? hisHash, long? ignoreUpToFreshness, HashSet<string> keysToIgnore,
+            out ReverseTimeIndex.Enumerator newWindowStart, out bool historyMatch)
         {
             if (packageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(packageSize), "The size of an anti-entropy package must be greater than zero.");
             int cutoff = Configuration.AntiEntropyCutoff;
             ReverseTimeIndex.Enumerator prevFreshnessStart = default;
             var result = new List<MessageItem>();
+            var expectedHash = hisHash == null ? (VersionHash?)null : new VersionHash(hisHash.Value.Data?.ToArray());
+            var ourHash = _freshIndex.DatabaseHash;
 
+            historyMatch = false;
             newWindowStart = _freshIndex.GetCloneableEnumerator();
             while (newWindowStart.MoveNext())
             {
@@ -533,6 +535,11 @@ namespace Shielded.Gossip
                     break;
                 if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
+                    if (historyMatch = expectedHash == ourHash)
+                    {
+                        newWindowStart = default;
+                        return result.ToArray();
+                    }
                     if (result.Count >= cutoff || (lastWindowEnd == null && result.Count >= packageSize))
                         return result.ToArray();
                     prevFreshnessStart = newWindowStart;
@@ -547,10 +554,12 @@ namespace Shielded.Gossip
                         return result.ToArray();
                     }
                     result.Add(item.Item);
+                    if (expectedHash != null)
+                        expectedHash.Value.XorWith(item.HashEffect);
                 }
             }
 
-            newWindowStart = lastWindowStart;
+            newWindowStart = (historyMatch = expectedHash == ourHash) ? default : lastWindowStart;
             if (newWindowStart.IsDefault)
                 return result.ToArray();
 
@@ -566,6 +575,11 @@ namespace Shielded.Gossip
                 var item = newWindowStart.Current;
                 if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
+                    if (historyMatch = expectedHash == ourHash)
+                    {
+                        newWindowStart = default;
+                        return result.ToArray();
+                    }
                     if (result.Count >= cutoff || result.Count >= packageSize)
                         return result.ToArray();
                     prevFreshnessStart = newWindowStart;
@@ -578,6 +592,8 @@ namespace Shielded.Gossip
                     return result.ToArray();
                 }
                 result.Add(item.Item);
+                if (expectedHash != null)
+                    expectedHash.Value.XorWith(item.HashEffect);
             } while (newWindowStart.MoveNext());
 
             newWindowStart = default;
@@ -649,7 +665,7 @@ namespace Shielded.Gossip
                 FreshnessOffset = _freshnessContext.GetValueOrDefault(),
             };
             _local[key] = newItem;
-            _freshIndex.Append(newItem);
+            _freshIndex.Append(newItem, default);
             AddToMail(newItem);
         });
 
@@ -707,12 +723,10 @@ namespace Shielded.Gossip
                     ExpiresInMs = mergedValue.ExpiresInMs,
                 };
                 _local[key] = newItem;
-                _freshIndex.Append(newItem);
+                var hash = oldHash ^ (mergedValue.Deleted || mergedValue.Expired ? default : GetHash(key, mergedValue.Value));
+                _freshIndex.Append(newItem, hash);
                 if (addToMail)
                     AddToMail(newItem);
-                var hash = oldHash ^ (mergedValue.Deleted || mergedValue.Expired ? default : GetHash(key, mergedValue.Value));
-                if (hash != default)
-                    _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
                 if (cmp.GetValueRelationship() != VectorRelationship.Equal)
                     OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
@@ -730,11 +744,10 @@ namespace Shielded.Gossip
                     ExpiresInMs = value.ExpiresInMs,
                 };
                 _local[key] = newItem;
-                _freshIndex.Append(newItem);
+                var hash = GetHash(key, value.Value);
+                _freshIndex.Append(newItem, hash);
                 if (addToMail)
                     AddToMail(newItem);
-                var hash = GetHash(key, value.Value);
-                _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
                 if (value.ExpiresInMs == null || value.ExpiresInMs > 0)
                     OnChanged(key, null, value.Value, false);
@@ -765,11 +778,9 @@ namespace Shielded.Gossip
                 FreshnessOffset = _freshnessContext.GetValueOrDefault(),
             };
             _local[key] = newItem;
-            _freshIndex.Append(newItem);
+            _freshIndex.Append(newItem, hash);
             if (addToMail)
                 AddToMail(newItem);
-            if (!oldItem.Expired)
-                _databaseHash.Commute((ref VersionHash h) => h ^= hash);
 
             if (oldItem.Expired || oldItem.ExpiresInMs <= 0)
                 return false;

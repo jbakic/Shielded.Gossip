@@ -75,5 +75,18 @@ namespace Shielded.Gossip
                 left.Data == null ? right.Data :
                 right.Data == null ? left.Data :
                 left.Data.Zip(right.Data, (a, b) => (byte)(a ^ b)).ToArray());
+
+        /// <summary>
+        /// To be used when XORing multiple hashes, to avoid constantly allocating new byte arrays.
+        /// </summary>
+        public void XorWith(VersionHash other)
+        {
+            if (other.Data == null)
+                return;
+            if (Data == null)
+                Data = other.Data.ToArray();
+            for (int i = 0; i < 32; i++)
+                Data[i] ^= other.Data[i];
+        }
     }
 }

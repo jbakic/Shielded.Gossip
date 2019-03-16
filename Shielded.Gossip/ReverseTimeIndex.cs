@@ -9,11 +9,13 @@ namespace Shielded.Gossip
     {
         public readonly long Freshness;
         public readonly MessageItem Item;
+        public readonly VersionHash HashEffect;
 
-        public ReverseTimeIndexItem(long freshness, MessageItem item)
+        public ReverseTimeIndexItem(long freshness, MessageItem item, VersionHash hashEffect)
         {
             Freshness = freshness;
             Item = item;
+            HashEffect = hashEffect;
         }
     }
 
@@ -23,6 +25,7 @@ namespace Shielded.Gossip
         {
             public MessageItem Item;
             public long Freshness;
+            public VersionHash HashEffect;
             public ListElement Previous;
         }
 
@@ -47,7 +50,7 @@ namespace Shielded.Gossip
             public ReverseTimeIndexItem Current =>
                 !_open ? throw new InvalidOperationException("MoveNext not called yet.") :
                 _current == null ? throw new InvalidOperationException("Enumeration already completed.") :
-                new ReverseTimeIndexItem(_current.Freshness, _current.Item);
+                new ReverseTimeIndexItem(_current.Freshness, _current.Item, _current.HashEffect);
 
             object IEnumerator.Current => ((IEnumerator<ReverseTimeIndexItem>)this).Current;
 
@@ -90,7 +93,9 @@ namespace Shielded.Gossip
             }
         }
 
+
         private readonly Shielded<ListElement> _listHead = new Shielded<ListElement>();
+        private readonly Shielded<VersionHash> _databaseHash = new Shielded<VersionHash>();
         private readonly Func<string, MessageItem> _currentItemGetter;
 
         public ReverseTimeIndex(Func<string, MessageItem> currentItemGetter)
@@ -98,38 +103,57 @@ namespace Shielded.Gossip
             _currentItemGetter = currentItemGetter ?? throw new ArgumentNullException();
         }
 
-        private readonly ShieldedLocal<Dictionary<string, MessageItem>> _toAppend = new ShieldedLocal<Dictionary<string, MessageItem>>();
+        private class CurrentTransactionEffects
+        {
+            public readonly Dictionary<string, ListElement> ToAppend = new Dictionary<string, ListElement>();
+            public VersionHash HashEffect;
+        }
 
-        public void Append(MessageItem item)
+        private readonly ShieldedLocal<CurrentTransactionEffects> _currFx = new ShieldedLocal<CurrentTransactionEffects>();
+
+        public void Append(MessageItem item, VersionHash hashEffect)
         {
             if (item == null)
                 throw new ArgumentNullException(nameof(item));
-            var toAppend = _toAppend.GetValueOrDefault();
-            if (toAppend == null)
+            var currFx = _currFx.GetValueOrDefault();
+            if (currFx == null)
             {
-                _toAppend.Value = toAppend = new Dictionary<string, MessageItem>();
+                _currFx.Value = currFx = new CurrentTransactionEffects();
                 _listHead.Commute(AppendCommute);
+                _databaseHash.Commute((ref VersionHash h) => h ^= currFx.HashEffect);
             }
-            toAppend[item.Key] = item;
+
+            currFx.HashEffect ^= hashEffect;
+            if (currFx.ToAppend.TryGetValue(item.Key, out var oldElem))
+            {
+                oldElem.Item = item;
+                oldElem.HashEffect ^= hashEffect;
+            }
+            else
+            {
+                currFx.ToAppend[item.Key] = new ListElement
+                {
+                    Item = item,
+                    HashEffect = hashEffect,
+                };
+            }
         }
 
         private void AppendCommute(ref ListElement cell)
         {
             var newFresh = (cell?.Freshness ?? 0) + 1;
             var referenceTickCount = Environment.TickCount;
-            foreach (var kvp in _toAppend.Value.OrderBy(kvp => kvp.Value.FreshnessOffset))
+            foreach (var kvp in _currFx.Value.ToAppend.OrderBy(kvp => kvp.Value.Item.FreshnessOffset))
             {
-                var item = kvp.Value;
-                item.Freshness = newFresh + item.FreshnessOffset;
+                var element = kvp.Value;
+                var item = element.Item;
+                element.Freshness = item.Freshness = newFresh + item.FreshnessOffset;
                 item.ActivateExpiry(referenceTickCount);
                 if (item.Deleted || item.Expired)
                     item.RemovableSince = referenceTickCount;
-                cell = new ListElement
-                {
-                    Item = item,
-                    Freshness = item.Freshness,
-                    Previous = cell,
-                };
+
+                element.Previous = cell;
+                cell = element;
             }
         }
 
@@ -139,5 +163,7 @@ namespace Shielded.Gossip
         IEnumerator IEnumerable.GetEnumerator() => GetCloneableEnumerator();
 
         public long LastFreshness => _listHead.Value?.Freshness ?? 0;
+
+        public VersionHash DatabaseHash => _databaseHash.Value;
     }
 }
