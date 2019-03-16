@@ -458,7 +458,7 @@ namespace Shielded.Gossip
                         LastWindowStart = hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         ReplyToId = replyTo.MessageId,
-                    }, newStartEnumerator, currentState?.LastPackageSize ?? 0);
+                    }, newStartEnumerator, currentState?.LastPackageSize ?? 0, currentState != null);
             }
 
             var windowStart = newStartEnumerator.IsDefault ? 0 : newStartEnumerator.Current.Freshness;
@@ -473,7 +473,7 @@ namespace Shielded.Gossip
                 LastWindowStart = hisNews?.WindowStart ?? 0,
                 LastWindowEnd = (hisNews?.WindowEnd ?? hisEnd?.WindowEnd).Value,
                 ReplyToId = replyTo.MessageId,
-            }, newStartEnumerator, packageSize);
+            }, newStartEnumerator, packageSize, currentState != null);
         });
 
         private GossipEnd PrepareEnd(NewGossip hisNews, int lastPackageSize, bool success)
@@ -495,16 +495,24 @@ namespace Shielded.Gossip
             return endMsg;
         }
 
-        private GossipReply PrepareReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator, int newPackageSize)
+        private GossipReply PrepareReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator, int newPackageSize,
+            bool hasActiveState)
         {
-            Shield.SideEffect(() => Shield.InTransaction(() =>
+            // we try to keep the reply transaction read-only. but if we do not already have an active gossip state, then
+            // we must set it consistently, to conflict with any possible concurrent reply or StartGossip process.
+            if (!hasActiveState)
             {
-                // reply transactions are kept read-only since they conflict too easily,
-                // and it really makes no difference, whatever we skipped now, we'll see
-                // in the next reply. so we change this only as a side-effect.
                 _gossipStates[server] = new GossipState(
                     msg.ReplyToId, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
-            }));
+            }
+            else
+            {
+                Shield.SideEffect(() => Shield.InTransaction(() =>
+                {
+                    _gossipStates[server] = new GossipState(
+                        msg.ReplyToId, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
+                }));
+            }
             return msg;
         }
 
