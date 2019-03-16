@@ -53,6 +53,8 @@ namespace Shielded.Gossip
         /// <param name="configuration">The configuration.</param>
         public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
         {
+            _compareMethods = new ApplyMethods(this,
+                typeof(ConsistentGossipBackend).GetMethod("CheckOne", BindingFlags.NonPublic | BindingFlags.Instance));
             _wrapped = new GossipBackend(transport, configuration, this);
             Shield.InTransaction(() =>
                 _wrapped.Changed.Subscribe(_wrapped_Changed));
@@ -484,8 +486,7 @@ namespace Shielded.Gossip
                     _fieldBlockers.Remove(key);
         });
 
-        private readonly ApplyMethods _compareMethods = new ApplyMethods(
-            typeof(ConsistentGossipBackend).GetMethod("CheckOne", BindingFlags.NonPublic | BindingFlags.Instance));
+        private readonly ApplyMethods _compareMethods;
 
         private ComplexRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
             where TItem : IMergeable<TItem>
@@ -515,7 +516,7 @@ namespace Shielded.Gossip
                     }
                     else
                     {
-                        var comparer = _compareMethods.Get(this, obj.GetType());
+                        var comparer = _compareMethods.Get(obj.GetType());
                         // what you read must be Greater or Equal to what we have.
                         if ((comparer(read.Key, obj).GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
                         {
@@ -531,7 +532,7 @@ namespace Shielded.Gossip
                 foreach (var change in transaction.Changes)
                 {
                     var obj = change.Value;
-                    var comparer = _compareMethods.Get(this, obj.GetType());
+                    var comparer = _compareMethods.Get(obj.GetType());
                     if (comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs)
                         .GetValueRelationship() != VectorRelationship.Greater)
                     {

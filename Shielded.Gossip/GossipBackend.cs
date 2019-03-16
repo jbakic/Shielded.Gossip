@@ -51,7 +51,8 @@ namespace Shielded.Gossip
             _freshIndex = new ReverseTimeIndex(GetItem);
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
             _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.CleanUpInterval, Configuration.CleanUpInterval);
-
+            _applyMethods = new ApplyMethods(this,
+                typeof(GossipBackend).GetMethod("SetInternal", BindingFlags.Instance | BindingFlags.NonPublic));
             Transport.MessageHandler = Transport_MessageHandler;
         }
 
@@ -288,8 +289,7 @@ namespace Shielded.Gossip
             }
         }
 
-        private readonly ApplyMethods _applyMethods = new ApplyMethods(typeof(GossipBackend)
-            .GetMethod("SetInternal", BindingFlags.Instance | BindingFlags.NonPublic));
+        private readonly ApplyMethods _applyMethods;
 
         private static readonly ShieldedLocal<long> _freshnessContext = new ShieldedLocal<long>();
 
@@ -330,7 +330,7 @@ namespace Shielded.Gossip
                     freshnessUtilized = false;
                 }
                 var obj = item.Value;
-                var method = _applyMethods.Get(this, obj.GetType());
+                var method = _applyMethods.Get(obj.GetType());
                 var itemResult = method(item.Key, obj, item.Deleted, item.Expired, item.ExpiresInMs);
                 freshnessUtilized |= itemResult != ComplexRelationship.Less && itemResult != ComplexRelationship.Equal &&
                     itemResult != ComplexRelationship.EqualButLess;

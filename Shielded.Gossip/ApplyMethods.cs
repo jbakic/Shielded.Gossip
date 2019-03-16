@@ -11,31 +11,33 @@ namespace Shielded.Gossip
 
     /// <summary>
     /// Helper for generic methods of signature:
-    /// VectorRelationship SomeMethod&lt;TItem&gt;(string key, FieldInfo&lt;TItem&gt; value).
+    /// ComplexRelationship SomeMethod&lt;TItem&gt;(string key, FieldInfo&lt;TItem&gt; value).
     /// Produces a delegate which receives an object arg and separate info fields, and
     /// calls the appropriate version of the generic method.
     /// </summary>
     internal class ApplyMethods
     {
-        public ApplyMethods(MethodInfo itemMsgMethod)
+        public ApplyMethods(object self, MethodInfo itemMsgMethod)
         {
+            _self = self;
             _itemMsgMethod = itemMsgMethod;
         }
 
-        public ApplyDelegate Get(object self, Type t)
+        public ApplyDelegate Get(Type t)
         {
-            return _applyDelegates.GetOrAdd(t, _ => CreateSetter(self, t));
+            return _applyDelegates.GetOrAdd(t, CreateSetter);
         }
 
         private readonly ConcurrentDictionary<Type, ApplyDelegate> _applyDelegates = new ConcurrentDictionary<Type, ApplyDelegate>();
+        private readonly object _self;
         private readonly MethodInfo _itemMsgMethod;
 
-        private ApplyDelegate CreateSetter(object self, Type t)
+        private ApplyDelegate CreateSetter(Type t)
         {
             var methodInfo = _itemMsgMethod.MakeGenericMethod(t);
             var genericMethod = typeof(ApplyMethods).GetMethod("CreateSetterGeneric", BindingFlags.NonPublic | BindingFlags.Instance);
             MethodInfo genericHelper = genericMethod.MakeGenericMethod(t);
-            return (ApplyDelegate)genericHelper.Invoke(this, new object[] { self, methodInfo });
+            return (ApplyDelegate)genericHelper.Invoke(this, new object[] { _self, methodInfo });
         }
 
         private ApplyDelegate CreateSetterGeneric<TItem>(object self, MethodInfo setter)
