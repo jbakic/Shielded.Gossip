@@ -2,44 +2,78 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
+using System.Security.Cryptography;
 
 namespace Shielded.Gossip
 {
     /// <summary>
-    /// Type of the hash used by the <see cref="GossipBackend"/>. It contains a 32bit and a
-    /// 64bit FNV1a hash.
+    /// Type of the hash used by the <see cref="GossipBackend"/>. Uses SHA-256.
     /// </summary>
     [DataContract(Namespace = ""), Serializable]
     public struct VersionHash : IEquatable<VersionHash>
     {
         [DataMember]
-        public ulong LongHash { get; set; }
-        [DataMember]
-        public int IntHash { get; set; }
+        public byte[] Data { get; set; }
 
-        public VersionHash(ulong l, int i)
+        public VersionHash(byte[] data)
         {
-            LongHash = l;
-            IntHash = i;
+            if (data != null && data.Length != 32)
+                throw new ArgumentException(nameof(data));
+            Data = data;
         }
 
-        public static VersionHash Hash(IEnumerable<byte[]> fieldsToHash) => Hash(fieldsToHash.ToArray());
-        public static VersionHash Hash(params byte[][] fieldsToHash) =>
-            new VersionHash(
-                FNV1a64.Hash(fieldsToHash),
-                FNV1a32.Hash(fieldsToHash));
+        private static readonly byte[] _delimiter = new byte[] { 0 };
 
-        public bool Equals(VersionHash other) => IntHash == other.IntHash && LongHash == other.LongHash;
+        public static VersionHash Hash(IEnumerable<byte[]> fieldsToHash) => Hash(fieldsToHash.ToArray());
+        public static VersionHash Hash(params byte[][] fieldsToHash)
+        {
+            if (fieldsToHash == null || fieldsToHash.Length == 0)
+                return default;
+            using (var sha = SHA256.Create())
+            {
+                for (var i = 0; i < fieldsToHash.Length; i++)
+                {
+                    var field = fieldsToHash[i];
+                    sha.TransformBlock(field, 0, field.Length, field, 0);
+                    if (i == fieldsToHash.Length - 1)
+                        sha.TransformFinalBlock(_delimiter, 0, _delimiter.Length);
+                    else
+                        sha.TransformBlock(_delimiter, 0, _delimiter.Length, _delimiter, 0);
+                }
+                return new VersionHash(sha.Hash);
+            }
+        }
+
+        public bool Equals(VersionHash other) => Util.IsByteEqual(Data, other.Data);
         public override bool Equals(object obj) => obj is VersionHash vh && Equals(vh);
-        public override int GetHashCode() => unchecked((int)(LongHash >> 32) ^ (int)LongHash ^ IntHash);
-        public override string ToString() => $"{LongHash}, {IntHash}";
+
+        public override int GetHashCode()
+        {
+            if (Data == null)
+                return 0;
+            unchecked
+            {
+                int res = 0;
+                for (int i = 0; i < 8; i++)
+                {
+                    res ^= Data[i * 4] << 24;
+                    res ^= Data[i * 4 + 1] << 16;
+                    res ^= Data[i * 4 + 2] << 8;
+                    res ^= Data[i * 4 + 3];
+                }
+                return res;
+            }
+        }
+
+        public override string ToString() => Data == null ? "" : Convert.ToBase64String(Data);
 
         public static bool operator ==(VersionHash left, VersionHash right) => left.Equals(right);
         public static bool operator !=(VersionHash left, VersionHash right) => !left.Equals(right);
 
         public static VersionHash operator ^(VersionHash left, VersionHash right) =>
-            new VersionHash(left.LongHash ^ right.LongHash, left.IntHash ^ right.IntHash);
-
-        public byte[] GetBytes() => BitConverter.GetBytes(IntHash).Concat(BitConverter.GetBytes(LongHash)).ToArray();
+            new VersionHash(
+                left.Data == null ? right.Data :
+                right.Data == null ? left.Data :
+                left.Data.Zip(right.Data, (a, b) => (byte)(a ^ b)).ToArray());
     }
 }
