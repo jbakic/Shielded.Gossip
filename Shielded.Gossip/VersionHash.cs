@@ -84,7 +84,10 @@ namespace Shielded.Gossip
             if (other.Data == null)
                 return;
             if (Data == null)
+            {
                 Data = other.Data.ToArray();
+                return;
+            }
             for (int i = 0; i < 32; i++)
                 Data[i] ^= other.Data[i];
         }
