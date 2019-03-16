@@ -51,7 +51,7 @@ required semantics. E.g. if you use an external database and have optimistic con
 checks based on an integer column, you can use the simple IntVersioned&lt;T&gt; wrapper,
 which resolves conflicts by simply picking the value with a higher version. There's also
 the Lww&lt;T&gt; wrapper, which pairs a value with the time it was written, and resolves
-conflicts using last-write-wins semantics, and perhaps the strongest is the combination
+conflicts using last-write-wins semantics. And perhaps the strongest is the combination
 of VecVersioned and Multiple wrappers, which add Version Vectors to your types to make
 them proper CRDTs.
 
@@ -119,33 +119,29 @@ need to be kept forever, because if a server has been disconnected from the othe
 time, and the others removed a key, he can revive it when he reconnects.
 
 The library does support removal, but since it has no persistence, it does not maintain any
-tombstones. There are two ways in which a key can be removed.
+tombstones.
 
-One way is by implementing the IDeletable interface on a data type. The idea is that certain
-types can reach a state where it becomes safe to delete them. Once in a version which is safe
-to delete, it will indicate this by the CanDelete property being true. The backend will keep
-it around for some time (default is one minute) to make sure the new removable state is
-communicated to other servers, and then clean it up from it's internal storage. It is
-important that CanDelete be determined solely by the version and state of the object itself,
-so that all servers that have the same value will see the same bool in this property.
-
-For example, the state of a consistent transaction uses this method to get itself cleaned up
-once not needed any more. This is perfectly safe, because if an old transaction is revived
-later, it will simply fail - most notably, because its changes have already been applied,
-so it cannot check out OK again, but there is some more complexity involved. In any case,
-once its failure is determined, it will reliably again become deletable.
-
-Another way to remove is to use the method Remove:
+A key can be removed by using the method Remove:
 
 ```csharp
 backend.Remove("some key");
 ```
 
-Internally, the value under the key keeps the same version, but is marked as deleted. This is
-regarded as a higher version. Like the IDeletable, it will be kept around for one minute by
-default, to communicate the deletion, but what happens if the key gets revived later is up to
-you. You should probably react to Changed events, and check in some external tombstone
-storage whether any newly arriving item may be kept, and immediately remove it again if not.
+Another option is to implement the IDeletable interface on a type. The idea is that certain
+types can reach a state where it becomes safe to delete them, which they indicate by the CanDelete
+property being true. It is important that CanDelete be determined solely by the version and state
+of the object itself, so that all servers that have the same value will see the same bool in this
+property.
+
+The backend will internally keep deleted values around for some time (default is one minute) to
+make sure the new state is communicated to other servers. The value under the key keeps the same
+version, but is marked as deleted. This is regarded as a higher version, so you won't be able
+to re-add the same version of data back, at least as long as the server internally remembers the
+removed version.
+
+What happens if a removed key gets revived later is up to you. You should probably react to Changed
+events, and check in some external tombstone storage whether any newly arriving item may be kept,
+and immediately remove it again if not.
 
 ## Expiry
 
