@@ -42,7 +42,9 @@ namespace Shielded.Gossip
                 _open = false;
             }
 
-            public bool IsDefault => _currentItemGetter == null;
+            public bool IsOpen => _open;
+
+            public bool IsDone => _current == null;
 
             public ReverseTimeIndexItem Current =>
                 !_open ? throw new InvalidOperationException("MoveNext not called yet.") :

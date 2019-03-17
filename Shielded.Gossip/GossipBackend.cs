@@ -225,7 +225,7 @@ namespace Shielded.Gossip
                 From = Transport.OwnId,
                 DatabaseHash = _freshIndex.DatabaseHash,
                 Items = toSend.Length == 0 ? null : toSend,
-                WindowStart = toSend.Length == 0 || newWindowStart.IsDefault ? 0 : newWindowStart.Current.Freshness,
+                WindowStart = toSend.Length == 0 || newWindowStart.IsDone ? 0 : newWindowStart.Current.Freshness,
                 WindowEnd = toSend.Length == 0 ? _freshIndex.LastFreshness : toSend[0].Freshness,
                 ReplyToId = lastReceivedId,
             };
@@ -389,7 +389,7 @@ namespace Shielded.Gossip
 
             // so, he's replying. this is just a safety check, to see if the windows match. they will.
             var ourLastStart = hisReply?.LastWindowStart ?? 0;
-            if (ourLastStart > 0 && ourLastStart != (state.LastWindowStart.IsDefault ? 0 : state.LastWindowStart.Current.Freshness))
+            if (ourLastStart > 0 && ourLastStart != (state.LastWindowStart.IsDone ? 0 : state.LastWindowStart.Current.Freshness))
                 throw new ApplicationException("Reply chain logic failure.");
 
             // OK, everything checks out
@@ -458,7 +458,7 @@ namespace Shielded.Gossip
                     }, newStartEnumerator, currentState?.LastPackageSize ?? 0, currentState != null);
             }
 
-            var windowStart = newStartEnumerator.IsDefault ? 0 : newStartEnumerator.Current.Freshness;
+            var windowStart = newStartEnumerator.IsDone ? 0 : newStartEnumerator.Current.Freshness;
             var windowEnd = _freshIndex.LastFreshness;
             return PrepareReply(server, new GossipReply
             {
@@ -518,70 +518,63 @@ namespace Shielded.Gossip
         {
             if (packageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(packageSize), "The size of an anti-entropy package must be greater than zero.");
-            int cutoff = Configuration.AntiEntropyCutoff;
-            ReverseTimeIndex.Enumerator prevFreshnessStart = default;
+
             var result = new List<MessageItem>();
-
             newWindowStart = _freshIndex.GetCloneableEnumerator();
-            while (newWindowStart.MoveNext())
+            // first, if we have a last window, fetch all the new items that happened after lastWindowEnd.
+            if (lastWindowEnd != null)
             {
-                var item = newWindowStart.Current;
-                if (item.Freshness <= lastWindowEnd)
-                    break;
-                if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
-                {
-                    if (result.Count >= cutoff || (lastWindowEnd == null && result.Count >= packageSize))
-                        return result.ToArray();
-                    prevFreshnessStart = newWindowStart;
-                }
-                if (keysToIgnore == null || item.Freshness > ignoreUpToFreshness.Value || !keysToIgnore.Contains(item.Item.Key))
-                {
-                    if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
-                    {
-                        newWindowStart = prevFreshnessStart;
-                        var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
-                        result.RemoveRange(index, result.Count - index);
-                        return result.ToArray();
-                    }
-                    result.Add(item.Item);
-                }
+                if (!AddPackagePart(result, ref newWindowStart, lastWindowEnd, null, ignoreUpToFreshness, keysToIgnore))
+                    return result.ToArray();
+
+                // and then prepare to continue where we left off last time
+                newWindowStart = lastWindowStart;
+                if (newWindowStart.IsDone)
+                    return result.ToArray();
+                // last time we iterated this one, we stopped without adding the current item. let's see if that item is still up to date.
+                if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
+                    return result.ToArray();
             }
 
-            newWindowStart = lastWindowStart;
-            if (newWindowStart.IsDefault)
-                return result.ToArray();
+            // and now, the (next) package of old items
+            AddPackagePart(result, ref newWindowStart, null, packageSize, ignoreUpToFreshness, keysToIgnore);
+            return result.ToArray();
+        }
 
-            // last time we iterated this one, we stopped without adding the current item. so this
-            // will be a do/while. but first, let's see if that item is still up to date.
-            if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
-            {
-                newWindowStart = default;
-                return result.ToArray();
-            }
+        // returns true if it added everything - either it reached stopAtFreshness, or it exhausted the enumerator.
+        private bool AddPackagePart(List<MessageItem> result, ref ReverseTimeIndex.Enumerator enumerator,
+            long? stopAtFreshness, int? packageSize, long? ignoreUpToFreshness, HashSet<string> keysToIgnore)
+        {
+            ReverseTimeIndex.Enumerator prevFreshnessStart = default;
+            int cutoff = Configuration.AntiEntropyCutoff;
+
+            if (!enumerator.IsOpen && !enumerator.MoveNext())
+                return true;
             do
             {
-                var item = newWindowStart.Current;
-                if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
+                var item = enumerator.Current;
+                if (item.Freshness <= stopAtFreshness)
+                    return true;
+                if (prevFreshnessStart.IsDone || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
                     if (result.Count >= cutoff || result.Count >= packageSize)
-                        return result.ToArray();
-                    prevFreshnessStart = newWindowStart;
+                        return false;
+                    prevFreshnessStart = enumerator;
                 }
                 if (keysToIgnore == null || item.Freshness > ignoreUpToFreshness.Value || !keysToIgnore.Contains(item.Item.Key))
                 {
-                    if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
+                    if (result.Count == cutoff && !prevFreshnessStart.IsDone)
                     {
-                        newWindowStart = prevFreshnessStart;
+                        enumerator = prevFreshnessStart;
                         var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
                         result.RemoveRange(index, result.Count - index);
-                        return result.ToArray();
+                        return false;
                     }
                     result.Add(item.Item);
                 }
-            } while (newWindowStart.MoveNext());
-
-            newWindowStart = default;
-            return result.ToArray();
+            }
+            while (enumerator.MoveNext());
+            return true;
         }
 
         /// <summary>
