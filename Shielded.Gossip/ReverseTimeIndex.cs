@@ -9,13 +9,11 @@ namespace Shielded.Gossip
     {
         public readonly long Freshness;
         public readonly MessageItem Item;
-        public readonly VersionHash HashEffect;
 
-        public ReverseTimeIndexItem(long freshness, MessageItem item, VersionHash hashEffect)
+        public ReverseTimeIndexItem(long freshness, MessageItem item)
         {
             Freshness = freshness;
             Item = item;
-            HashEffect = hashEffect;
         }
     }
 
@@ -25,7 +23,6 @@ namespace Shielded.Gossip
         {
             public MessageItem Item;
             public long Freshness;
-            public VersionHash HashEffect;
             public ListElement Previous;
         }
 
@@ -50,7 +47,7 @@ namespace Shielded.Gossip
             public ReverseTimeIndexItem Current =>
                 !_open ? throw new InvalidOperationException("MoveNext not called yet.") :
                 _current == null ? throw new InvalidOperationException("Enumeration already completed.") :
-                new ReverseTimeIndexItem(_current.Freshness, _current.Item, _current.HashEffect);
+                new ReverseTimeIndexItem(_current.Freshness, _current.Item);
 
             object IEnumerator.Current => ((IEnumerator<ReverseTimeIndexItem>)this).Current;
 
@@ -127,15 +124,10 @@ namespace Shielded.Gossip
             if (currFx.ToAppend.TryGetValue(item.Key, out var oldElem))
             {
                 oldElem.Item = item;
-                oldElem.HashEffect ^= hashEffect;
             }
             else
             {
-                currFx.ToAppend[item.Key] = new ListElement
-                {
-                    Item = item,
-                    HashEffect = hashEffect,
-                };
+                currFx.ToAppend[item.Key] = new ListElement { Item = item };
             }
         }
 

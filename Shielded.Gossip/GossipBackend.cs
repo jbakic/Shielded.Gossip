@@ -219,7 +219,7 @@ namespace Shielded.Gossip
             if (IsGossipActive(server))
                 return false;
             var lastReceivedId = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedMsgId : null;
-            var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, null, out var newWindowStart, out var _);
+            var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
             var msg = new GossipStart
             {
                 From = Transport.OwnId,
@@ -433,7 +433,7 @@ namespace Shielded.Gossip
                     Math.Min(Configuration.AntiEntropyCutoff, currentState.LastPackageSize * 2));
             var toSend = GetPackage(packageSize,
                 lastWindowStart > 0 ? currentState.LastWindowStart : default, lastWindowEnd,
-                replyTo.DatabaseHash, ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator, out var historyMatch);
+                ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
 
             if (toSend.Length == 0)
             {
@@ -452,7 +452,7 @@ namespace Shielded.Gossip
                         Items = null,
                         WindowStart = 0,
                         WindowEnd = _freshIndex.LastFreshness,
-                        LastWindowStart = historyMatch ? 0 : hisNews.WindowStart,
+                        LastWindowStart = hisNews.WindowStart,
                         LastWindowEnd = hisNews.WindowEnd,
                         ReplyToId = replyTo.MessageId,
                     }, newStartEnumerator, currentState?.LastPackageSize ?? 0, currentState != null);
@@ -467,7 +467,7 @@ namespace Shielded.Gossip
                 Items = toSend,
                 WindowStart = windowStart,
                 WindowEnd = windowEnd,
-                LastWindowStart = historyMatch ? 0 : hisNews?.WindowStart ?? 0,
+                LastWindowStart = hisNews?.WindowStart ?? 0,
                 LastWindowEnd = (hisNews?.WindowEnd ?? hisEnd?.WindowEnd).Value,
                 ReplyToId = replyTo.MessageId,
             }, newStartEnumerator, packageSize, currentState != null);
@@ -514,18 +514,14 @@ namespace Shielded.Gossip
         }
 
         private MessageItem[] GetPackage(int packageSize, ReverseTimeIndex.Enumerator lastWindowStart, long? lastWindowEnd,
-            VersionHash? hisHash, long? ignoreUpToFreshness, HashSet<string> keysToIgnore,
-            out ReverseTimeIndex.Enumerator newWindowStart, out bool historyMatch)
+            long? ignoreUpToFreshness, HashSet<string> keysToIgnore, out ReverseTimeIndex.Enumerator newWindowStart)
         {
             if (packageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(packageSize), "The size of an anti-entropy package must be greater than zero.");
             int cutoff = Configuration.AntiEntropyCutoff;
             ReverseTimeIndex.Enumerator prevFreshnessStart = default;
             var result = new List<MessageItem>();
-            var expectedHash = hisHash == null ? (VersionHash?)null : new VersionHash(hisHash.Value.Data?.ToArray());
-            var ourHash = _freshIndex.DatabaseHash;
 
-            historyMatch = false;
             newWindowStart = _freshIndex.GetCloneableEnumerator();
             while (newWindowStart.MoveNext())
             {
@@ -534,11 +530,6 @@ namespace Shielded.Gossip
                     break;
                 if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
-                    if (historyMatch = expectedHash == ourHash)
-                    {
-                        newWindowStart = default;
-                        return result.ToArray();
-                    }
                     if (result.Count >= cutoff || (lastWindowEnd == null && result.Count >= packageSize))
                         return result.ToArray();
                     prevFreshnessStart = newWindowStart;
@@ -553,12 +544,10 @@ namespace Shielded.Gossip
                         return result.ToArray();
                     }
                     result.Add(item.Item);
-                    if (expectedHash != null)
-                        expectedHash.Value.XorWith(item.HashEffect);
                 }
             }
 
-            newWindowStart = (historyMatch = expectedHash == ourHash) ? default : lastWindowStart;
+            newWindowStart = lastWindowStart;
             if (newWindowStart.IsDefault)
                 return result.ToArray();
 
@@ -574,11 +563,6 @@ namespace Shielded.Gossip
                 var item = newWindowStart.Current;
                 if (prevFreshnessStart.IsDefault || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
-                    if (historyMatch = expectedHash == ourHash)
-                    {
-                        newWindowStart = default;
-                        return result.ToArray();
-                    }
                     if (result.Count >= cutoff || result.Count >= packageSize)
                         return result.ToArray();
                     prevFreshnessStart = newWindowStart;
@@ -593,8 +577,6 @@ namespace Shielded.Gossip
                         return result.ToArray();
                     }
                     result.Add(item.Item);
-                    if (expectedHash != null)
-                        expectedHash.Value.XorWith(item.HashEffect);
                 }
             } while (newWindowStart.MoveNext());
 
