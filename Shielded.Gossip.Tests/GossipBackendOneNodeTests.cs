@@ -163,7 +163,7 @@ namespace Shielded.Gossip.Tests
             Shield.InTransaction(() => { _backend.SetHasVec("key", testEntity); });
 
             // clean-up is every 200 ms, so this is enough.
-            Thread.Sleep(500);
+            Thread.Sleep(300);
 
             var read = Shield.InTransaction(() => _backend.TryGetHasVec<TestClass>("key").Single());
             Assert.AreEqual(testEntity.Id, read.Id);
@@ -172,7 +172,7 @@ namespace Shielded.Gossip.Tests
             testEntity.Version = testEntity.Version.Next(_backend.Transport.OwnId);
             Shield.InTransaction(() => { _backend.SetHasVec("key", testEntity); });
 
-            Thread.Sleep(500);
+            Thread.Sleep(300);
 
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Multiple<TestClass> _)));
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGetHasVec<TestClass>("key").Any()));
@@ -186,7 +186,7 @@ namespace Shielded.Gossip.Tests
             Shield.InTransaction(() => { _backend.Set("key", testEntity.Lww()); });
 
             // also checking IDeletable impl...
-            Thread.Sleep(500);
+            Thread.Sleep(300);
 
             var read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.AreEqual(testEntity.Name, read.Value.Name);
@@ -202,7 +202,7 @@ namespace Shielded.Gossip.Tests
             next.Value.CanDelete = true;
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
-            Thread.Sleep(500);
+            Thread.Sleep(300);
 
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Lww<TestClass> _)));
             read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
@@ -219,7 +219,7 @@ namespace Shielded.Gossip.Tests
             Shield.InTransaction(() => { _backend.Set("key", testEntity.Version(1)); });
 
             // also checking IDeletable impl...
-            Thread.Sleep(500);
+            Thread.Sleep(300);
 
             var read = Shield.InTransaction(() => _backend.TryGetIntVersioned<TestClass>("key"));
             Assert.AreEqual(testEntity.Name, read.Value.Name);
@@ -235,7 +235,7 @@ namespace Shielded.Gossip.Tests
             next.Value.CanDelete = true;
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
-            Thread.Sleep(500);
+            Thread.Sleep(300);
 
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out IntVersioned<TestClass> _)));
             read = Shield.InTransaction(() => _backend.TryGetIntVersioned<TestClass>("key"));

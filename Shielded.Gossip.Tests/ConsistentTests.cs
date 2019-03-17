@@ -140,8 +140,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void Consistent_Race()
         {
-            const int transactions = 500;
-            const int fieldCount = 50;
+            const int transactions = 1000;
+            const int fieldCount = 100;
 
             foreach (var back in _backends.Values)
             {
