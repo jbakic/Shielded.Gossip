@@ -67,14 +67,13 @@ namespace Shielded.Gossip
                     if (!lockTaken)
                         return;
                     var currTickCount = Environment.TickCount;
-                    var (toRemove, freshness) = Shield.InTransaction(() =>
-                        (_freshIndex
+                    var toRemove = Shield.InTransaction(() =>
+                        _freshIndex
                             .Where(i => i.Item.RemovableSince.HasValue
                                 ? unchecked(currTickCount - i.Item.RemovableSince.Value) > Configuration.RemovableItemLingerMs
                                 : i.Item.ExpiresInMs <= 0)
                             .Select(i => i.Item)
-                            .ToArray(),
-                        _freshIndex.LastFreshness));
+                            .ToArray());
                     Shield.InTransaction(() =>
                     {
                         foreach (var item in toRemove)
@@ -584,16 +583,19 @@ namespace Shielded.Gossip
                         return result.ToArray();
                     prevFreshnessStart = newWindowStart;
                 }
-                if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
+                if (keysToIgnore == null || item.Freshness > ignoreUpToFreshness.Value || !keysToIgnore.Contains(item.Item.Key))
                 {
-                    newWindowStart = prevFreshnessStart;
-                    var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
-                    result.RemoveRange(index, result.Count - index);
-                    return result.ToArray();
+                    if (result.Count == cutoff && !prevFreshnessStart.IsDefault)
+                    {
+                        newWindowStart = prevFreshnessStart;
+                        var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
+                        result.RemoveRange(index, result.Count - index);
+                        return result.ToArray();
+                    }
+                    result.Add(item.Item);
+                    if (expectedHash != null)
+                        expectedHash.Value.XorWith(item.HashEffect);
                 }
-                result.Add(item.Item);
-                if (expectedHash != null)
-                    expectedHash.Value.XorWith(item.HashEffect);
             } while (newWindowStart.MoveNext());
 
             newWindowStart = default;

@@ -27,8 +27,8 @@ namespace Shielded.Gossip
                 throw new ArgumentNullException(nameof(value));
             Value = value;
             Deleted = deleted || value is IDeletable del && del.CanDelete;
-            Expired = expired;
-            ExpiresInMs = expiresInMs;
+            Expired = !Deleted && expired;
+            ExpiresInMs = Deleted ? null : expiresInMs;
         }
 
         public FieldInfo(MessageItem item)
@@ -37,8 +37,8 @@ namespace Shielded.Gossip
                 throw new ArgumentNullException(nameof(item));
             Value = (T)item.Value;
             Deleted = item.Deleted || Value is IDeletable del && del.CanDelete;
-            Expired = item.Expired;
-            ExpiresInMs = item.ExpiresInMs;
+            Expired = !Deleted && item.Expired;
+            ExpiresInMs = Deleted ? null : item.ExpiresInMs;
         }
 
         // this is one long signature...
@@ -71,6 +71,8 @@ namespace Shielded.Gossip
             if (cmp != VectorRelationship.Equal)
                 return (ComplexRelationship)cmp;
 
+            if (Deleted && other.Deleted)
+                return ComplexRelationship.Equal;
             if (Deleted && !other.Deleted)
                 return ComplexRelationship.Greater;
             if (!Deleted && other.Deleted)
