@@ -24,22 +24,24 @@ namespace Shielded.Gossip
 
         private static readonly byte[] _delimiter = new byte[] { 0 };
 
-        public static VersionHash Hash(IEnumerable<byte[]> fieldsToHash) => Hash(fieldsToHash.ToArray());
-        public static VersionHash Hash(params byte[][] fieldsToHash)
+        public static VersionHash Hash(IEnumerable<byte[]> fieldsToHash)
         {
-            if (fieldsToHash == null || fieldsToHash.Length == 0)
+            if (fieldsToHash == null)
                 return default;
             using (var sha = SHA256.Create())
             {
-                for (var i = 0; i < fieldsToHash.Length; i++)
+                bool doneFirst = false;
+                foreach (var field in fieldsToHash)
                 {
-                    var field = fieldsToHash[i];
-                    sha.TransformBlock(field, 0, field.Length, field, 0);
-                    if (i == fieldsToHash.Length - 1)
-                        sha.TransformFinalBlock(_delimiter, 0, _delimiter.Length);
-                    else
+                    if (doneFirst)
                         sha.TransformBlock(_delimiter, 0, _delimiter.Length, _delimiter, 0);
+                    else
+                        doneFirst = true;
+                    sha.TransformBlock(field, 0, field.Length, field, 0);
                 }
+                if (!doneFirst)
+                    return default;
+                sha.TransformFinalBlock(_delimiter, 0, _delimiter.Length);
                 return new VersionHash(sha.Hash);
             }
         }

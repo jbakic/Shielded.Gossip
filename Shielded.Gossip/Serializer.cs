@@ -58,7 +58,7 @@ namespace Shielded.Gossip
             {
                 var type = msg.GetType();
                 var ser = new DataContractSerializer(type);
-                var typeName = TypeId.Get(type);
+                var typeName = TypeId.GetId(type);
                 var nameBytes = Encoding.UTF8.GetBytes(typeName);
                 var lengthBytes = BitConverter.GetBytes(nameBytes.Length);
                 using (var ms = new MemoryStream())
@@ -74,7 +74,7 @@ namespace Shielded.Gossip
             {
                 var nameLength = BitConverter.ToInt32(bytes, 0);
                 var name = Encoding.UTF8.GetString(bytes, 4, nameLength);
-                var type = Type.GetType(name);
+                var type = TypeId.GetType(name);
                 if (type == null)
                     throw new ApplicationException("Unable to read message type: " + name);
                 var spent = 4 + nameLength;
