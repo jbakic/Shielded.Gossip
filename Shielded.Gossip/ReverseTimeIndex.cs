@@ -105,7 +105,6 @@ namespace Shielded.Gossip
         private class CurrentTransactionEffects
         {
             public readonly Dictionary<string, ListElement> ToAppend = new Dictionary<string, ListElement>();
-            public VersionHash HashEffect;
         }
 
         private readonly ShieldedLocal<CurrentTransactionEffects> _currFx = new ShieldedLocal<CurrentTransactionEffects>();
@@ -119,10 +118,9 @@ namespace Shielded.Gossip
             {
                 _currFx.Value = currFx = new CurrentTransactionEffects();
                 _listHead.Commute(AppendCommute);
-                _databaseHash.Commute((ref VersionHash h) => h ^= currFx.HashEffect);
             }
 
-            currFx.HashEffect ^= hashEffect;
+            _databaseHash.Commute((ref VersionHash h) => h ^= hashEffect);
             if (currFx.ToAppend.TryGetValue(item.Key, out var oldElem))
             {
                 oldElem.Item = item;
