@@ -81,7 +81,7 @@ namespace Shielded.Gossip.Tests
                     }));
                 });
 
-                Assert.AreEqual(VectorRelationship.Less, backend.Set("key", "failed write".Version(5), 100));
+                Assert.AreEqual(VectorRelationship.Less, backend.Set("key", "failed write".Version(5)));
 
                 var resWithInfo = backend.TryGetWithInfo<IntVersioned<string>>("key");
 
@@ -98,10 +98,10 @@ namespace Shielded.Gossip.Tests
                 Shield.InTransaction(() => backend.KeyMissing.Subscribe(Provider));
 
                 // this will still fail, because of the KeyMissing event restoring the tombstone.
-                Assert.AreEqual(VectorRelationship.Less, backend.Set("key", "failed write".Version(5), 100));
+                Assert.AreEqual(VectorRelationship.Less, backend.Set("key", "failed write".Version(5)));
 
                 // but this will work
-                Assert.AreEqual(VectorRelationship.Greater, backend.Set("key", "successful write".Version(8), 100));
+                Assert.AreEqual(VectorRelationship.Greater, backend.Set("key", "successful write".Version(8)));
 
                 resWithInfo = backend.TryGetWithInfo<IntVersioned<string>>("key");
 
