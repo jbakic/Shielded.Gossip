@@ -153,6 +153,29 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void Expiry_CrossServerConsistentExpiryChange()
+        {
+            _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1))).Wait();
+
+            Thread.Sleep(50);
+            _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1), 100)).Wait();
+
+            Thread.Sleep(50);
+            Assert.IsTrue(_backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<bool>("test"))
+                .Result.Value.Single().Value);
+
+            // we can also extend the expiry by a consistent transaction. due to compare precision, we must use 200 now.
+            _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1), 200)).Wait();
+
+            Thread.Sleep(100);
+            Assert.IsTrue(_backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<bool>("test"))
+                .Result.Value.Single().Value);
+
+            Thread.Sleep(150);
+            Assert.IsFalse(_backends[B].TryGetVecVersioned<bool>("test").Any());
+        }
+
+        [TestMethod]
         public void Expiry_DeleteByExpiry()
         {
             _backends[A].RunConsistent(() => _backends[A].SetHasVec("test", true.Version(A, 1))).Wait();

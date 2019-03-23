@@ -151,17 +151,18 @@ namespace Shielded.Gossip
             {
                 var (mergedValue, cmp) = new FieldInfo<TItem>(val, expireInMs)
                     .MergeWith(oldValue, Configuration.ExpiryComparePrecision);
-                var valueCmp = cmp.GetValueRelationship();
-                if (valueCmp == VectorRelationship.Less || valueCmp == VectorRelationship.Equal)
-                    return valueCmp;
+                if (cmp == ComplexRelationship.Less || cmp == ComplexRelationship.Equal || cmp == ComplexRelationship.EqualButLess)
+                    return cmp.GetValueRelationship();
                 local[key] = new MessageItem
                 {
                     Key = key,
                     Value = mergedValue.Value,
                     Deleted = mergedValue.Deleted,
+                    Expired = mergedValue.Expired,
                     ExpiresInMs = mergedValue.ExpiresInMs,
                 };
-                OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
+                if (cmp.GetValueRelationship() != VectorRelationship.Equal)
+                    OnChanged(key, oldValue.Value, mergedValue.Value, mergedValue.Deleted);
                 return cmp.GetValueRelationship();
             }
             else
