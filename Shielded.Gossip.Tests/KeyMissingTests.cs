@@ -102,7 +102,7 @@ namespace Shielded.Gossip.Tests
                 Assert.IsTrue(resWithInfo.Deleted);
 
                 // enough time for a full clean-up of the key
-                Thread.Sleep(200);
+                Thread.Sleep(400);
 
                 // confirm clean-up
                 Shield.InTransaction(() => backend.KeyMissing.Unsubscribe(Provider));
