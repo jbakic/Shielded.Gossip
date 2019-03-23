@@ -63,8 +63,7 @@ namespace Shielded.Gossip
         /// An enumerable of all keys involved in the transaction, reads and writes.
         /// </summary>
         public IEnumerable<string> AllKeys =>
-            (Reads?.Select(r => r.Key) ?? Enumerable.Empty<string>())
-            .Concat(Changes?.Select(w => w.Key) ?? Enumerable.Empty<string>());
+            Reads?.Select(r => r.Key) ?? Enumerable.Empty<string>();
 
         private IEnumerable<TransactionState> VotingStates =>
             (InitiatorVotes ? State : State.Without(Initiator)).Select(vi => vi.Value);

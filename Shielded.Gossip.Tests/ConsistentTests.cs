@@ -52,6 +52,26 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void Consistent_AddAndRemove()
+        {
+            var testEntity = new TestClass { Id = 1, Name = "One" };
+
+            Assert.IsTrue(_backends[A].RunConsistent(() =>
+            {
+                _backends[A].SetHasVec("key", testEntity.Version(A));
+                _backends[A].Remove("key");
+            }).Result);
+
+            CheckProtocols();
+
+            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
+                .Result;
+
+            Assert.IsTrue(success);
+            Assert.IsFalse(multi.Any());
+        }
+
+        [TestMethod]
         public void Consistent_SingleNode()
         {
             Shield.InTransaction(() =>

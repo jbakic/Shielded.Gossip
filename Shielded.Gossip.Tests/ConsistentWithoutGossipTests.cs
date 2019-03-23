@@ -119,6 +119,43 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void ConsistentWithoutGossip_WriteTwoVersions()
+        {
+            // we'll set a version on two servers, but only locally. the A server will try to run a
+            // transaction and B and C should reject it. however, A will write two versions of the data,
+            // which will be only IntVersioned, so it might seem as if A's write should win! This was
+            // an issue due to not remembering what state a field had at transaction start, but rather
+            // just sending the written value.
+            _backends[B].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[B].Set("key", "rejected".Version(1));
+            });
+            _backends[B].Configuration.DirectMail = DirectMailType.GossipSupressed;
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[C].Set("key", "rejected".Version(1));
+            });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
+
+            Assert.IsFalse(_backends[A].RunConsistent(() =>
+            {
+                _backends[A].Set("key", "first".Version(1));
+                Assert.AreEqual(VectorRelationship.Greater, _backends[A].Set("key", "second".Version(2)));
+            }, 1).Result);
+
+            CheckProtocols();
+
+            // the A server should now see the other version.
+            var read = _backends[A].RunConsistent(() => _backends[A].TryGetIntVersioned<string>("key"))
+                .Result.Value;
+
+            Assert.AreEqual("rejected", read.Value);
+            Assert.AreEqual(1, read.Version);
+        }
+
+        [TestMethod]
         public void ConsistentWithoutGossip_TouchInconsistent()
         {
             // we will test if the Touch method will transmit the value known only to C to other servers.

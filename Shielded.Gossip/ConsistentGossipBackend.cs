@@ -224,6 +224,8 @@ namespace Shielded.Gossip
                 Data = oldItem.Data,
                 Deleted = true,
             };
+            if (oldItem.Expired || oldItem.ExpiresInMs <= 0)
+                return false;
             var val = oldItem.Value;
             OnChanged(key, val, val, true);
             return true;
@@ -327,14 +329,14 @@ namespace Shielded.Gossip
                         {
                             var transParticipants = TransactionParticipants?.ToArray() ?? Transport.Servers;
                             var exceptMe = transParticipants.Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId));
+                            var reads = _wrapped.Reads.ToArray();
                             transaction = new TransactionInfo
                             {
                                 Initiator = Transport.OwnId,
                                 InitiatorVotes = TransactionParticipants == null ||
                                     transParticipants.Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase),
-                                Reads = _wrapped.Reads
-                                    .Where(key => !ourChanges.ContainsKey(key))
-                                    .Select(key => _wrapped.GetActiveItem(key) ?? new MessageItem { Key = key })
+                                Reads = reads
+                                    .Select(key => _wrapped.GetItem(key) ?? new MessageItem { Key = key })
                                     .ToArray(),
                                 Changes = ourChanges.Values.ToArray(),
                                 State = new TransactionVector(
@@ -343,7 +345,7 @@ namespace Shielded.Gossip
                                     .ToArray()),
                             };
                             ourState = new BackendState(WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString()),
-                                Transport.OwnId, this, transaction.AllKeys.ToArray());
+                                Transport.OwnId, this, reads);
 
                             Shield.SideEffect(() => Commit(ourState), () => Fail(ourState));
                         }
@@ -493,7 +495,7 @@ namespace Shielded.Gossip
         {
             var curr = _wrapped.TryGetWithInfo<TItem>(key);
             if (curr == null)
-                return value.Deleted ? ComplexRelationship.Equal : ComplexRelationship.Greater;
+                return value.Deleted || value.Expired ? ComplexRelationship.Equal : ComplexRelationship.Greater;
             return value.VectorCompare(curr, Configuration.ExpiryComparePrecision);
         }
 
@@ -533,8 +535,10 @@ namespace Shielded.Gossip
                 {
                     var obj = change.Value;
                     var comparer = _compareMethods.Get(obj.GetType());
-                    if (comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs)
-                        .GetValueRelationship() != VectorRelationship.Greater)
+                    // the same for writes - because e.g. if you add and remove a key that did not exist, your write's effect on
+                    // other servers will be Equal. this is also OK.
+                    if ((comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs)
+                        .GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
                     {
                         if (initiatedLocally)
                             return false;
