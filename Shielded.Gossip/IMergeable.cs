@@ -3,7 +3,7 @@
 namespace Shielded.Gossip
 {
     /// <summary>
-    /// Base interface of <see cref="IMergeable{TIn, TOut}"/>, used for providing access to
+    /// Base interface of <see cref="IMergeable{T}"/>, used for providing access to
     /// the version bytes used for the DB hash, without having to know which mergeable type
     /// we're dealing with - this is non-generic.
     /// </summary>

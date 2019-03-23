@@ -283,9 +283,16 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Fired after any key changes.
+        /// Fired after any key changes. Does not fire within consistent transactions, but only when
+        /// and if they commit their changes.
         /// </summary>
-        public readonly ShieldedEvent<ChangedEventArgs> Changed = new ShieldedEvent<ChangedEventArgs>();
+        public ShieldedEvent<ChangedEventArgs> Changed { get; } = new ShieldedEvent<ChangedEventArgs>();
+
+        /// <summary>
+        /// Fired when accessing a key that has no value or has expired. Handlers can specify a value to use,
+        /// which will be saved in the backend and returned to the original reader.
+        /// </summary>
+        public ShieldedEvent<KeyMissingEventArgs> KeyMissing => _wrapped.KeyMissing;
 
         private readonly ShieldedDictNc<string, BackendState> _transactions = new ShieldedDictNc<string, BackendState>();
         private readonly ShieldedDictNc<string, BackendState> _fieldBlockers = new ShieldedDictNc<string, BackendState>();

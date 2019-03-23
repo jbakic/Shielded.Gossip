@@ -35,6 +35,17 @@
         /// field will be transmitted as well, even if you did not change its value.
         /// </summary>
         void Touch(string key);
+
+        /// <summary>
+        /// Fired after any key changes.
+        /// </summary>
+        ShieldedEvent<ChangedEventArgs> Changed { get; }
+
+        /// <summary>
+        /// Fired when accessing a key that has no value or has expired. Handlers can specify a value to use,
+        /// which will be saved in the backend and returned to the original reader.
+        /// </summary>
+        ShieldedEvent<KeyMissingEventArgs> KeyMissing { get; }
     }
 
     public static class GossipBackendExtensions

@@ -596,22 +596,42 @@ namespace Shielded.Gossip
         /// Try to read the value under the given key. Will return deleted and expired values as well,
         /// in case they are still present in the storage for communicating the removal to other servers.
         /// </summary>
-        public FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>
+        public FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem> => Shield.InTransaction(() =>
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException(nameof(key));
             var mi = GetItem(key);
             return mi == null ? null : new FieldInfo<TItem>(mi);
-        }
+        });
 
-        internal MessageItem GetItem(string key)
+        internal MessageItem GetItem(string key) => Shield.InTransaction(() =>
         {
-            return _local.TryGetValue(key, out MessageItem i) ? i : null;
-        }
+            // expired items might be refetched by the KeyMissing event, so we do not consider those definitive.
+            if (_local.TryGetValue(key, out MessageItem mi) && !(mi.Expired || mi.ExpiresInMs <= 0))
+                return mi;
+
+            var (val, deleted, expInMs) = OnKeyMissing(key);
+            if (val == null)
+                return mi;
+            if (!deleted)
+                deleted = val is IDeletable del && del.CanDelete;
+            mi = new MessageItem
+            {
+                Key = key,
+                Value = val,
+                Deleted = deleted,
+                ExpiresInMs = deleted ? null : expInMs,
+                FreshnessOffset = _freshnessContext.GetValueOrDefault(),
+            };
+            _local[key] = mi;
+            _freshIndex.Append(mi, GetHash(key, val));
+            return mi;
+        });
 
         internal MessageItem GetActiveItem(string key)
         {
-            return _local.TryGetValue(key, out MessageItem i) && !i.Deleted && !i.Expired && !(i.ExpiresInMs <= 0) ? i : null;
+            var i = GetItem(key);
+            return i != null && !i.Deleted && !i.Expired && !(i.ExpiresInMs <= 0) ? i : null;
         }
 
         private VersionHash GetHash(string key, IHasVersionBytes i)
@@ -630,7 +650,8 @@ namespace Shielded.Gossip
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException(nameof(key));
-            if (!_local.TryGetValue(key, out var mi))
+            var mi = GetItem(key);
+            if (mi == null)
                 return;
             var newItem = new MessageItem
             {
@@ -685,7 +706,8 @@ namespace Shielded.Gossip
                 throw new ArgumentNullException(nameof(key));
             if (value == null)
                 throw new ArgumentNullException(nameof(value));
-            if (_local.TryGetValue(key, out var oldItem))
+            var oldItem = GetItem(key);
+            if (oldItem != null)
             {
                 var oldValue = new FieldInfo<TItem>(oldItem);
                 var oldHash = oldItem.Deleted || oldItem.Expired ? default : GetHash(key, oldValue.Value);
@@ -776,7 +798,20 @@ namespace Shielded.Gossip
         /// <summary>
         /// Fired after any key changes.
         /// </summary>
-        public readonly ShieldedEvent<ChangedEventArgs> Changed = new ShieldedEvent<ChangedEventArgs>();
+        public ShieldedEvent<ChangedEventArgs> Changed { get; } = new ShieldedEvent<ChangedEventArgs>();
+
+        private (IHasVersionBytes ValueToUse, bool Deleted, int? ExpiresInMs) OnKeyMissing(string key)
+        {
+            var ev = new KeyMissingEventArgs(key);
+            KeyMissing.Raise(this, ev);
+            return (ev.ValueToUse, ev.ValueDeleted, ev.ExpiresInMs);
+        }
+
+        /// <summary>
+        /// Fired when accessing a key that has no value or has expired. Handlers can specify a value to use,
+        /// which will be saved in the backend and returned to the original reader.
+        /// </summary>
+        public ShieldedEvent<KeyMissingEventArgs> KeyMissing { get; } = new ShieldedEvent<KeyMissingEventArgs>();
 
         public void Dispose()
         {
