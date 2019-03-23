@@ -47,7 +47,7 @@ namespace Shielded.Gossip
             _owner = owner ?? this;
             Transport = transport ?? throw new ArgumentNullException(nameof(transport));
             Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-            _freshIndex = new ReverseTimeIndex(GetItem);
+            _freshIndex = new ReverseTimeIndex(GetItemDirect);
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
             _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.CleanUpInterval, Configuration.CleanUpInterval);
             _applyMethods = new ApplyMethods(this,
@@ -532,7 +532,7 @@ namespace Shielded.Gossip
                 if (newWindowStart.IsDone)
                     return result.ToArray();
                 // last time we iterated this one, we stopped without adding the current item. let's see if that item is still up to date.
-                if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
+                if (newWindowStart.Current.Item != GetItemDirect(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
                     return result.ToArray();
             }
 
@@ -603,6 +603,15 @@ namespace Shielded.Gossip
             var mi = GetItem(key);
             return mi == null ? null : new FieldInfo<TItem>(mi);
         });
+
+        /// <summary>
+        /// For internal use, does not raise the KeyMissing event. Needed for checking if an item in the
+        /// fresh index is still current, because we do not want the data reloaded in that case.
+        /// </summary>
+        private MessageItem GetItemDirect(string key)
+        {
+            return _local.TryGetValue(key, out var mi) ? mi : null;
+        }
 
         internal MessageItem GetItem(string key) => Shield.InTransaction(() =>
         {

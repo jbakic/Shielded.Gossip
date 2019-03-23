@@ -16,14 +16,19 @@ namespace Shielded.Gossip.Tests
         {
             var currValue = "stored value".Version(7);
             var transport = new MockTransport(A, new string[0]);
-            using (var backend = new GossipBackend(transport, new GossipConfiguration()))
+            using (var backend = new GossipBackend(transport, new GossipConfiguration
             {
+                CleanUpInterval = 100,
+                RemovableItemLingerMs = 100,
+            }))
+            {
+                void Provider(object sender, KeyMissingEventArgs args) => args.UseValue(currValue, expiresInMs: 100);
+
                 Shield.InTransaction(() =>
                 {
-                    backend.KeyMissing.Subscribe((_, args) =>
-                        args.UseValue(currValue, expiresInMs: 100));
-                    backend.Changed.Subscribe((_, args) =>
-                        Shield.SideEffect(() => currValue = (IntVersioned<string>)args.NewValue));
+                    backend.KeyMissing.Subscribe(Provider);
+                    backend.Changed.Subscribe((_, args) => Shield.SideEffect(() =>
+                        currValue = (IntVersioned<string>)args.NewValue));
                 });
 
                 var resWithInfo = backend.TryGetWithInfo<IntVersioned<string>>("key");
@@ -32,7 +37,14 @@ namespace Shielded.Gossip.Tests
                 Assert.AreEqual(7, resWithInfo.Value.Version);
                 Assert.AreEqual(100, resWithInfo.ExpiresInMs);
 
-                Thread.Sleep(150);
+                // enough time for a full clean-up of the key. since the provider is still subscribed, the
+                // clean-up might accidentally refetch the key. this will test whether it does.
+                Thread.Sleep(400);
+
+                // confirm clean-up
+                Shield.InTransaction(() => backend.KeyMissing.Unsubscribe(Provider));
+                Assert.IsNull(backend.TryGetWithInfo<IntVersioned<string>>("key"));
+                Shield.InTransaction(() => backend.KeyMissing.Subscribe(Provider));
 
                 Assert.AreEqual(VectorRelationship.Less, backend.Set("key", "failed write".Version(2), 100));
 
