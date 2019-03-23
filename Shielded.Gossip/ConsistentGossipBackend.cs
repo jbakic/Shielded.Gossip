@@ -78,7 +78,7 @@ namespace Shielded.Gossip
             var local = _currentState.Value;
             if (!local.TryGetValue(key, out MessageItem i))
                 return _wrapped.TryGet(key, out item);
-            if (i.Deleted)
+            if (i.Deleted || i.Expired || i.ExpiresInMs <= 0)
             {
                 item = default;
                 return false;
