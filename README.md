@@ -139,9 +139,8 @@ version, but is marked as deleted. This is regarded as a higher version, so you 
 to re-add the same version of data back, at least as long as the server internally remembers the
 removed version.
 
-What happens if a removed key gets revived later is up to you. You should probably react to Changed
-events, and check in some external tombstone storage whether any newly arriving item may be kept,
-and immediately remove it again if not.
+What happens if a removed key gets revived later is up to you. You should probably handle KeyMissing
+events to check an external tombstone storage and restore the tombstones when needed.
 
 ## Expiry
 
