@@ -113,8 +113,6 @@ namespace Shielded.Gossip
                     try { client.Close(); } catch { }
                     lock (_lock)
                     {
-                        if (_client != client)
-                            return;
                         _state = State.Connecting;
                         Task.Run(Connect);
                     }
