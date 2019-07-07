@@ -115,9 +115,8 @@ namespace Shielded.Gossip
                     {
                         if (_client != client)
                             return;
-                        _messageQueue.Clear();
-                        _client = null;
-                        _state = State.Disconnected;
+                        _state = State.Connecting;
+                        Task.Run(Connect);
                     }
                     return;
                 }
