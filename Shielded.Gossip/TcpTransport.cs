@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -17,6 +19,8 @@ namespace Shielded.Gossip
             OwnId = ownId;
             LocalEndpoint = localEndpoint;
             ServerIPs = serverIPs;
+            // TODO: this does not react to changes in ServerIPs!
+            _clientConnections = Shield.InTransaction(() => serverIPs.ToDictionary(kvp => kvp.Key, kvp => new TcpClientConnection(this, kvp.Value)));
         }
 
         public string OwnId { get; private set; }
@@ -34,6 +38,8 @@ namespace Shielded.Gossip
 
         private TcpListener _listener;
         private readonly object _listenerLock = new object();
+        private readonly Dictionary<string, TcpClientConnection> _clientConnections;
+        private readonly ConcurrentDictionary<TcpClient, object> _serverConnections = new ConcurrentDictionary<TcpClient, object>();
 
         /// <summary>
         /// Stop the server. Safe to call if already stopped.
@@ -52,6 +58,10 @@ namespace Shielded.Gossip
                     catch { }
                     _listener = null;
                 }
+
+                foreach (var serverConn in _serverConnections.Keys)
+                    serverConn.Dispose();
+                _serverConnections.Clear();
             }
         }
 
@@ -61,6 +71,8 @@ namespace Shielded.Gossip
         public void Dispose()
         {
             StopListening();
+            foreach (var clConn in _clientConnections.Values)
+                clConn.Dispose();
         }
 
         /// <summary>
@@ -81,7 +93,9 @@ namespace Shielded.Gossip
                 while (true)
                 {
                     var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
-                    MessageLoop(client);
+                    _serverConnections.TryAdd(client, null);
+                    var stream = client.GetStream();
+                    MessageLoop(client, msg => SendFramed(stream, msg));
                 }
             }
             catch (ObjectDisposedException) { }
@@ -92,7 +106,7 @@ namespace Shielded.Gossip
             }
         }
 
-        private async void MessageLoop(TcpClient client)
+        internal async void MessageLoop(TcpClient client, Func<byte[], Task> sender)
         {
             async Task<bool> ReceiveBuffer(NetworkStream ns, byte[] buff)
             {
@@ -125,17 +139,15 @@ namespace Shielded.Gossip
 
                     var reply = Receive(buffer);
                     if (reply == null)
-                        break;
-                    await SendFramed(stream, reply).ConfigureAwait(false);
+                        continue;
+                    await sender(reply).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
                 Error?.Invoke(this, ex);
-            }
-            finally
-            {
-                client.Close();
+                try { client.Close(); } catch { }
+                _serverConnections.TryRemove(client, out var _);
             }
         }
 
@@ -152,45 +164,25 @@ namespace Shielded.Gossip
         /// </summary>
         public event EventHandler<Exception> Error;
 
+        public void RaiseError(Exception ex)
+        {
+            Error?.Invoke(this, ex);
+        }
+
         public void Broadcast(object msg)
         {
             var bytes = Serializer.Serialize(msg);
-            foreach (var ip in ServerIPs.Values)
-                Send(ip, bytes, false);
+            foreach (var conn in _clientConnections.Values)
+                conn.Send(bytes);
         }
 
         public void Send(string server, object msg, bool replyExpected)
         {
-            if (ServerIPs.TryGetValue(server, out var ip))
-                Send(ip, Serializer.Serialize(msg), replyExpected);
+            if (_clientConnections.TryGetValue(server, out var conn))
+                conn.Send(Serializer.Serialize(msg));
         }
 
-        /// <summary>
-        /// Sends a message to the given endpoint, minimally framed - we send the length, 32 bits, and
-        /// then the bytes.
-        /// </summary>
-        private async void Send(IPEndPoint ip, byte[] bytes, bool replyExpected)
-        {
-            var client = new TcpClient();
-            try
-            {
-                await client.ConnectAsync(ip.Address, ip.Port).ConfigureAwait(false);
-                var stream = client.GetStream();
-                await SendFramed(stream, bytes).ConfigureAwait(false);
-
-                if (replyExpected)
-                    MessageLoop(client);
-                else
-                    client.Close();
-            }
-            catch (Exception ex)
-            {
-                client.Close();
-                Error?.Invoke(this, ex);
-            }
-        }
-
-        private static async Task SendFramed(NetworkStream stream, byte[] bytes)
+        internal static async Task SendFramed(NetworkStream stream, byte[] bytes)
         {
             var lengthBytes = BitConverter.GetBytes(bytes.Length);
             await stream.WriteAsync(lengthBytes, 0, 4).ConfigureAwait(false);
