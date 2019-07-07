@@ -86,7 +86,7 @@ namespace Shielded.Gossip
 
         private async void WriterLoop(TcpClient client)
         {
-            while (client.Connected)
+            while (true)
             {
                 byte[] msg;
                 lock (_lock)
