@@ -87,10 +87,10 @@ namespace Shielded.Gossip
                 _state = State.Sending;
             }
             WriterLoop(client);
-            Transport.MessageLoop(client, async msg => Send(msg), OnError);
+            Transport.MessageLoop(client, async msg => Send(msg), OnCloseOrError);
         }
 
-        private void OnError(TcpClient client, Exception ex)
+        private void OnCloseOrError(TcpClient client, Exception ex)
         {
             lock (_lock)
             {
@@ -107,7 +107,8 @@ namespace Shielded.Gossip
                     _state = State.Disconnected;
                 }
             }
-            Transport.RaiseError(ex);
+            if (ex != null)
+                Transport.RaiseError(ex);
         }
 
         private async void WriterLoop(TcpClient client)
@@ -139,7 +140,7 @@ namespace Shielded.Gossip
             catch (Exception ex)
             {
                 try { client.Close(); } catch { }
-                OnError(client, ex);
+                OnCloseOrError(client, ex);
             }
         }
 

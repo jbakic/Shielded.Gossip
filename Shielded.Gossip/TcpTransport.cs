@@ -98,7 +98,7 @@ namespace Shielded.Gossip
                     MessageLoop(client, msg => SendFramed(stream, msg),
                         (c, ex) =>
                         {
-                            if (_serverConnections.TryRemove(c, out var _))
+                            if (_serverConnections.TryRemove(c, out var _) && ex != null)
                                 RaiseError(ex);
                         });
                 }
@@ -111,7 +111,7 @@ namespace Shielded.Gossip
             }
         }
 
-        internal async void MessageLoop(TcpClient client, Func<byte[], Task> sender, Action<TcpClient, Exception> onError)
+        internal async void MessageLoop(TcpClient client, Func<byte[], Task> sender, Action<TcpClient, Exception> onCloseOrError)
         {
             async Task<bool> ReceiveBuffer(NetworkStream ns, byte[] buff)
             {
@@ -135,23 +135,28 @@ namespace Shielded.Gossip
                     byte[] buffer = null;
                     var lengthBytes = new byte[4];
                     if (!await ReceiveBuffer(stream, lengthBytes).ConfigureAwait(false))
+                    {
+                        onCloseOrError(client, null);
                         return;
+                    }
                     var length = BitConverter.ToInt32(lengthBytes, 0);
 
                     buffer = new byte[length];
                     if (!await ReceiveBuffer(stream, buffer).ConfigureAwait(false))
+                    {
+                        onCloseOrError(client, null);
                         return;
+                    }
 
                     var reply = Receive(buffer);
-                    if (reply == null)
-                        continue;
-                    await sender(reply).ConfigureAwait(false);
+                    if (reply != null)
+                        await sender(reply).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
                 try { client.Close(); } catch { }
-                onError(client, ex);
+                onCloseOrError(client, ex);
             }
         }
 
