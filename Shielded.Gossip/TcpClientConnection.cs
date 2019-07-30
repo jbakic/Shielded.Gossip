@@ -40,7 +40,7 @@ namespace Shielded.Gossip
         {
             lock (_lock)
             {
-                if (_messageQueue.Count >= MaxQueueLength)
+                while (_messageQueue.Count >= MaxQueueLength)
                     _messageQueue.Dequeue();
                 _messageQueue.Enqueue(message);
 
@@ -60,41 +60,69 @@ namespace Shielded.Gossip
 
         private async void Connect()
         {
-            var client = _client = new TcpClient();
+            TcpClient client = new TcpClient();
+            lock (_lock)
+            {
+                _client = client;
+            }
+
             try
             {
                 await client.ConnectAsync(_targetEndPoint.Address, _targetEndPoint.Port).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                Transport.RaiseError(ex);
                 lock (_lock)
                 {
                     _messageQueue.Clear();
                     _client = null;
                     _state = State.Disconnected;
                 }
+                Transport.RaiseError(ex);
                 return;
             }
+
             lock (_lock)
             {
                 _state = State.Sending;
             }
             WriterLoop(client);
-            Transport.MessageLoop(client, async msg => Send(msg));
+            Transport.MessageLoop(client, async msg => Send(msg), OnError);
+        }
+
+        private void OnError(TcpClient client, Exception ex)
+        {
+            lock (_lock)
+            {
+                if (_client != client)
+                    return; // skipping the RaiseError call below!
+                _client = null;
+                if (_state == State.Sending)
+                {
+                    _state = State.Connecting;
+                    Task.Run(Connect);
+                }
+                else if (_state == State.Connected)
+                {
+                    _state = State.Disconnected;
+                }
+            }
+            Transport.RaiseError(ex);
         }
 
         private async void WriterLoop(TcpClient client)
         {
-            while (true)
+            try
             {
-                byte[] msg;
-                lock (_lock)
+                while (true)
                 {
-                    msg = _messageQueue.Peek();
-                }
-                try
-                {
+                    byte[] msg;
+                    lock (_lock)
+                    {
+                        if (_client != client)
+                            return;
+                        msg = _messageQueue.Peek();
+                    }
                     await TcpTransport.SendFramed(client.GetStream(), msg);
                     lock (_lock)
                     {
@@ -107,17 +135,11 @@ namespace Shielded.Gossip
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    Transport.RaiseError(ex);
-                    try { client.Close(); } catch { }
-                    lock (_lock)
-                    {
-                        _state = State.Connecting;
-                        Task.Run(Connect);
-                    }
-                    return;
-                }
+            }
+            catch (Exception ex)
+            {
+                try { client.Close(); } catch { }
+                OnError(client, ex);
             }
         }
 

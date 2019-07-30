@@ -95,18 +95,23 @@ namespace Shielded.Gossip
                     var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
                     _serverConnections.TryAdd(client, null);
                     var stream = client.GetStream();
-                    MessageLoop(client, msg => SendFramed(stream, msg));
+                    MessageLoop(client, msg => SendFramed(stream, msg),
+                        (c, ex) =>
+                        {
+                            if (_serverConnections.TryRemove(c, out var _))
+                                RaiseError(ex);
+                        });
                 }
             }
             catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
                 StopListening();
-                Error?.Invoke(this, ex);
+                RaiseError(ex);
             }
         }
 
-        internal async void MessageLoop(TcpClient client, Func<byte[], Task> sender)
+        internal async void MessageLoop(TcpClient client, Func<byte[], Task> sender, Action<TcpClient, Exception> onError)
         {
             async Task<bool> ReceiveBuffer(NetworkStream ns, byte[] buff)
             {
@@ -145,9 +150,8 @@ namespace Shielded.Gossip
             }
             catch (Exception ex)
             {
-                Error?.Invoke(this, ex);
                 try { client.Close(); } catch { }
-                _serverConnections.TryRemove(client, out var _);
+                onError(client, ex);
             }
         }
 
