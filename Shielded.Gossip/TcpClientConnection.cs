@@ -110,16 +110,19 @@ namespace Shielded.Gossip
                     _state = State.Disconnected;
                     _messageQueue.Clear();
                 }
-                else if (_state == State.Sending)
+                else if (_state == State.Sending && _messageQueue.Count > 0)
                 {
                     _state = State.Connecting;
                     Task.Run(Connect);
                 }
-                else if (_state == State.Connected)
+                else
                 {
                     _state = State.Disconnected;
-                    _keepAliveTimer.Dispose();
-                    _keepAliveTimer = null;
+                    if (_keepAliveTimer != null)
+                    {
+                        _keepAliveTimer.Dispose();
+                        _keepAliveTimer = null;
+                    }
                 }
             }
             if (ex != null)
@@ -163,6 +166,13 @@ namespace Shielded.Gossip
 
         private async void SendKeepAlive(TcpClient client)
         {
+            lock (_lock)
+            {
+                if (_client != client || _state != State.Connected)
+                    return;
+                // to block any concurrent attempts to send, since only one thread may send over a TcpClient at one time.
+                _state = State.Sending;
+            }
             try
             {
                 await TcpTransport.SendFramed(client.GetStream(), new byte[0]);
@@ -170,6 +180,15 @@ namespace Shielded.Gossip
             catch (Exception ex)
             {
                 OnCloseOrError(client, ex);
+            }
+            lock (_lock)
+            {
+                if (_client != client || _state != State.Sending)
+                    return;
+                if (_messageQueue.Count > 0)
+                    Task.Run(() => WriterLoop(client));
+                else
+                    _state = State.Connected;
             }
         }
 
