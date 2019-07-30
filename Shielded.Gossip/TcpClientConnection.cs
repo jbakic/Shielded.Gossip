@@ -77,24 +77,22 @@ namespace Shielded.Gossip
             try
             {
                 await client.ConnectAsync(TargetEndPoint.Address, TargetEndPoint.Port).ConfigureAwait(false);
+                lock (_lock)
+                {
+                    if (_client != client)
+                    {
+                        try { client.Close(); } catch { }
+                        return;
+                    }
+                    _state = State.Sending;
+                }
+                WriterLoop(client);
+                Transport.MessageLoop(client, async msg => Send(msg), OnCloseOrError);
             }
             catch (Exception ex)
             {
                 OnCloseOrError(client, ex);
-                return;
             }
-
-            lock (_lock)
-            {
-                if (_client != client)
-                {
-                    try { client.Close(); } catch { }
-                    return;
-                }
-                _state = State.Sending;
-            }
-            WriterLoop(client);
-            Transport.MessageLoop(client, async msg => Send(msg), OnCloseOrError);
         }
 
         private void OnCloseOrError(TcpClient client, Exception ex)
@@ -176,19 +174,19 @@ namespace Shielded.Gossip
             try
             {
                 await TcpTransport.SendFramed(client.GetStream(), new byte[0]);
+                lock (_lock)
+                {
+                    if (_client != client || _state != State.Sending)
+                        return;
+                    if (_messageQueue.Count > 0)
+                        Task.Run(() => WriterLoop(client));
+                    else
+                        _state = State.Connected;
+                }
             }
             catch (Exception ex)
             {
                 OnCloseOrError(client, ex);
-            }
-            lock (_lock)
-            {
-                if (_client != client || _state != State.Sending)
-                    return;
-                if (_messageQueue.Count > 0)
-                    Task.Run(() => WriterLoop(client));
-                else
-                    _state = State.Connected;
             }
         }
 
