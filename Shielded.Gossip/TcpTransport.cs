@@ -112,7 +112,7 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Calls <see cref="StopListening"/>, and also disposes all outgoing persistent connections. Sending will no longer work after this.
+        /// Calls <see cref="StopListening"/>, and also disposes all outgoing persistent connections.
         /// </summary>
         public void Dispose()
         {
