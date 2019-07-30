@@ -22,10 +22,10 @@ transport, since gossip-based communication is resilient. It is enough that a
 majority of messages make it through in a reasonable amount of time.
 
 ```csharp
-var transport = new TcpTransport("Server1", new IPEndPoint(IPAddress.Parse("10.0.0.1"), 2001),
-    // using ShieldedDict allows us to later safely change transport.Servers if needed, but it's not mandatory.
-    Shield.InTransaction(() => new ShieldedDict<string, IPEndPoint>
+var transport = new TcpTransport("Server1",
+    new Dictionary<string, IPEndPoint>
     {
+        { "Server1", new IPEndPoint(IPAddress.Parse("10.0.0.1"), 2001) },
         { "Server2", new IPEndPoint(IPAddress.Parse("10.0.0.2"), 2001) },
         { "Server3", new IPEndPoint(IPAddress.Parse("10.0.0.3"), 2001) },
     }));

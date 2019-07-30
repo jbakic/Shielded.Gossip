@@ -27,8 +27,7 @@ namespace Shielded.Gossip.Tests
         protected IDictionary<string, TBackend> _backends;
 
         protected abstract TBackend CreateBackend(ITransport transport, GossipConfiguration configuration);
-        protected abstract TTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
-            IEnumerable<KeyValuePair<string, IPEndPoint>> servers);
+        protected abstract TTransport CreateTransport(string ownId, IDictionary<string, IPEndPoint> servers);
 
         [TestInitialize]
         public void Init()
@@ -36,7 +35,7 @@ namespace Shielded.Gossip.Tests
             RandomizePorts();
             _backends = new Dictionary<string, TBackend>(_addresses.Select(kvp =>
             {
-                var transport = CreateTransport(kvp.Key, kvp.Value, _addresses.Where(inner => inner.Key != kvp.Key));
+                var transport = CreateTransport(kvp.Key, _addresses);
                 var backend = CreateBackend(transport, new GossipConfiguration
                 {
                     GossipInterval = 250,
@@ -119,11 +118,9 @@ namespace Shielded.Gossip.Tests
             return new GossipBackend(transport, configuration);
         }
 
-        protected override TcpTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
-            IEnumerable<KeyValuePair<string, IPEndPoint>> servers)
+        protected override TcpTransport CreateTransport(string ownId, IDictionary<string, IPEndPoint> servers)
         {
-            var transport = new TcpTransport(ownId, localEndpoint,
-                new ShieldedDict<string, IPEndPoint>(servers, null, StringComparer.InvariantCultureIgnoreCase));
+            var transport = new TcpTransport(ownId, servers);
             transport.Error += OnListenerError;
             transport.StartListening();
             return transport;

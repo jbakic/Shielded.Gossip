@@ -16,11 +16,9 @@ namespace Shielded.Gossip.Tests
             return new ConsistentGossipBackend(transport, configuration);
         }
 
-        protected override TcpTransport CreateTransport(string ownId, IPEndPoint localEndpoint,
-            IEnumerable<KeyValuePair<string, IPEndPoint>> servers)
+        protected override TcpTransport CreateTransport(string ownId, IDictionary<string, IPEndPoint> servers)
         {
-            var transport = new TcpTransport(ownId, localEndpoint,
-                new ShieldedDict<string, IPEndPoint>(servers, null, StringComparer.InvariantCultureIgnoreCase));
+            var transport = new TcpTransport(ownId, servers);
             transport.Error += OnListenerError;
             transport.StartListening();
             return transport;

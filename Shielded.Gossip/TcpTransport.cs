@@ -14,32 +14,78 @@ namespace Shielded.Gossip
     /// </summary>
     public class TcpTransport : ITransport
     {
-        public TcpTransport(string ownId, IPEndPoint localEndpoint, IDictionary<string, IPEndPoint> serverIPs)
+        /// <summary>
+        /// Constructor.
+        /// </summary>
+        /// <param name="ownId">The ID of this server.</param>
+        /// <param name="serverIPs">The dictionary with server IDs and IP endpoints, including this server. Do not make later
+        /// changes to any of the IPEndPoint objects!</param>
+        public TcpTransport(string ownId, IDictionary<string, IPEndPoint> serverIPs)
         {
-            OwnId = ownId;
-            LocalEndpoint = localEndpoint;
-            ServerIPs = serverIPs;
-            // TODO: this does not react to changes in ServerIPs!
-            _clientConnections = Shield.InTransaction(() => serverIPs.ToDictionary(kvp => kvp.Key, kvp => new TcpClientConnection(this, kvp.Value)));
+            OwnId = ownId ?? throw new ArgumentNullException(nameof(ownId));
+            if (serverIPs == null)
+                throw new ArgumentNullException(nameof(serverIPs));
+            LocalEndpoint = serverIPs[ownId];
+            (ServerIPs, _clientConnections) = Shield.InTransaction(() =>
+            {
+                var ips = new ShieldedDict<string, IPEndPoint>(serverIPs.Where(kvp => !StringComparer.InvariantCultureIgnoreCase.Equals(kvp.Key, ownId)));
+                var clients = new ConcurrentDictionary<string, TcpClientConnection>(
+                    ips.Select(kvp => new KeyValuePair<string, TcpClientConnection>(kvp.Key, new TcpClientConnection(this, kvp.Value))));
+                Shield.PreCommit(() => ips.TryGetValue("any", out var _) || true,
+                    () => Shield.SyncSideEffect(UpdateClientConnections));
+                return (ips, clients);
+            });
         }
 
         public string OwnId { get; private set; }
         public readonly IPEndPoint LocalEndpoint;
-        public readonly IDictionary<string, IPEndPoint> ServerIPs;
+        /// <summary>
+        /// Other servers known to this one. You may make changes to the dictionary, but please treat all IPEndPoint objects
+        /// as immutable! Create a new IPEndPoint if you wish to change the address of a server.
+        /// </summary>
+        public readonly ShieldedDict<string, IPEndPoint> ServerIPs;
         public ICollection<string> Servers => ServerIPs.Keys;
 
         /// <summary>
-        /// Timeout for detecting a half-open connection. If we are expecting (more) data,
-        /// and receive nothing for this long, we terminate the connection.
+        /// Timeout in milliseconds for detecting a half-open connection. Default is 30 seconds.
         /// </summary>
-        public int ReceiveTimeout { get; set; } = 5000;
+        public int ReceiveTimeout { get; set; } = 30000;
+
+        /// <summary>
+        /// Every this many milliseconds we transmit a keep-alive message over our active persistent connections,
+        /// if nothing else gets sent. Default is 15 seconds. Should be smaller than the <see cref="ReceiveTimeout"/>, of course.
+        /// </summary>
+        public int KeepAliveInterval { get; set; } = 15000;
 
         public MessageHandler MessageHandler { get; set; }
 
         private TcpListener _listener;
         private readonly object _listenerLock = new object();
-        private readonly Dictionary<string, TcpClientConnection> _clientConnections;
+        private readonly ConcurrentDictionary<string, TcpClientConnection> _clientConnections;
         private readonly ConcurrentDictionary<TcpClient, object> _serverConnections = new ConcurrentDictionary<TcpClient, object>();
+
+        private void UpdateClientConnections()
+        {
+            foreach (var key in ServerIPs.Changes)
+            {
+                if (!ServerIPs.TryGetValue(key, out var endpoint))
+                {
+                    if (_clientConnections.TryRemove(key, out var conn))
+                    {
+                        conn.Dispose();
+                    }
+                }
+                else if (!_clientConnections.TryGetValue(key, out var conn))
+                {
+                    _clientConnections[key] = new TcpClientConnection(this, endpoint);
+                }
+                else if (conn.TargetEndPoint != endpoint)
+                {
+                    conn.Dispose();
+                    _clientConnections[key] = new TcpClientConnection(this, endpoint);
+                }
+            }
+        }
 
         /// <summary>
         /// Stop the server. Safe to call if already stopped.
@@ -93,6 +139,7 @@ namespace Shielded.Gossip
                 while (true)
                 {
                     var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    client.ReceiveTimeout = ReceiveTimeout;
                     _serverConnections.TryAdd(client, null);
                     var stream = client.GetStream();
                     MessageLoop(client, msg => SendFramed(stream, msg),
@@ -128,7 +175,6 @@ namespace Shielded.Gossip
 
             try
             {
-                client.ReceiveTimeout = ReceiveTimeout;
                 var stream = client.GetStream();
                 while (client.Connected)
                 {
@@ -140,6 +186,8 @@ namespace Shielded.Gossip
                         return;
                     }
                     var length = BitConverter.ToInt32(lengthBytes, 0);
+                    if (length == 0)
+                        continue;
 
                     buffer = new byte[length];
                     if (!await ReceiveBuffer(stream, buffer).ConfigureAwait(false))
@@ -155,7 +203,6 @@ namespace Shielded.Gossip
             }
             catch (Exception ex)
             {
-                try { client.Close(); } catch { }
                 onCloseOrError(client, ex);
             }
         }
@@ -195,7 +242,8 @@ namespace Shielded.Gossip
         {
             var lengthBytes = BitConverter.GetBytes(bytes.Length);
             await stream.WriteAsync(lengthBytes, 0, 4).ConfigureAwait(false);
-            await stream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
+            if (bytes.Length > 0)
+                await stream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
         }
     }
 }

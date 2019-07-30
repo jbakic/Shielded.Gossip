@@ -75,7 +75,7 @@ namespace Shielded.Gossip.Tests
 
         public string OwnId => _wrapped.OwnId;
         public ICollection<string> Servers => _wrapped.Servers;
-        public IDictionary<string, IPEndPoint> ServerIPs => _wrapped.ServerIPs;
+        public ShieldedDict<string, IPEndPoint> ServerIPs => _wrapped.ServerIPs;
 
         public MessageHandler MessageHandler { get; set; }
 

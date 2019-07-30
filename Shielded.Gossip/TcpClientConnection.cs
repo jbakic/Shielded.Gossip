@@ -21,19 +21,19 @@ namespace Shielded.Gossip
             Sending
         }
 
-        private readonly IPEndPoint _targetEndPoint;
-
         private readonly object _lock = new object();
         private State _state = State.Disconnected;
         private TcpClient _client;
         private readonly Queue<byte[]> _messageQueue = new Queue<byte[]>();
+        private Timer _keepAliveTimer;
 
         public readonly TcpTransport Transport;
+        public readonly IPEndPoint TargetEndPoint;
 
         public TcpClientConnection(TcpTransport transport, IPEndPoint targetEndPoint)
         {
             Transport = transport;
-            _targetEndPoint = targetEndPoint;
+            TargetEndPoint = targetEndPoint;
         }
 
         public void Send(byte[] message)
@@ -52,6 +52,8 @@ namespace Shielded.Gossip
                 else if (_state == State.Connected)
                 {
                     _state = State.Sending;
+                    _keepAliveTimer.Dispose();
+                    _keepAliveTimer = null;
                     var client = _client;
                     Task.Run(() => WriterLoop(client));
                 }
@@ -61,29 +63,34 @@ namespace Shielded.Gossip
         private async void Connect()
         {
             TcpClient client = new TcpClient();
+            client.ReceiveTimeout = Transport.ReceiveTimeout;
             lock (_lock)
             {
+                if (_state != State.Connecting || _client != null)
+                {
+                    client.Dispose();
+                    return;
+                }
                 _client = client;
             }
 
             try
             {
-                await client.ConnectAsync(_targetEndPoint.Address, _targetEndPoint.Port).ConfigureAwait(false);
+                await client.ConnectAsync(TargetEndPoint.Address, TargetEndPoint.Port).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                lock (_lock)
-                {
-                    _messageQueue.Clear();
-                    _client = null;
-                    _state = State.Disconnected;
-                }
-                Transport.RaiseError(ex);
+                OnCloseOrError(client, ex);
                 return;
             }
 
             lock (_lock)
             {
+                if (_client != client)
+                {
+                    try { client.Close(); } catch { }
+                    return;
+                }
                 _state = State.Sending;
             }
             WriterLoop(client);
@@ -92,12 +99,18 @@ namespace Shielded.Gossip
 
         private void OnCloseOrError(TcpClient client, Exception ex)
         {
+            try { client.Close(); } catch { }
             lock (_lock)
             {
                 if (_client != client)
                     return; // skipping the RaiseError call below!
                 _client = null;
-                if (_state == State.Sending)
+                if (_state == State.Connecting)
+                {
+                    _state = State.Disconnected;
+                    _messageQueue.Clear();
+                }
+                else if (_state == State.Sending)
                 {
                     _state = State.Connecting;
                     Task.Run(Connect);
@@ -105,6 +118,8 @@ namespace Shielded.Gossip
                 else if (_state == State.Connected)
                 {
                     _state = State.Disconnected;
+                    _keepAliveTimer.Dispose();
+                    _keepAliveTimer = null;
                 }
             }
             if (ex != null)
@@ -129,9 +144,12 @@ namespace Shielded.Gossip
                     {
                         if (_messageQueue.Peek() == msg)
                             _messageQueue.Dequeue();
+                        if (_client != client)
+                            return;
                         if (_messageQueue.Count == 0)
                         {
                             _state = State.Connected;
+                            _keepAliveTimer = new Timer(_ => SendKeepAlive(client), null, Transport.KeepAliveInterval, Transport.KeepAliveInterval);
                             return;
                         }
                     }
@@ -139,7 +157,18 @@ namespace Shielded.Gossip
             }
             catch (Exception ex)
             {
-                try { client.Close(); } catch { }
+                OnCloseOrError(client, ex);
+            }
+        }
+
+        private async void SendKeepAlive(TcpClient client)
+        {
+            try
+            {
+                await TcpTransport.SendFramed(client.GetStream(), new byte[0]);
+            }
+            catch (Exception ex)
+            {
                 OnCloseOrError(client, ex);
             }
         }
@@ -148,12 +177,18 @@ namespace Shielded.Gossip
         {
             lock (_lock)
             {
-                var client = _client;
-                if (client == null)
-                    return;
-                try { client.Close(); } catch { }
-                _client = null;
                 _state = State.Disconnected;
+                _messageQueue.Clear();
+                if (_client != null)
+                {
+                    try { _client.Close(); } catch { }
+                    _client = null;
+                }
+                if (_keepAliveTimer != null)
+                {
+                    _keepAliveTimer.Dispose();
+                    _keepAliveTimer = null;
+                }
             }
         }
     }
