@@ -103,6 +103,7 @@ namespace Shielded.Gossip
                 if (_client != client)
                     return; // skipping the RaiseError call below!
                 _client = null;
+
                 if (_state == State.Connecting)
                 {
                     _state = State.Disconnected;
@@ -116,11 +117,12 @@ namespace Shielded.Gossip
                 else
                 {
                     _state = State.Disconnected;
-                    if (_keepAliveTimer != null)
-                    {
-                        _keepAliveTimer.Dispose();
-                        _keepAliveTimer = null;
-                    }
+                }
+
+                if (_keepAliveTimer != null)
+                {
+                    _keepAliveTimer.Dispose();
+                    _keepAliveTimer = null;
                 }
             }
             if (ex != null)
@@ -150,6 +152,9 @@ namespace Shielded.Gossip
                         if (_messageQueue.Count == 0)
                         {
                             _state = State.Connected;
+                            // a bit of paranoia:
+                            if (_keepAliveTimer != null)
+                                _keepAliveTimer.Dispose();
                             _keepAliveTimer = new Timer(_ => SendKeepAlive(client), null, Transport.KeepAliveInterval, Transport.KeepAliveInterval);
                             return;
                         }
@@ -179,7 +184,11 @@ namespace Shielded.Gossip
                     if (_client != client || _state != State.Sending)
                         return;
                     if (_messageQueue.Count > 0)
+                    {
+                        _keepAliveTimer.Dispose();
+                        _keepAliveTimer = null;
                         Task.Run(() => WriterLoop(client));
+                    }
                     else
                         _state = State.Connected;
                 }
