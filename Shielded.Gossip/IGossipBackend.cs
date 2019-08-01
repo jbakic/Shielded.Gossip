@@ -1,4 +1,6 @@
-﻿namespace Shielded.Gossip
+﻿using System.Collections.Generic;
+
+namespace Shielded.Gossip
 {
     /// <summary>
     /// The basic common interface provided by both gossip backends.
@@ -7,6 +9,7 @@
     {
         /// <summary>
         /// Returns true if the backend contains a (non-deleted and non-expired) value under the key.
+        /// May trigger the <see cref="KeyMissing"/> event.
         /// </summary>
         bool ContainsKey(string key);
 
@@ -17,7 +20,7 @@
 
         /// <summary>
         /// Returns true if the backend contains a value under the key, including any expired or deleted value
-        /// that still lingers.
+        /// that still lingers. May trigger the <see cref="KeyMissing"/> event.
         /// </summary>
         bool ContainsKeyWithInfo(string key);
 
@@ -26,6 +29,16 @@
         /// in case they are still present in the storage for communicating the removal to other servers.
         /// </summary>
         FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>;
+
+        /// <summary>
+        /// Gets all (non-deleted and non-expired) keys contained in the backend.
+        /// </summary>
+        ICollection<string> Keys { get; }
+
+        /// <summary>
+        /// Gets all keys contained in the backend, including deleted and expired keys that still linger.
+        /// </summary>
+        ICollection<string> KeysWithInfo { get; }
 
         /// <summary>
         /// Set a value under the given key, merging it with any already existing value

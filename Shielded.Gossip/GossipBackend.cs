@@ -661,8 +661,20 @@ namespace Shielded.Gossip
         internal MessageItem GetActiveItem(string key)
         {
             var i = GetItem(key);
-            return i != null && !i.Deleted && !i.Expired && !(i.ExpiresInMs <= 0) ? i : null;
+            return i != null && IsActive(i) ? i : null;
         }
+
+        private static bool IsActive(MessageItem mi) => !mi.Deleted && !mi.Expired && !(mi.ExpiresInMs <= 0);
+
+        /// <summary>
+        /// Gets all (non-deleted and non-expired) keys contained in the backend.
+        /// </summary>
+        public ICollection<string> Keys => Shield.InTransaction(() => _local.Where(kvp => IsActive(kvp.Value)).Select(kvp => kvp.Key).ToList());
+
+        /// <summary>
+        /// Gets all keys contained in the backend, including deleted and expired keys that still linger.
+        /// </summary>
+        public ICollection<string> KeysWithInfo => _local.Keys;
 
         private VersionHash GetHash(string key, IHasVersionBytes i)
         {

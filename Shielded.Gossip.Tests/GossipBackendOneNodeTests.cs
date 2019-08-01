@@ -45,12 +45,16 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsFalse(_backend.ContainsKey("key"));
             Assert.IsFalse(_backend.ContainsKeyWithInfo("key"));
+            Assert.IsFalse(_backend.Keys.Any());
+            Assert.IsFalse(_backend.KeysWithInfo.Any());
 
             Assert.AreEqual(VectorRelationship.Greater,
                 Shield.InTransaction(() => _backend.SetHasVec("key", testEntity)));
 
             Assert.IsTrue(_backend.ContainsKey("key"));
             Assert.IsTrue(_backend.ContainsKeyWithInfo("key"));
+            Assert.IsTrue(_backend.Keys.SequenceEqual(new[] { "key" }));
+            Assert.IsTrue(_backend.KeysWithInfo.SequenceEqual(new[] { "key" }));
 
             var read = Shield.InTransaction(() => _backend.TryGetHasVec<TestClass>("key").Single());
 
@@ -172,6 +176,7 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(300);
 
             Assert.IsTrue(_backend.ContainsKey("key"));
+            Assert.IsTrue(_backend.Keys.SequenceEqual(new[] { "key" }));
             var read = Shield.InTransaction(() => _backend.TryGetHasVec<TestClass>("key").Single());
             Assert.AreEqual(testEntity.Id, read.Id);
 
@@ -181,11 +186,15 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsFalse(_backend.ContainsKey("key"));
             Assert.IsTrue(_backend.ContainsKeyWithInfo("key"));
+            Assert.IsFalse(_backend.Keys.Any());
+            Assert.IsTrue(_backend.KeysWithInfo.SequenceEqual(new[] { "key" }));
 
             Thread.Sleep(300);
 
             Assert.IsFalse(_backend.ContainsKey("key"));
             Assert.IsFalse(_backend.ContainsKeyWithInfo("key"));
+            Assert.IsFalse(_backend.Keys.Any());
+            Assert.IsFalse(_backend.KeysWithInfo.Any());
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Multiple<TestClass> _)));
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGetHasVec<TestClass>("key").Any()));
         }
@@ -217,6 +226,7 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(300);
 
             Assert.IsFalse(_backend.ContainsKeyWithInfo("key"));
+            Assert.IsFalse(_backend.KeysWithInfo.Any());
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out Lww<TestClass> _)));
             read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.IsNull(read.Value);
@@ -251,6 +261,7 @@ namespace Shielded.Gossip.Tests
             Thread.Sleep(300);
 
             Assert.IsFalse(_backend.ContainsKeyWithInfo("key"));
+            Assert.IsFalse(_backend.KeysWithInfo.Any());
             Assert.IsFalse(Shield.InTransaction(() => _backend.TryGet("key", out IntVersioned<TestClass> _)));
             read = Shield.InTransaction(() => _backend.TryGetIntVersioned<TestClass>("key"));
             Assert.IsNull(read.Value);

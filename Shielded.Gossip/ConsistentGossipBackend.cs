@@ -92,6 +92,22 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
+        /// Gets all (non-deleted and non-expired) keys contained in the backend. Throws if used in a consistent
+        /// transaction.
+        /// </summary>
+        public ICollection<string> Keys =>
+            IsInConsistentTransaction ? throw new NotSupportedException("Accessing all keys in a consistent transaction is not supported.")
+            : _wrapped.Keys;
+
+        /// <summary>
+        /// Gets all keys contained in the backend, including deleted and expired keys that still linger. Throws
+        /// if used in a consistent transaction.
+        /// </summary>
+        public ICollection<string> KeysWithInfo =>
+            IsInConsistentTransaction ? throw new NotSupportedException("Accessing all keys in a consistent transaction is not supported.")
+            : _wrapped.KeysWithInfo;
+
+        /// <summary>
         /// Try to read the value under the given key.
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
