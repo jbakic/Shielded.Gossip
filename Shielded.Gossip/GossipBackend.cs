@@ -578,6 +578,16 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
+        /// Returns true if the backend contains a (non-deleted and non-expired) value under the key.
+        /// </summary>
+        public bool ContainsKey(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            return GetActiveItem(key) != null;
+        }
+
+        /// <summary>
         /// Try to read the value under the given key.
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
@@ -593,16 +603,27 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
+        /// Returns true if the backend contains a value under the key, including any expired or deleted value
+        /// that still lingers.
+        /// </summary>
+        public bool ContainsKeyWithInfo(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            return GetItem(key) != null;
+        }
+
+        /// <summary>
         /// Try to read the value under the given key. Will return deleted and expired values as well,
         /// in case they are still present in the storage for communicating the removal to other servers.
         /// </summary>
-        public FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem> => Shield.InTransaction(() =>
+        public FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>
         {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException(nameof(key));
             var mi = GetItem(key);
             return mi == null ? null : new FieldInfo<TItem>(mi);
-        });
+        }
 
         /// <summary>
         /// For internal use, does not raise the KeyMissing event. Needed for checking if an item in the

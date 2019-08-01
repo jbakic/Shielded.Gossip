@@ -35,7 +35,19 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() =>
+            {
+                Assert.IsFalse(_backends[A].ContainsKey("key"));
+                Assert.IsFalse(_backends[A].ContainsKeyWithInfo("key"));
+
+                _backends[A].SetHasVec("key", testEntity.Version(A));
+
+                Assert.IsTrue(_backends[A].ContainsKey("key"));
+                Assert.IsTrue(_backends[A].ContainsKeyWithInfo("key"));
+            }).Result);
+
+            Assert.IsTrue(_backends[A].ContainsKey("key"));
+            Assert.IsTrue(_backends[A].ContainsKeyWithInfo("key"));
 
             CheckProtocols();
 
@@ -56,9 +68,23 @@ namespace Shielded.Gossip.Tests
 
             Assert.IsTrue(_backends[A].RunConsistent(() =>
             {
+                Assert.IsFalse(_backends[A].ContainsKey("key"));
+                Assert.IsFalse(_backends[A].ContainsKeyWithInfo("key"));
+
                 _backends[A].SetHasVec("key", testEntity.Version(A));
+
+                Assert.IsTrue(_backends[A].ContainsKey("key"));
+                Assert.IsTrue(_backends[A].ContainsKeyWithInfo("key"));
+
                 _backends[A].Remove("key");
+
+                Assert.IsFalse(_backends[A].ContainsKey("key"));
+                Assert.IsTrue(_backends[A].ContainsKeyWithInfo("key"));
             }).Result);
+
+            Assert.IsFalse(_backends[A].ContainsKey("key"));
+            // no info either - the transaction never commits the add operation.
+            Assert.IsFalse(_backends[A].ContainsKeyWithInfo("key"));
 
             CheckProtocols();
 

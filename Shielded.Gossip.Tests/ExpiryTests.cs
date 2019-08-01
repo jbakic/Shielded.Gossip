@@ -30,12 +30,15 @@ namespace Shielded.Gossip.Tests
         {
             _backends[A].SetHasVec("test", true.Version(A, 1), 100);
 
+            Assert.IsTrue(_backends[A].ContainsKey("test"));
             Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(50);
+            Assert.IsTrue(_backends[A].ContainsKey("test"));
             Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
             Thread.Sleep(70);
+            Assert.IsFalse(_backends[A].ContainsKey("test"));
             Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 

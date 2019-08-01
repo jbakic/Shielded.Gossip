@@ -61,6 +61,37 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
+        /// Returns true if the backend contains a (non-deleted and non-expired) value under the key.
+        /// </summary>
+        public bool ContainsKey(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            key = WrapPublicKey(key);
+            if (!IsInConsistentTransaction)
+                return _wrapped.ContainsKey(key);
+            var local = _currentState.Value;
+            if (!local.TryGetValue(key, out MessageItem i))
+                return _wrapped.ContainsKey(key);
+            return !(i.Deleted || i.Expired || i.ExpiresInMs <= 0);
+        }
+
+        /// <summary>
+        /// Returns true if the backend contains a value under the key, including any expired or deleted value
+        /// that still lingers.
+        /// </summary>
+        public bool ContainsKeyWithInfo(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            key = WrapPublicKey(key);
+            if (!IsInConsistentTransaction)
+                return _wrapped.ContainsKeyWithInfo(key);
+            var local = _currentState.Value;
+            return local.TryGetValue(key, out MessageItem _) || _wrapped.ContainsKeyWithInfo(key);
+        }
+
+        /// <summary>
         /// Try to read the value under the given key.
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
