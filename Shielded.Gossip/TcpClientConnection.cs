@@ -45,35 +45,33 @@ namespace Shielded.Gossip
                 _messageQueue.Enqueue(message);
 
                 if (_state == State.Disconnected)
-                {
-                    _state = State.Connecting;
-                    Task.Run(Connect);
-                }
+                    StartConnecting();
                 else if (_state == State.Connected)
-                {
-                    _state = State.Sending;
-                    _keepAliveTimer.Dispose();
-                    _keepAliveTimer = null;
-                    var client = _client;
-                    Task.Run(() => WriterLoop(client));
-                }
+                    StartSending();
             }
         }
 
-        private async void Connect()
+        private void StartConnecting()
         {
-            TcpClient client = new TcpClient();
-            client.ReceiveTimeout = Transport.ReceiveTimeout;
-            lock (_lock)
-            {
-                if (_state != State.Connecting || _client != null)
-                {
-                    client.Dispose();
-                    return;
-                }
-                _client = client;
-            }
+            _state = State.Connecting;
+            var client = _client = new TcpClient() { ReceiveTimeout = Transport.ReceiveTimeout };
+            Task.Run(() => Connect(client));
+        }
 
+        private void StartSending()
+        {
+            _state = State.Sending;
+            if (_keepAliveTimer != null)
+            {
+                _keepAliveTimer.Dispose();
+                _keepAliveTimer = null;
+            }
+            var client = _client;
+            Task.Run(() => WriterLoop(client));
+        }
+
+        private async void Connect(TcpClient client)
+        {
             try
             {
                 await client.ConnectAsync(TargetEndPoint.Address, TargetEndPoint.Port).ConfigureAwait(false);
@@ -84,9 +82,8 @@ namespace Shielded.Gossip
                         try { client.Close(); } catch { }
                         return;
                     }
-                    _state = State.Sending;
+                    StartSending();
                 }
-                WriterLoop(client);
                 Transport.MessageLoop(client, async msg => Send(msg), OnCloseOrError);
             }
             catch (Exception ex)
@@ -104,19 +101,14 @@ namespace Shielded.Gossip
                     return; // skipping the RaiseError call below!
                 _client = null;
 
-                if (_state == State.Connecting)
+                if (_state == State.Sending && _messageQueue.Count > 0)
                 {
-                    _state = State.Disconnected;
-                    _messageQueue.Clear();
-                }
-                else if (_state == State.Sending && _messageQueue.Count > 0)
-                {
-                    _state = State.Connecting;
-                    Task.Run(Connect);
+                    StartConnecting();
                 }
                 else
                 {
                     _state = State.Disconnected;
+                    _messageQueue.Clear();
                 }
 
                 if (_keepAliveTimer != null)
@@ -169,26 +161,22 @@ namespace Shielded.Gossip
 
         private async void SendKeepAlive(TcpClient client)
         {
-            lock (_lock)
-            {
-                if (_client != client || _state != State.Connected)
-                    return;
-                // to block any concurrent attempts to send, since only one thread may send over a TcpClient at one time.
-                _state = State.Sending;
-            }
             try
             {
+                lock (_lock)
+                {
+                    if (_client != client || _state != State.Connected)
+                        return;
+                    // to block any concurrent attempts to send, since only one thread may send over a TcpClient at one time.
+                    _state = State.Sending;
+                }
                 await TcpTransport.SendFramed(client.GetStream(), new byte[0]);
                 lock (_lock)
                 {
                     if (_client != client || _state != State.Sending)
                         return;
                     if (_messageQueue.Count > 0)
-                    {
-                        _keepAliveTimer.Dispose();
-                        _keepAliveTimer = null;
-                        Task.Run(() => WriterLoop(client));
-                    }
+                        StartSending();
                     else
                         _state = State.Connected;
                 }
