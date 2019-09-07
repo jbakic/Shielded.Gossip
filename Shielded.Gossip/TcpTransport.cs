@@ -104,10 +104,6 @@ namespace Shielded.Gossip
                     catch { }
                     _listener = null;
                 }
-
-                foreach (var serverConn in _serverConnections.Keys)
-                    serverConn.Dispose();
-                _serverConnections.Clear();
             }
         }
 
@@ -119,6 +115,9 @@ namespace Shielded.Gossip
             StopListening();
             foreach (var clConn in _clientConnections.Values)
                 clConn.Dispose();
+            foreach (var serverConn in _serverConnections.Keys)
+                serverConn.Dispose();
+            _serverConnections.Clear();
         }
 
         /// <summary>
