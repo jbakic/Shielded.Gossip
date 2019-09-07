@@ -423,12 +423,12 @@ namespace Shielded.Gossip
                         return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
                     }
                     var prepTask = PreparationProcess();
-                    var resTask = await Task.WhenAny(prepTask, Task.Delay(GetNewTimeout()));
-                    if (resTask == prepTask && prepTask.Result.Success)
+                    var result = await prepTask.WithTimeout(GetNewTimeout());
+                    if (result.Success)
                         return cont;
 
                     cont.Rollback();
-                    if (resTask == prepTask && prepTask.Result.WaitBeforeRetry != null)
+                    if (result.WaitBeforeRetry != null)
                         await prepTask.Result.WaitBeforeRetry;
                 }
                 return null;
@@ -648,11 +648,8 @@ namespace Shielded.Gossip
             {
                 try
                 {
-                    var prepareTask = PrepareInternal(ourState, newVal, false);
-                    if (await Task.WhenAny(
-                            prepareTask,
-                            ourState.PrepareCompleter.Task,
-                            Task.Delay(Configuration.ConsistentPrepareTimeoutRange.Max)) != prepareTask ||
+                    var prepareTask = PrepareInternal(ourState, newVal, false).WithTimeout(Configuration.ConsistentPrepareTimeoutRange.Max);
+                    if (await Task.WhenAny(prepareTask, ourState.PrepareCompleter.Task) != prepareTask ||
                         !prepareTask.Result.Success)
                     {
                         SetRejected(id);

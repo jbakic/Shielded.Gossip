@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Shielded.Gossip
 {
@@ -26,6 +28,20 @@ namespace Shielded.Gossip
                 if (one[i] != two[i])
                     return false;
             return true;
+        }
+
+        internal static async Task<T> WithTimeout<T>(this Task<T> task, int ms, T timeoutResult = default)
+        {
+            using (var cts = new CancellationTokenSource())
+            {
+                if (await Task.WhenAny(task, Task.Delay(ms, cts.Token)) == task)
+                {
+                    cts.Cancel();
+                    return await task;
+                }
+                else
+                    return timeoutResult;
+            }
         }
     }
 }
