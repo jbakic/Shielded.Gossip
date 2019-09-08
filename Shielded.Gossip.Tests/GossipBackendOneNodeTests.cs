@@ -258,7 +258,7 @@ namespace Shielded.Gossip.Tests
             next.Value.CanDelete = true;
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
-            Thread.Sleep(300);
+            Thread.Sleep(400);
 
             Assert.IsFalse(_backend.ContainsKeyWithInfo("key"));
             Assert.IsFalse(_backend.KeysWithInfo.Any());
