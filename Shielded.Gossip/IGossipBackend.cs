@@ -19,6 +19,11 @@ namespace Shielded.Gossip
         bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>;
 
         /// <summary>
+        /// Try to read the value under the given key.
+        /// </summary>
+        bool TryGet(string key, out object item);
+
+        /// <summary>
         /// Returns true if the backend contains a value under the key, including any expired or deleted value
         /// that still lingers. May trigger the <see cref="KeyMissing"/> event.
         /// </summary>
@@ -29,6 +34,12 @@ namespace Shielded.Gossip
         /// in case they are still present in the storage for communicating the removal to other servers.
         /// </summary>
         FieldInfo<TItem> TryGetWithInfo<TItem>(string key) where TItem : IMergeable<TItem>;
+
+        /// <summary>
+        /// Try to read the value under the given key. Will return deleted and expired values as well,
+        /// in case they are still present in the storage for communicating the removal to other servers.
+        /// </summary>
+        FieldInfo TryGetWithInfo(string key);
 
         /// <summary>
         /// Gets all (non-deleted and non-expired) keys contained in the backend.

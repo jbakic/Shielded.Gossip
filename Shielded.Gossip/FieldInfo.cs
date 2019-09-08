@@ -8,16 +8,41 @@ namespace Shielded.Gossip
     /// Contains a value together with its metadata, like expiry and whether it was
     /// deleted from the database.
     /// </summary>
-    public class FieldInfo<T> where T : IMergeable<T>
+    public class FieldInfo
     {
-        public readonly T Value;
-        public readonly bool Deleted;
+        // this is virtual to avoid having to box values in the child class every time it gets constructed.
+        // the child will override it and thus box only if someone asks for this.
+        public virtual object ValueObject { get; }
+        public bool Deleted { get; protected set; }
         /// <summary>
         /// For internal use. Set to true when the item has been excluded from the database
         /// hash, which may happen some time after its expiry time runs out.
         /// </summary>
-        public readonly bool Expired;
-        public readonly int? ExpiresInMs;
+        public bool Expired { get; protected set; }
+        public int? ExpiresInMs { get; protected set; }
+
+        protected FieldInfo() { }
+
+        public FieldInfo(MessageItem item)
+        {
+            if (item == null)
+                throw new ArgumentNullException(nameof(item));
+            ValueObject = item.Value;
+            Deleted = item.Deleted || ValueObject is IDeletable del && del.CanDelete;
+            Expired = !Deleted && item.Expired;
+            ExpiresInMs = Deleted ? null : item.ExpiresInMs;
+        }
+    }
+
+    /// <summary>
+    /// Contains a value together with its metadata, like expiry and whether it was
+    /// deleted from the database.
+    /// </summary>
+    public sealed class FieldInfo<T> : FieldInfo where T : IMergeable<T>
+    {
+        public T Value { get; private set; }
+
+        public override object ValueObject => Value;
 
         public FieldInfo(T value, int? expiresInMs) : this(value, false, false, expiresInMs) { }
 

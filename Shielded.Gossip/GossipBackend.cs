@@ -592,13 +592,23 @@ namespace Shielded.Gossip
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
+            var res = TryGet(key, out var obj);
+            item = res ? (TItem)obj : default;
+            return res;
+        }
+
+        /// <summary>
+        /// Try to read the value under the given key.
+        /// </summary>
+        public bool TryGet(string key, out object item)
+        {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException(nameof(key));
             item = default;
             var mi = GetActiveItem(key);
             if (mi == null)
                 return false;
-            item = (TItem)mi.Value;
+            item = mi.Value;
             return true;
         }
 
@@ -623,6 +633,18 @@ namespace Shielded.Gossip
                 throw new ArgumentNullException(nameof(key));
             var mi = GetItem(key);
             return mi == null ? null : new FieldInfo<TItem>(mi);
+        }
+
+        /// <summary>
+        /// Try to read the value under the given key. Will return deleted and expired values as well,
+        /// in case they are still present in the storage for communicating the removal to other servers.
+        /// </summary>
+        public FieldInfo TryGetWithInfo(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            var mi = GetItem(key);
+            return mi == null ? null : new FieldInfo(mi);
         }
 
         /// <summary>

@@ -112,13 +112,24 @@ namespace Shielded.Gossip
         /// </summary>
         public bool TryGet<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
         {
+            var res = TryGet(key, out var obj);
+            item = res ? (TItem)obj : default;
+            return res;
+        }
+
+        /// <summary>
+        /// Try to read the value under the given key.
+        /// </summary>
+        public bool TryGet(string key, out object item)
+        {
             if (string.IsNullOrWhiteSpace(key))
                 throw new ArgumentNullException(nameof(key));
             key = WrapPublicKey(key);
             return TryGetInternal(key, out item);
         }
 
-        private bool TryGetInternal<TItem>(string key, out TItem item) where TItem : IMergeable<TItem>
+
+        private bool TryGetInternal(string key, out object item)
         {
             if (!IsInConsistentTransaction)
                 return _wrapped.TryGet(key, out item);
@@ -130,7 +141,7 @@ namespace Shielded.Gossip
                 item = default;
                 return false;
             }
-            item = (TItem)i.Value;
+            item = i.Value;
             return true;
         }
 
@@ -149,6 +160,23 @@ namespace Shielded.Gossip
             if (!local.TryGetValue(key, out var item))
                 return _wrapped.TryGetWithInfo<TItem>(key);
             return new FieldInfo<TItem>(item);
+        }
+
+        /// <summary>
+        /// Try to read the value under the given key. Will return deleted and expired values as well,
+        /// in case they are still present in the storage for communicating the removal to other servers.
+        /// </summary>
+        public FieldInfo TryGetWithInfo(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException(nameof(key));
+            key = WrapPublicKey(key);
+            if (!IsInConsistentTransaction)
+                return _wrapped.TryGetWithInfo(key);
+            var local = _currentState.Value;
+            if (!local.TryGetValue(key, out var item))
+                return _wrapped.TryGetWithInfo(key);
+            return new FieldInfo(item);
         }
 
         private string WrapPublicKey(string key)
