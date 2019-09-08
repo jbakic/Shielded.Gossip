@@ -387,7 +387,9 @@ namespace Shielded.Gossip
         /// <param name="attempts">The number of attempts to make, default 10.</param>
         /// <returns>Result of the task is a continuation for later committing/rolling back, or null if
         /// preparation failed.</returns>
-        public async Task<CommitContinuation> Prepare(Action trans, int attempts = 10)
+        /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
+        /// always run your lambda in that context.</param>
+        public async Task<CommitContinuation> Prepare(Action trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             if (trans == null)
                 throw new ArgumentNullException(nameof(trans));
@@ -451,13 +453,13 @@ namespace Shielded.Gossip
                         return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
                     }
                     var prepTask = PreparationProcess();
-                    var result = await prepTask.WithTimeout(GetNewTimeout());
+                    var result = await prepTask.WithTimeout(GetNewTimeout()).ConfigureAwait(runTransOnCapturedContext);
                     if (result.Success)
                         return cont;
 
                     cont.Rollback();
                     if (result.WaitBeforeRetry != null)
-                        await prepTask.Result.WaitBeforeRetry;
+                        await prepTask.Result.WaitBeforeRetry.ConfigureAwait(runTransOnCapturedContext);
                 }
                 return null;
             }
@@ -477,7 +479,9 @@ namespace Shielded.Gossip
         /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
         /// transaction, this argument is ignored.</param>
         /// <returns>Result indicates if we succeeded in the given number of attempts.</returns>
-        public async Task<bool> RunConsistent(Action trans, int attempts = 10)
+        /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
+        /// always run your lambda in that context.</param>
+        public async Task<bool> RunConsistent(Action trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             if (IsInConsistentTransaction)
             {
@@ -485,7 +489,7 @@ namespace Shielded.Gossip
                 return true;
             }
 
-            using (var cont = await Prepare(trans, attempts))
+            using (var cont = await Prepare(trans, attempts, runTransOnCapturedContext).ConfigureAwait(runTransOnCapturedContext))
             {
                 if (cont == null)
                     return false;
@@ -503,10 +507,12 @@ namespace Shielded.Gossip
         /// transaction, this argument is ignored.</param>
         /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
         /// the result that the lambda returned.</returns>
-        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10)
+        /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
+        /// always run your lambda in that context.</param>
+        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             T res = default;
-            var success = await RunConsistent(() => { res = trans(); }, attempts);
+            var success = await RunConsistent(() => { res = trans(); }, attempts, runTransOnCapturedContext).ConfigureAwait(runTransOnCapturedContext);
             return (success, success ? res : default);
         }
 

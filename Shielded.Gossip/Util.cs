@@ -34,7 +34,7 @@ namespace Shielded.Gossip
         {
             using (var cts = new CancellationTokenSource())
             {
-                if (await Task.WhenAny(task, Task.Delay(ms, cts.Token)) == task)
+                if (await Task.WhenAny(task, Task.Delay(ms, cts.Token)).ConfigureAwait(false) == task)
                 {
                     cts.Cancel();
                     return await task;

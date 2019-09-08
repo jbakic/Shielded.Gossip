@@ -117,6 +117,88 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void ConsistentWithoutGossip_SynchronizationContextCaptureTest()
+        {
+            // in case you want the lambda's you pass to RunConsistent to run on current sync context,
+            // you must pass an arg to the backend, so that it can correctly call ConfigureAwait on the awaits
+            // it does...
+
+            // we'll set a version on two servers, but only locally. the A server will try to run the
+            // transaction and B and C will reject it. we do this to make sure we have some
+            // awaits between the two runs of the transaction lambda below.
+            _backends[B].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[B].SetHasVec("key", "rejected".Version(B));
+            });
+            _backends[B].Configuration.DirectMail = DirectMailType.GossipSupressed;
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[C].SetHasVec("key", "rejected".Version(B));
+            });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
+
+            AsyncPump.Run(async () =>
+            {
+                var ctx = SynchronizationContext.Current;
+                await _backends[A].RunConsistent(() =>
+                {
+                    Assert.AreEqual(ctx, SynchronizationContext.Current);
+                    // side-effects too, this is perhaps most useful for them.
+                    Shield.SideEffect(() => Assert.AreEqual(ctx, SynchronizationContext.Current));
+
+                    _backends[A].SetHasVec("key", "accepted".Version(A));
+                });
+                Assert.AreEqual(ctx, SynchronizationContext.Current);
+            });
+        }
+
+        [TestMethod]
+        public void ConsistentWithoutGossip_SynchronizationContextNoCaptureTest()
+        {
+            // this is the opposite of the previous - we do not want the transaction lambda to run on the
+            // current synchronization context (which is the default behavior), so will the backend
+            // correctly avoid capturing it?
+
+            // we'll set a version on two servers, but only locally. the A server will try to run the
+            // transaction and B and C will reject it. we do this to make sure we have some
+            // awaits between the two runs of the transaction lambda below.
+            _backends[B].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[B].SetHasVec("key", "rejected".Version(B));
+            });
+            _backends[B].Configuration.DirectMail = DirectMailType.GossipSupressed;
+            _backends[C].Configuration.DirectMail = DirectMailType.Off;
+            Shield.InTransaction(() =>
+            {
+                _backends[C].SetHasVec("key", "rejected".Version(B));
+            });
+            _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
+
+            int run = 0;
+            AsyncPump.Run(async () =>
+            {
+                var ctx = SynchronizationContext.Current;
+                await _backends[A].RunConsistent(() =>
+                {
+                    // the first run is done immediately, so the context is still visible. but the second will be
+                    // done after awaiting for the other servers, who will reject the first run.
+                    if (++run == 1)
+                        Assert.AreEqual(ctx, SynchronizationContext.Current);
+                    else
+                        Assert.IsNull(SynchronizationContext.Current);
+                    Shield.SideEffect(() => Assert.IsNull(SynchronizationContext.Current));
+
+                    _backends[A].SetHasVec("key", "accepted".Version(A));
+                }, runTransOnCapturedContext: false).ConfigureAwait(false);
+
+                Assert.IsNull(SynchronizationContext.Current);
+            });
+        }
+
+        [TestMethod]
         public void ConsistentWithoutGossip_WriteTwoVersions()
         {
             // we'll set a version on two servers, but only locally. the A server will try to run a
