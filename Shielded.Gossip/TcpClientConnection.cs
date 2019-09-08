@@ -55,6 +55,7 @@ namespace Shielded.Gossip
         {
             _state = State.Connecting;
             var client = _client = new TcpClient() { ReceiveTimeout = Transport.ReceiveTimeout };
+            // this is mostly just needed for ASP.NET WebForms which actively prohibits any awaits on its threads.
             Task.Run(() => Connect(client));
         }
 
@@ -134,7 +135,7 @@ namespace Shielded.Gossip
                             return;
                         msg = _messageQueue.Peek();
                     }
-                    await TcpTransport.SendFramed(client.GetStream(), msg);
+                    await TcpTransport.SendFramed(client.GetStream(), msg).ConfigureAwait(false);
                     lock (_lock)
                     {
                         if (_messageQueue.Peek() == msg)
@@ -170,7 +171,7 @@ namespace Shielded.Gossip
                     // to block any concurrent attempts to send, since only one thread may send over a TcpClient at one time.
                     _state = State.Sending;
                 }
-                await TcpTransport.SendFramed(client.GetStream(), new byte[0]);
+                await TcpTransport.SendFramed(client.GetStream(), new byte[0]).ConfigureAwait(false);
                 lock (_lock)
                 {
                     if (_client != client || _state != State.Sending)
