@@ -146,20 +146,20 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_Race()
         {
-            const int transactions = 1000;
-            const int fieldCount = 50;
+            const int transactions = 10000;
+            const int fieldCount = 500;
 
             foreach (var back in _backends.Values)
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
-            Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
-                Task.Run(() => Shield.InTransaction(() =>
+            ParallelEnumerable.Range(1, transactions).ForAll(i =>
+                Shield.InTransaction(() =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).ToArray());
+                }));
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
@@ -197,8 +197,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_RaceSeriallyConnected()
         {
-            const int transactions = 1000;
-            const int fieldCount = 50;
+            const int transactions = 10000;
+            const int fieldCount = 500;
 
             Shield.InTransaction(() =>
             {
@@ -208,14 +208,14 @@ namespace Shielded.Gossip.Tests
             foreach (var back in _backends.Values)
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
-            Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
-                Task.Run(() => Shield.InTransaction(() =>
+            ParallelEnumerable.Range(1, transactions).ForAll(i =>
+                Shield.InTransaction(() =>
                 {
                     var backend = _backends.Values.Skip(i % 3).First();
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).ToArray());
+                }));
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
@@ -230,8 +230,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void GossipBackendMultiple_RaceAsymmetric()
         {
-            const int transactions = 1000;
-            const int fieldCount = 50;
+            const int transactions = 10000;
+            const int fieldCount = 500;
 
             Shield.InTransaction(() =>
             {
@@ -241,15 +241,15 @@ namespace Shielded.Gossip.Tests
             foreach (var back in _backends.Values)
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
-            Task.WaitAll(Enumerable.Range(1, transactions).Select(i =>
-                Task.Run(() => Shield.InTransaction(() =>
+            ParallelEnumerable.Range(1, transactions).ForAll(i =>
+                Shield.InTransaction(() =>
                 {
                     // run all updates on A, to cause asymmetry in the amount of data they have to gossip about.
                     var backend = _backends[A];
                     var key = "key" + (i % fieldCount);
                     var val = backend.TryGet(key, out CountVector v) ? v : new CountVector();
                     backend.Set(key, val.Increment(backend.Transport.OwnId));
-                }))).ToArray());
+                }));
 
             Thread.Sleep(1000);
             OnMessage(null, "Done waiting.");
