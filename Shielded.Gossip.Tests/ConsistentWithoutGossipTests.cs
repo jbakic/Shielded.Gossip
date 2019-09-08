@@ -119,9 +119,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void ConsistentWithoutGossip_SynchronizationContextCaptureTest()
         {
-            // in case you want the lambda's you pass to RunConsistent to run on current sync context,
-            // you must pass an arg to the backend, so that it can correctly call ConfigureAwait on the awaits
-            // it does...
+            // by default, lambdas passed to RunConsistent/Prepare, incl. any side effects, will
+            // all be executed in the current async context.
 
             // we'll set a version on two servers, but only locally. the A server will try to run the
             // transaction and B and C will reject it. we do this to make sure we have some
@@ -157,9 +156,8 @@ namespace Shielded.Gossip.Tests
         [TestMethod]
         public void ConsistentWithoutGossip_SynchronizationContextNoCaptureTest()
         {
-            // this is the opposite of the previous - we do not want the transaction lambda to run on the
-            // current synchronization context (which is the default behavior), so will the backend
-            // correctly avoid capturing it?
+            // this is the opposite of the previous - here we do not need the transaction lambda to run in the
+            // current async context, so we use the runTransOnCapturedContext argument.
 
             // we'll set a version on two servers, but only locally. the A server will try to run the
             // transaction and B and C will reject it. we do this to make sure we have some
