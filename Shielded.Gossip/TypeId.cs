@@ -7,7 +7,7 @@ namespace Shielded.Gossip
     /// <summary>
     /// Helper for obtaining a fully qualified type name which does not contain the
     /// assembly version information, and for faster obtaining of Types from such IDs.
-    /// Used by the <see cref="Serializer"/>.
+    /// Used by the <see cref="DefaultSerializer"/>.
     /// </summary>
     public static class TypeId
     {
