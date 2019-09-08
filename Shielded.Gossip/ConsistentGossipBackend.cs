@@ -385,10 +385,10 @@ namespace Shielded.Gossip
         /// </summary>
         /// <param name="trans">The lambda to run as a distributed transaction.</param>
         /// <param name="attempts">The number of attempts to make, default 10.</param>
-        /// <returns>Result of the task is a continuation for later committing/rolling back, or null if
-        /// preparation failed.</returns>
         /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
         /// always run your lambda in that context.</param>
+        /// <returns>Result of the task is a continuation for later committing/rolling back, or null if
+        /// preparation failed.</returns>
         public async Task<CommitContinuation> Prepare(Action trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             if (trans == null)
@@ -478,9 +478,9 @@ namespace Shielded.Gossip
         /// <param name="trans">The lambda to run as a distributed transaction.</param>
         /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
         /// transaction, this argument is ignored.</param>
-        /// <returns>Result indicates if we succeeded in the given number of attempts.</returns>
         /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
         /// always run your lambda in that context.</param>
+        /// <returns>Result indicates if we succeeded in the given number of attempts.</returns>
         public async Task<bool> RunConsistent(Action trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             if (IsInConsistentTransaction)
@@ -505,10 +505,10 @@ namespace Shielded.Gossip
         /// <param name="trans">The lambda to run as a distributed transaction.</param>
         /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
         /// transaction, this argument is ignored.</param>
-        /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
-        /// the result that the lambda returned.</returns>
         /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
         /// always run your lambda in that context.</param>
+        /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
+        /// the result that the lambda returned.</returns>
         public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             T res = default;
