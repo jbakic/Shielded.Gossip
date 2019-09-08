@@ -518,7 +518,7 @@ namespace Shielded.Gossip
 
         async Task<PrepareResult> PrepareInternal(BackendState ourState, TransactionInfo transaction, bool initiatedLocally)
         {
-            var lockRes = await LockFields(ourState);
+            var lockRes = await LockFields(ourState).ConfigureAwait(false);
             return lockRes.Success ? new PrepareResult(Check(ourState.TransactionId, transaction, initiatedLocally), null) : lockRes;
         }
 
@@ -554,7 +554,7 @@ namespace Shielded.Gossip
                 if (waitFor == prepareTask)
                     return new PrepareResult(false);
 
-                if (await Task.WhenAny(prepareTask, waitFor) == prepareTask)
+                if (await Task.WhenAny(prepareTask, waitFor).ConfigureAwait(false) == prepareTask)
                     return prepareTask.Result;
             }
         }
@@ -677,7 +677,7 @@ namespace Shielded.Gossip
                 try
                 {
                     var prepareTask = PrepareInternal(ourState, newVal, false).WithTimeout(Configuration.ConsistentPrepareTimeoutRange.Max);
-                    if (await Task.WhenAny(prepareTask, ourState.PrepareCompleter.Task) != prepareTask ||
+                    if (await Task.WhenAny(prepareTask, ourState.PrepareCompleter.Task).ConfigureAwait(false) != prepareTask ||
                         !prepareTask.Result.Success)
                     {
                         SetRejected(id);
