@@ -8,14 +8,14 @@ namespace Shielded.Gossip.Tests
     /// This basically tests <see cref="VectorBase{TVec, T}"/>.
     /// </summary>
     [TestClass]
-    public class VectorClockTests
+    public class VersionVectorTests
     {
         private const string A = "server A";
         private const string B = "server B";
         private const string C = "server C";
 
         [TestMethod]
-        public void VectorClock_ConstructorAndEquality()
+        public void VersionVector_ConstructorAndEquality()
         {
             var items = new []
             {
@@ -35,7 +35,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_VectorCompareAndNext()
+        public void VersionVector_VectorCompareAndNext()
         {
             var a = new VersionVector(A, 4);
 
@@ -71,7 +71,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_MergeWith_DefaultIsZero()
+        public void VersionVector_MergeWith_DefaultIsZero()
         {
             Assert.AreEqual(VectorRelationship.Equal,
                 (new VersionVector() | new VersionVector()).VectorCompare(new VersionVector()));
@@ -88,7 +88,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_MergeWith_Idempotent()
+        public void VersionVector_MergeWith_Idempotent()
         {
             var a = (VersionVector)(A, 4);
             var b = (VersionVector)(A, 4);
@@ -100,7 +100,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_MergeWith_Commutative()
+        public void VersionVector_MergeWith_Commutative()
         {
             var a = (VersionVector)(A, 4);
             var b = (VersionVector)(B, 6);
@@ -112,7 +112,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_MergeWith_Associative()
+        public void VersionVector_MergeWith_Associative()
         {
             var a = (VersionVector)(A, 4);
             var b = (VersionVector)(B, 6);
@@ -125,7 +125,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_EqualityAndHashCode()
+        public void VersionVector_EqualityAndHashCode()
         {
             var a = (VersionVector)(A, 1);
             var b = (VersionVector)(B, 2);
@@ -147,7 +147,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_Modify()
+        public void VersionVector_Modify()
         {
             Assert.ThrowsException<ArgumentNullException>(() => new VersionVector(null, 1));
             Assert.ThrowsException<ArgumentNullException>(() => (VersionVector)(null, 1));
@@ -163,7 +163,7 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
-        public void VectorClock_Overflow()
+        public void VersionVector_Overflow()
         {
             var a = (VersionVector)(A, int.MaxValue);
 

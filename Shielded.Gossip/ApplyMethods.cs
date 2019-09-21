@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 
@@ -17,10 +18,12 @@ namespace Shielded.Gossip
     /// </summary>
     internal class ApplyMethods
     {
-        public ApplyMethods(object self, MethodInfo itemMsgMethod)
+        public ApplyMethods(Expression<Func<string, FieldInfo<Lww<int>>, ComplexRelationship>> sampleCall)
         {
-            _self = self;
-            _itemMsgMethod = itemMsgMethod;
+            var methodCall = (MethodCallExpression)sampleCall.Body;
+            _self = methodCall.Object == null ? null :
+                Expression.Lambda<Func<object>>(methodCall.Object).Compile()();
+            _itemMsgMethod = methodCall.Method.GetGenericMethodDefinition();
         }
 
         public ApplyDelegate Get(Type t)

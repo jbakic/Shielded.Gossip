@@ -126,7 +126,7 @@ namespace Shielded.Gossip
                     return null;
                 if (!_referenceTickCount.HasValue)
                     return _expiresInMs;
-                return unchecked(_expiresInMs.Value + _referenceTickCount.Value - GetEnvironmentTickCount());
+                return unchecked(_expiresInMs.Value + _referenceTickCount.Value - TransactionalTickCount.Value);
             }
             set
             {
@@ -137,20 +137,6 @@ namespace Shielded.Gossip
         private int? _expiresInMs;
         [NonSerialized]
         private int? _referenceTickCount;
-
-        private static ShieldedLocal<int> _transactionTickCount = new ShieldedLocal<int>();
-
-        /// <summary>
-        /// Like Environment.TickCount, but does not change within one Shielded transaction run.
-        /// </summary>
-        private int GetEnvironmentTickCount()
-        {
-            if (!Shield.IsInTransaction)
-                return Environment.TickCount;
-            if (!_transactionTickCount.HasValue)
-                return _transactionTickCount.Value = Environment.TickCount;
-            return _transactionTickCount.Value;
-        }
 
         public void ActivateExpiry(int referenceTickCount)
         {

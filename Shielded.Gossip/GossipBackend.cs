@@ -50,8 +50,7 @@ namespace Shielded.Gossip
             _freshIndex = new ReverseTimeIndex(GetItemDirect);
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
             _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.CleanUpInterval, Configuration.CleanUpInterval);
-            _applyMethods = new ApplyMethods(this,
-                typeof(GossipBackend).GetMethod("SetInternal", BindingFlags.Instance | BindingFlags.NonPublic));
+            _applyMethods = new ApplyMethods((key, fi) => SetInternal(key, fi));
             Transport.MessageHandler = Transport_MessageHandler;
         }
 

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -53,8 +52,7 @@ namespace Shielded.Gossip
         /// <param name="configuration">The configuration.</param>
         public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
         {
-            _compareMethods = new ApplyMethods(this,
-                typeof(ConsistentGossipBackend).GetMethod("CheckOne", BindingFlags.NonPublic | BindingFlags.Instance));
+            _compareMethods = new ApplyMethods((key, fi) => CheckOne(key, fi));
             _wrapped = new GossipBackend(transport, configuration, this);
             Shield.InTransaction(() =>
                 _wrapped.Changed.Subscribe(_wrapped_Changed));
@@ -336,14 +334,14 @@ namespace Shielded.Gossip
                 AllKeys = allKeys;
             }
 
-            public void Complete(bool res) => Shield.InTransaction(() =>
+            public void Complete() => Shield.InTransaction(() =>
             {
                 if (!Self._transactions.Remove(TransactionId))
                     return;
                 Self.UnlockFields(this);
                 Shield.SideEffect(() =>
                 {
-                    PrepareCompleter.TrySetResult(new PrepareResult(res));
+                    PrepareCompleter.TrySetResult(new PrepareResult(false));
                     Committer.TrySetResult(null);
                 });
             });
@@ -407,6 +405,8 @@ namespace Shielded.Gossip
                     TransactionInfo transaction = null;
                     cont = Shield.RunToCommit(Timeout.Infinite, () =>
                     {
+                        ourState = null;
+                        transaction = null;
                         var ourChanges = _currentState.Value = new Dictionary<string, MessageItem>();
                         trans();
 
@@ -452,14 +452,13 @@ namespace Shielded.Gossip
                         });
                         return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
                     }
-                    var prepTask = PreparationProcess();
-                    var result = await prepTask.WithTimeout(GetNewTimeout()).ConfigureAwait(runTransOnCapturedContext);
+                    var result = await PreparationProcess().WithTimeout(GetNewTimeout()).ConfigureAwait(runTransOnCapturedContext);
                     if (result.Success)
                         return cont;
 
                     cont.Rollback();
                     if (result.WaitBeforeRetry != null)
-                        await prepTask.Result.WaitBeforeRetry.ConfigureAwait(runTransOnCapturedContext);
+                        await result.WaitBeforeRetry.ConfigureAwait(runTransOnCapturedContext);
                 }
                 return null;
             }
@@ -525,7 +524,7 @@ namespace Shielded.Gossip
         async Task<PrepareResult> PrepareInternal(BackendState ourState, TransactionInfo transaction, bool initiatedLocally)
         {
             var lockRes = await LockFields(ourState).ConfigureAwait(false);
-            return lockRes.Success ? new PrepareResult(Check(ourState.TransactionId, transaction, initiatedLocally), null) : lockRes;
+            return lockRes.Success ? new PrepareResult(Check(ourState, transaction, initiatedLocally), null) : lockRes;
         }
 
         private async Task<PrepareResult> LockFields(BackendState ourState)
@@ -534,10 +533,10 @@ namespace Shielded.Gossip
             var keys = ourState.AllKeys;
             while (true)
             {
-                Task waitFor = Shield.InTransaction(() =>
+                Task[] waitFor = Shield.InTransaction(() =>
                 {
-                    if (!_transactions.ContainsKey(ourState.TransactionId))
-                        return prepareTask;
+                    if (!_transactions.TryGetValue(ourState.TransactionId, out var currState) || currState != ourState)
+                        return new Task[0];
                     var tasks = keys.Select(key =>
                     {
                         if (!_fieldBlockers.TryGetValue(key, out var someState))
@@ -546,10 +545,10 @@ namespace Shielded.Gossip
                             Shield.SideEffect(() =>
                                 someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task)));
                         return someState.Committer.Task;
-                    }).Where(t => t != null).ToArray();
+                    }).Where(t => t != null).Distinct().ToArray();
 
-                    if (tasks.Any())
-                        return Task.WhenAll(tasks);
+                    if (tasks.Length > 0)
+                        return tasks;
 
                     foreach (var key in keys)
                         _fieldBlockers[key] = ourState;
@@ -557,11 +556,11 @@ namespace Shielded.Gossip
                 });
                 if (waitFor == null)
                     return new PrepareResult(true);
-                if (waitFor == prepareTask)
+                if (waitFor.Length == 0)
                     return new PrepareResult(false);
 
-                if (await Task.WhenAny(prepareTask, waitFor).ConfigureAwait(false) == prepareTask)
-                    return prepareTask.Result;
+                if (await Task.WhenAny(prepareTask, Task.WhenAll(waitFor)).ConfigureAwait(false) == prepareTask)
+                    return await prepareTask;
             }
         }
 
@@ -583,13 +582,14 @@ namespace Shielded.Gossip
             where TItem : IMergeable<TItem>
         {
             var curr = _wrapped.TryGetWithInfo<TItem>(key);
-            if (curr == null)
-                return value.Deleted || value.Expired ? ComplexRelationship.Equal : ComplexRelationship.Greater;
-            return value.VectorCompare(curr, Configuration.ExpiryComparePrecision);
+            return curr == null ? ComplexRelationship.Greater : value.VectorCompare(curr, Configuration.ExpiryComparePrecision);
         }
 
-        private bool Check(string id, TransactionInfo transaction, bool initiatedLocally) => Shield.InTransaction(() =>
+        private bool Check(BackendState ourState, TransactionInfo transaction, bool initiatedLocally) => Shield.InTransaction(() =>
         {
+            var id = ourState.TransactionId;
+            if (!_transactions.TryGetValue(id, out var currState) || currState != ourState)
+                return false;
             bool result = true;
 
             if (transaction.Reads != null)
@@ -624,10 +624,9 @@ namespace Shielded.Gossip
                 {
                     var obj = change.Value;
                     var comparer = _compareMethods.Get(obj.GetType());
-                    // the same for writes - because e.g. if you add and remove a key that did not exist, your write's effect on
-                    // other servers will be Equal. this is also OK.
-                    if ((comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs)
-                        .GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
+                    // writes must be Greater than what we have, or EqualButGreater, if you just extended the expiry
+                    var cmp = comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs);
+                    if (cmp != ComplexRelationship.Greater && cmp != ComplexRelationship.EqualButGreater)
                     {
                         if (initiatedLocally)
                             return false;
@@ -673,8 +672,7 @@ namespace Shielded.Gossip
             }
             if (StringComparer.InvariantCultureIgnoreCase.Equals(newVal.Initiator, Transport.OwnId))
             {
-                SetRejected(id);
-                return;
+                throw new ApplicationException("Invalid transaction info - local server is Initiator, but his state is None.");
             }
             var ourState = new BackendState(id, newVal.Initiator, this, newVal.AllKeys.ToArray());
             _transactions.Add(id, ourState);
@@ -682,12 +680,10 @@ namespace Shielded.Gossip
             {
                 try
                 {
-                    var prepareTask = PrepareInternal(ourState, newVal, false).WithTimeout(Configuration.ConsistentPrepareTimeoutRange.Max);
-                    if (await Task.WhenAny(prepareTask, ourState.PrepareCompleter.Task).ConfigureAwait(false) != prepareTask ||
-                        !prepareTask.Result.Success)
-                    {
+                    var result = await PrepareInternal(ourState, newVal, false)
+                        .WithTimeout(Configuration.ConsistentPrepareTimeoutRange.Max).ConfigureAwait(false);
+                    if (!result.Success)
                         SetRejected(id);
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -725,12 +721,11 @@ namespace Shielded.Gossip
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Fail));
         });
 
-        private bool ApplyAndSetSuccess(string id) => Shield.InTransaction(() =>
+        private bool SetSuccess(string id) => Shield.InTransaction(() =>
         {
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 return false;
-            Apply(current);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
             return true;
         });
@@ -744,13 +739,14 @@ namespace Shielded.Gossip
             {
                 SetFail(id);
                 if (ourState != null)
-                    ourState.Complete(false);
+                    ourState.Complete();
             }
             else if (current.IsSuccess)
             {
-                ApplyAndSetSuccess(id);
+                Apply(current);
+                SetSuccess(id);
                 if (ourState != null)
-                    ourState.Complete(true);
+                    ourState.Complete();
             }
             else if (current.IsPrepared &&
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
@@ -759,7 +755,14 @@ namespace Shielded.Gossip
                     Shield.SideEffect(() =>
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
                 else
+                {
+                    // in case this transaction previously succeeded, but some other servers never got the news,
+                    // and were holding in Prepared - we send the latest state of these keys, to make sure they
+                    // are up-to-date when they release their field locks.
+                    foreach (var key in current.AllKeys)
+                        _wrapped.Touch(key);
                     SetFail(id);
+                }
             }
         }
 
@@ -779,13 +782,13 @@ namespace Shielded.Gossip
                 throw new ApplicationException("Critical error - unexpected commit failure.");
             Apply(current);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
-            ourState.Complete(true);
+            ourState.Complete();
         });
 
         private void Fail(BackendState ourState) => Shield.InTransaction(() =>
         {
             SetFail(ourState.TransactionId);
-            ourState.Complete(false);
+            ourState.Complete();
         });
 
         public void Dispose()

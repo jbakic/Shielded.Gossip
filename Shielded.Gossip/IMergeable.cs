@@ -18,23 +18,22 @@ namespace Shielded.Gossip
     }
 
     /// <summary>
-    /// Interface for CRDTs - types which have a merge operation that is idempotent,
-    /// commutative and associative. Such an operation allows multiple servers to eventually
-    /// reach the same state regardless of the order or the number of messages which they
-    /// exchange.
+    /// Interface for types which have a merge operation that is idempotent, commutative and
+    /// associative. Required by the gossip backend to resolve conflicts.
     /// </summary>
     public interface IMergeable<T> : IHasVersionBytes where T : IMergeable<T>
     {
         /// <summary>
-        /// Merge the value with another, returning the result. Must be idempotent, commutative
-        /// and associative. Should not change the current object!
+        /// Merge the value with another, returning the result. Should not change the current
+        /// object! The result must be <see cref="VectorRelationship.Greater"/> than or
+        /// <see cref="VectorRelationship.Equal"/> to both of the merged values.
         /// </summary>
         T MergeWith(T other);
 
         /// <summary>
-        /// Compare with the other value, returning their <see cref="VectorRelationship"/>. Connected
-        /// to <see cref="MergeWith(T)"/> - comparing the result of a merge with any of the two
-        /// original values must return Greater or Equal.
+        /// Compare with the other value, returning their <see cref="VectorRelationship"/>.
+        /// Comparing the result of <see cref="MergeWith(T)"/> with any of the two merged values
+        /// must return Greater or Equal.
         /// </summary>
         VectorRelationship VectorCompare(T other);
     }

@@ -245,5 +245,53 @@ namespace Shielded.Gossip.Tests
             read = _backends[C].RunConsistent(() => _backends[C].TryGetIntVersioned<TestClass>("key")).Result.Value;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
         }
+
+        [TestMethod]
+        public void Consistent_Stress()
+        {
+            const int transactions = 1000;
+            const int fieldCount = 100;
+            const int prime1 = 113;
+            const int prime2 = 149;
+
+            foreach (var back in _backends.Values)
+            {
+                back.Configuration.DirectMail = DirectMailType.Always;
+            }
+
+            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+            {
+                var backend = _backends.Values.Skip(i % 3).First();
+                var key1 = "key" + (i * prime1 % fieldCount);
+                var key2 = "key" + ((i + 1) * prime2 % fieldCount);
+                if (key1 == key2)
+                    key2 = "key" + (((i + 1) * prime2 + 1) % fieldCount);
+                return backend.RunConsistent(() =>
+                {
+                    var val1 = backend.TryGetVecVersioned<int>(key1)
+                        .SingleOrDefault()
+                        .NextVersion(backend.Transport.OwnId);
+                    val1.Value = val1.Value + 1;
+                    Assert.AreEqual(VectorRelationship.Greater, backend.SetHasVec(key1, val1));
+
+                    var val2 = backend.TryGetVecVersioned<int>(key2)
+                        .SingleOrDefault()
+                        .NextVersion(backend.Transport.OwnId);
+                    val2.Value = val2.Value - 1;
+                    Assert.AreEqual(VectorRelationship.Greater, backend.SetHasVec(key2, val2));
+                }, 100);
+            })).Result;
+            var successCount = bools.Count(b => b);
+            Assert.AreEqual(transactions, successCount);
+
+            CheckProtocols();
+
+            var totalSum = _backends[B].RunConsistent(() =>
+                Enumerable.Range(0, fieldCount).Sum(i =>
+                    _backends[B].TryGetVecVersioned<int>("key" + i).SingleOrDefault().Value)).Result;
+
+            Assert.IsTrue(totalSum.Success);
+            Assert.AreEqual(0, totalSum.Value);
+        }
     }
 }

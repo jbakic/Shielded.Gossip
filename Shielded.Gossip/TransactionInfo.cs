@@ -87,11 +87,9 @@ namespace Shielded.Gossip
         public bool IsFail => State.Any(i => i.Value == TransactionState.Fail);
 
         /// <summary>
-        /// True if a majority of servers has reached the Success or the Fail state. It is safe to
-        /// delete a done transaction, cause even if later revived, it is idempotent - a re-execution
-        /// will simply fail with no effects, and the transaction will become deletable again.
+        /// True as soon as the transaction completes.
         /// </summary>
-        public bool CanDelete => State.Count(s => (s.Value & TransactionState.Done) != 0) > (State.Count / 2);
+        public bool CanDelete => IsDone;
 
         public IEnumerable<byte[]> GetVersionBytes() => (State ?? new TransactionVector()).GetVersionBytes();
 
