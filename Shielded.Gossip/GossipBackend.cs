@@ -429,7 +429,7 @@ namespace Shielded.Gossip
             var packageSize = currentState == null
                 ? Configuration.AntiEntropyInitialSize
                 : Math.Max(Configuration.AntiEntropyInitialSize,
-                    Math.Min(Configuration.AntiEntropyCutoff, currentState.LastPackageSize * 2));
+                    Math.Min(Configuration.AntiEntropyItemsCutoff, currentState.LastPackageSize * 2));
             var toSend = GetPackage(packageSize,
                 lastWindowStart > 0 ? currentState.LastWindowStart : default, lastWindowEnd,
                 ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
@@ -545,7 +545,9 @@ namespace Shielded.Gossip
             long? stopAtFreshness, int? packageSize, long? ignoreUpToFreshness, HashSet<string> keysToIgnore)
         {
             ReverseTimeIndex.Enumerator prevFreshnessStart = default;
-            int cutoff = Configuration.AntiEntropyCutoff;
+            var itemsCutoff = Configuration.AntiEntropyItemsCutoff;
+            var bytesCutoff = Configuration.AntiEntropyBytesCutoff;
+            var bytes = result.Sum(mi => mi.Data.Length);
 
             if (!enumerator.IsOpen && !enumerator.MoveNext())
                 return true;
@@ -556,17 +558,22 @@ namespace Shielded.Gossip
                     return true;
                 if (prevFreshnessStart.IsDone || prevFreshnessStart.Current.Freshness != item.Freshness)
                 {
-                    if (result.Count >= cutoff || result.Count >= packageSize)
+                    // bytes not checked, cause we do not know if this particular item will get added.
+                    if (result.Count >= itemsCutoff || result.Count >= packageSize)
                         return false;
                     prevFreshnessStart = enumerator;
                 }
                 if (keysToIgnore == null || item.Freshness > ignoreUpToFreshness.Value || !keysToIgnore.Contains(item.Item.Key))
                 {
-                    if (result.Count == cutoff && !prevFreshnessStart.IsDone)
+                    bytes += item.Item.Data.Length;
+                    if ((result.Count == itemsCutoff || bytes > bytesCutoff) &&
+                        // we only stop and remove the current package if we already have at least one other package in result.
+                        result.Count > 0 && result[0].Freshness != item.Freshness)
                     {
                         enumerator = prevFreshnessStart;
                         var index = result.FindIndex(mi => mi.Freshness == item.Freshness);
-                        result.RemoveRange(index, result.Count - index);
+                        if (index >= 0)
+                            result.RemoveRange(index, result.Count - index);
                         return false;
                     }
                     result.Add(item.Item);

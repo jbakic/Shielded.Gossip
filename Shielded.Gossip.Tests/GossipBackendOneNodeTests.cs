@@ -173,7 +173,7 @@ namespace Shielded.Gossip.Tests
             Shield.InTransaction(() => { _backend.SetHasVec("key", testEntity); });
 
             // linger interval is 200 ms, so this is enough.
-            Thread.Sleep(300);
+            Thread.Sleep(400);
 
             Assert.IsTrue(_backend.ContainsKey("key"));
             Assert.IsTrue(_backend.Keys.SequenceEqual(new[] { "key" }));
@@ -189,7 +189,7 @@ namespace Shielded.Gossip.Tests
             Assert.IsFalse(_backend.Keys.Any());
             Assert.IsTrue(_backend.KeysWithInfo.SequenceEqual(new[] { "key" }));
 
-            Thread.Sleep(300);
+            Thread.Sleep(400);
 
             Assert.IsFalse(_backend.ContainsKey("key"));
             Assert.IsFalse(_backend.ContainsKeyWithInfo("key"));

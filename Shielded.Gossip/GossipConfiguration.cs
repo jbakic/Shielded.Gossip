@@ -37,7 +37,7 @@
         /// <summary>
         /// Number of key/value pairs to send in the opening message when beginning a new gossip exchange.
         /// Must be > 0. The message sizes grow exponentially after that, doubling in size, until they
-        /// reach the <see cref="AntiEntropyCutoff"/>. Messages will contain only whole transactions,
+        /// reach the <see cref="AntiEntropyItemsCutoff"/>. Messages will contain only whole transactions,
         /// so the actual size will not be exactly this number. Reply messages will also include all new
         /// changes, so they may be bigger when under load.
         /// </summary>
@@ -48,7 +48,14 @@
         /// now and then, particularly if you perform transactions which change a large number of
         /// fields, because we transmit only whole transactions.
         /// </summary>
-        public int AntiEntropyCutoff { get; set; } = 1000;
+        public int AntiEntropyItemsCutoff { get; set; } = 1000;
+
+        /// <summary>
+        /// Limit on the size, in bytes, of any message. The messages can get a little bigger than this,
+        /// because of the size of metadata accompanying the items, and also because we only transmit
+        /// whole transactions.
+        /// </summary>
+        public int AntiEntropyBytesCutoff { get; set; } = 10 * 1024 * 1024;
 
         /// <summary>
         /// If we hear no reply in this many milliseconds, we may start another gossip session with

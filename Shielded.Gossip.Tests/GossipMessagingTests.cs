@@ -72,14 +72,14 @@ namespace Shielded.Gossip.Tests
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 17,
-                AntiEntropyCutoff = 59,
+                AntiEntropyItemsCutoff = 59,
             }))
             using (var backendB = new GossipBackend(transportB, new GossipConfiguration
             {
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 17,
-                AntiEntropyCutoff = 59,
+                AntiEntropyItemsCutoff = 59,
             }))
             {
                 for (int i = 0; i < 100; i++)
@@ -186,6 +186,66 @@ namespace Shielded.Gossip.Tests
         }
 
         [TestMethod]
+        public void GossipMessaging_BytesCutoff()
+        {
+            var someBytes = Enumerable.Repeat((byte)101, 10000).ToArray();
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string>());
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+                AntiEntropyBytesCutoff = 30000,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                backendA.SetHasVec("key1", someBytes.Version(A, 1));
+                backendA.SetHasVec("key2", someBytes.Version(A, 1));
+                backendA.Configuration.DirectMail = DirectMailType.StartGossip;
+                backendA.SetHasVec("key3", someBytes.Version(A, 1));
+
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
+                Assert.IsNotNull(msgA1);
+                // 2 of the keys, the third one cannot fit in the bytes cut-off.
+                Assert.AreEqual(2, msgA1.Items.Length);
+            }
+        }
+
+        [TestMethod]
+        public void GossipMessaging_BytesCutoffEmptyMsg()
+        {
+            var someBytes = Enumerable.Repeat((byte)101, 10000).ToArray();
+            var transportA = new MockTransport(A, new List<string> { B });
+            var transportB = new MockTransport(B, new List<string>());
+            using (var backendA = new GossipBackend(transportA, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+                AntiEntropyBytesCutoff = 1000,
+            }))
+            using (var backendB = new GossipBackend(transportB, new GossipConfiguration
+            {
+                DirectMail = DirectMailType.Off,
+                GossipInterval = Timeout.Infinite,
+            }))
+            {
+                backendA.SetHasVec("key1", someBytes.Version(A, 1));
+                backendA.SetHasVec("key2", someBytes.Version(A, 1));
+                backendA.Configuration.DirectMail = DirectMailType.StartGossip;
+                backendA.SetHasVec("key3", someBytes.Version(A, 1));
+
+                var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
+                Assert.IsNotNull(msgA1);
+                // one key will pass, since we must send something...
+                Assert.AreEqual(1, msgA1.Items.Length);
+            }
+        }
+
+        [TestMethod]
         public void GossipMessaging_NewChangesBetweenReplies()
         {
             var transportA = new MockTransport(A, new List<string> { B });
@@ -195,14 +255,14 @@ namespace Shielded.Gossip.Tests
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 7,
-                AntiEntropyCutoff = 49,
+                AntiEntropyItemsCutoff = 49,
             }))
             using (var backendB = new GossipBackend(transportB, new GossipConfiguration
             {
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 7,
-                AntiEntropyCutoff = 49,
+                AntiEntropyItemsCutoff = 49,
             }))
             {
                 for (int i = 0; i < 100; i++)
@@ -370,14 +430,14 @@ namespace Shielded.Gossip.Tests
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 21,
-                AntiEntropyCutoff = 49,
+                AntiEntropyItemsCutoff = 49,
             }))
             using (var backendB = new GossipBackend(transportB, new GossipConfiguration
             {
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 21,
-                AntiEntropyCutoff = 49,
+                AntiEntropyItemsCutoff = 49,
             }))
             {
                 for (int i = 0; i < 2; i++)
@@ -486,14 +546,14 @@ namespace Shielded.Gossip.Tests
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 7,
-                AntiEntropyCutoff = 49,
+                AntiEntropyItemsCutoff = 49,
             }))
             using (var backendB = new GossipBackend(transportB, new GossipConfiguration
             {
                 DirectMail = DirectMailType.Off,
                 GossipInterval = Timeout.Infinite,
                 AntiEntropyInitialSize = 7,
-                AntiEntropyCutoff = 49,
+                AntiEntropyItemsCutoff = 49,
             }))
             {
                 for (int i = 0; i < 100; i++)
