@@ -17,9 +17,9 @@ system for persistency, like a traditional relational DB.
 The central class is the GossipBackend. You need to provide it with a message
 transport implementation and some configuration. The library has a basic transport
 using TCP, in the class TcpTransport, but by implementing ITransport you can use
-any communication means you want. It does not require any strong guarantees from the
-transport, since gossip-based communication is resilient. It is enough that a
-majority of messages make it through in a reasonable amount of time.
+any communication means you want. It does not require strong guarantees from the
+transport. It is enough that a majority of messages make it through in a reasonable
+amount of time.
 
 ```csharp
 var transport = new TcpTransport("Server1",
@@ -38,22 +38,14 @@ two other servers listed above.
 
 The backend is a key/value store. Keys are strings, and values can be any type which
 implements the IMergeable&lt;T&gt; interface, which is needed for resolving conflicts.
-It is ideal to use the library with CRDTs -
-[Conflict-free Replicated Data Types](https://en.wikipedia.org/wiki/Conflict-free_replicated_data_type),
-specifically the state-based convergent variant. Such types have a merge operation which
-is idempotent, commutative and associative, which basically means that different servers
-will eventually reach agreement on the correct value regardless of the number of conflicting
-edits, or the number and order of messages they exchange.
-
-However, you do not need to implement or use CRDTs. The library has wrapper types which
-implement the IMergeable interface, and you can choose the appropriate one based on the
-required semantics. E.g. if you use an external database and have optimistic concurrency
-checks based on an integer column, you can use the simple IntVersioned&lt;T&gt; wrapper,
-which resolves conflicts by simply picking the value with a higher version. There's also
-the Lww&lt;T&gt; wrapper, which pairs a value with the time it was written, and resolves
-conflicts using last-write-wins semantics. And perhaps the strongest is the combination
-of VecVersioned and Multiple wrappers, which add Version Vectors to your types to make
-them proper CRDTs.
+You can implement it yourself, or use one of the included wrapper types which
+implement it. E.g. if you use an external database and have optimistic concurrency
+checks based on an integer column, use the IntVersioned&lt;T&gt; wrapper, which
+resolves conflicts by simply picking the value with a higher version. There's also
+the Lww&lt;T&gt; wrapper, which pairs a value with the time it was written, and
+resolves conflicts using last-write-wins semantics. And the safest option is the
+combination of VecVersioned and Multiple wrappers, which add Version Vectors to your
+types to make them full-blown CRDTs (more on that below).
 
 Getting and setting values is simple. If you have a type called SomeEntity, and this type
 has an int Version property:
@@ -68,8 +60,7 @@ backend.Set("the key", newVal.Version(newVal.Version));
 ```
 
 Distributing the new data to other servers is done asynchronously, in the background,
-and does not block. If other servers changed the same key at the same time, those
-changes will be merged with yours eventually.
+and does not block.
 
 The backend supports transactions as well, which are done using ordinary Shielded library
 transactions.
@@ -87,39 +78,42 @@ snapshot of the data available locally, and your transaction will be retried if 
 thread on the same machine is in conflict with you. The transaction will also be
 distributed to other servers as a single package, so no other server will see key2 set
 to val2 wthout also seeing the write you made to key1, but that is the only guarantee.
-E.g. any previous transaction you did locally might not yet be visible to other servers even
-if they can see the effects of this one. And most importantly, no changes on other servers
-will conflict with yours. They will just eventually be merged together.
+E.g. any previous transaction you did locally might not yet be visible to other servers
+even if they can see the effects of this one.
 
 ## CRDTs and Version Vectors
 
-As mentioned previously, CRDTs are the ideal type of value to use with the eventually consistent
-backend. They are mergable in an idempotent, commutative and associative way, which means that
-the servers must eventually agree on the same version of the data, regardless of the order or
-number of messages they exchange. Currently included are the VersionVector, and a distributed
-counter implemented in the CountVector class. VectorBase can be used as a base class to easily
-implement vector clock-like CRDT types.
+CRDTs ([Conflict-free Replicated Data Types](https://en.wikipedia.org/wiki/Conflict-free_replicated_data_type))
+are the ideal type of value to use with the eventually consistent backend. They are
+mergable in an idempotent, commutative and associative way, which means that the servers
+must eventually agree on the same version of the data, regardless of the order or number
+of messages they exchange. Currently included are the VersionVector, and a distributed
+counter implemented in the CountVector class. VectorBase can be used as a base class to
+easily implement vector clock-like CRDT types.
 
-To achieve the same desirable characteristics with a type which is not a CRDT, you can add the
-IHasVersionVector interface to it, and use the Multiple&lt;T&gt; wrapper to make it a CRDT. If
-you cannot change the type to add the interface to it, you can use the VecVersioned&lt;T&gt;
-wrapper which pairs a value of any type with a version vector and which implements that interface.
+To achieve the same desirable characteristics with a type which is not a CRDT, you can
+add the IHasVersionVector interface to it, and use the Multiple&lt;T&gt; wrapper to make
+it a CRDT. If you cannot change the type to add the interface to it, you can use the
+VecVersioned&lt;T&gt; wrapper which pairs a value of any type with a version vector and
+which implements that interface.
 
-[Version vectors](https://en.wikipedia.org/wiki/Version_vector) reliably detect conflicting edits
-to the same key, and the Multiple will keep the conflicting versions, allowing you to resolve
-conflicts using any strategy that works best for your use case. Thus, version vectors will
-never lose any writes even if used in a system that is just eventually consistent, unlike the
-simpler IntVersioned and Lww wrappers.
+[Version vectors](https://en.wikipedia.org/wiki/Version_vector) reliably detect
+conflicting edits to the same key, and the Multiple will keep the conflicting versions,
+allowing you to resolve conflicts using any strategy that works best for your use case.
+Thus, version vectors will never lose any writes even if used in a system that is just
+eventually consistent, unlike the simpler IntVersioned and Lww wrappers.
 
 ## Removing Keys
 
-As you may already know, this is a tricky subject. Removing data from a gossip based key/value
-store generally requires maintaining so-called tombstones. Those are records of removal, which
-need to be kept forever, because if a server has been disconnected from the others for a long
-time, and the others removed a key, he can revive it when he reconnects.
+As you may already know, this is a tricky subject. Removing data from a gossip based
+key/value store generally requires maintaining so-called tombstones. Those are records
+of removal, which need to be kept forever, because if a server has been disconnected
+from the others for a long time, and the others removed a key, he can revive it when he
+reconnects.
 
-The library does support removal, but since it has no persistence, it does not maintain any
-tombstones.
+The library does support removal, but since it has no persistence, it maintains
+tombstones only for one minute (configurable), just to communicate the removal to other
+servers.
 
 A key can be removed by using the method Remove:
 
@@ -127,43 +121,32 @@ A key can be removed by using the method Remove:
 backend.Remove("some key");
 ```
 
-Another option is to implement the IDeletable interface on a type. The idea is that certain
-types can reach a state where it becomes safe to delete them, which they indicate by the CanDelete
-property being true. It is important that CanDelete be determined solely by the version and state
-of the object itself, so that all servers that have the same value will see the same bool in this
-property.
+Another option is to implement the IDeletable interface on a type, and when its
+CanDelete property becomes true, it will be deleted. CanDelete should only depend on
+the state of the object and nothing else.
 
-The backend will internally keep deleted values around for some time (default is one minute) to
-make sure the new state is communicated to other servers. The value under the key keeps the same
-version, but is marked as deleted. This is regarded as a higher version, so you won't be able
-to re-add the same version of data back, at least as long as the server internally remembers the
-removed version.
-
-What happens if a removed key gets revived later is up to you. If you're handling KeyMissing
-events, you can restore the tombstone from an external storage when needed. Or you can react to
-Changed events and, when a new item is added which should not be there, just remove it again.
+What happens if a removed key gets revived later is up to you. If you're handling
+KeyMissing events, you can restore the tombstone from an external storage when needed.
+Or you can react to Changed events and, when a new item is added which should not be
+there, simply remove it again.
 
 ## Expiry
 
-All Set method variants of both backends accept an extra parameter with which you can ask for
-an item to expire from the storage. For example, to expire a key after 5 seconds:
+All Set method variants of both backends accept an expiry parameter. For example, to
+expire a key after 5 seconds:
 
 ```csharp
 backend.Set("some key", someMergeable, 5000);
 ```
 
-By writing the same value again with only a different expiry you can extend it, in case you
-wish to have sliding expiry. It is not however possible to reduce the expiry. For that you
-must write a new, higher version of the data. This is due to the nature of the gossip
-implementation - when merging two values which are otherwise equal, the backend simply takes
-the max of the expiry values. An exception is if one side did not have expiry, in which case
-the result of the merge will have the expiry of the other.
+By writing the same value again with only a different expiry you can extend it, e.g.
+if you wish to have sliding expiry. It is also possible to activate it for an already
+existing value. But it is not possible to reduce it.
 
-It is important to note that, to avoid issues with server clock synchronization, the backends
-do not communicate about the exact time when an item must expire. Rather, they send each other
-the information on how many milliseconds a key has left before it expires. Since this number
-does not change during transmission of a message, every time they exchange information about
-a key its expiry can get extended. It is therefore not precise.
+It is important to note that, to avoid issues with server clock synchronization, the
+backends do not communicate about the exact time when an item must expire. Rather, they
+send each other the information on how many milliseconds a key has left before it
+expires. Thus, expiry is not precise.
 
 ## The Consistent Backend
 
@@ -203,7 +186,10 @@ the system will block any other consistent transactions accessing the same field
 *The library needs more work in this regard - there's currently no event raised when a transaction
 is received from another server. Presumably, a server who did not initiate a transaction might
 also want to do some external work in sync with that transaction, so I plan to add some events
-like TransactionPreparing, TransactionCommitting, TransactionFailing... for this purpose.*
+like TransactionPreparing, TransactionCommitting, TransactionFailing... for this purpose.
+Also missing is the ability to wait for a number of servers to fully confirm the transaction,
+currently you'll get a result as soon as possible, as soon as the transaction has been checked
+by enough servers.*
 
 The consistent transactions are implemented using the ordinary, eventually consistent gossip
 backend. The transaction state is stored in a CRDT type, and the servers react to changes to it
@@ -215,19 +201,22 @@ that are strictly greater than the versions on other servers. It is enough for a
 servers to confirm (or reject) a transaction, so the system should work in case of partitions,
 as long as you're in the partition that contains more than half of the servers.
 
-NB that calls to RunConsistent will return successfully as soon as the local server declares
-success - it will not wait for other servers to raise their state to success as well. This
-may change in the future, by adding an option to wait for a number of servers to confirm
-success too, which could be important when combining consistent transactions with any external
-systems.
-
 You should avoid using the same fields from both consistent and non-consistent transaction,
 but FYI, if you access the same fields from non-consistent transactions, the non-consistent
-transactions will proceed uninterrupted. Thus, when the other servers confirm your transaction,
-they guarantee only that at the point in time when they checked, your transaction was OK, and
-that no other consistent transaction can change the affected fields until you decide to commit
-or roll back. This behavior ensures that the non-consistent ops never block, which is a useful
-quality.
+transactions will proceed uninterrupted. Consistent transactions can only block each other.
+This is maybe weird, but it guarantees that non-consistent ops never block, which is very
+useful.
+
+## On Serializing
+
+The library uses the DataContractSerializer, simply to avoid introducing any dependencies.
+You will probably want to replace this with a better, binary serializer. Just call the
+method Serializer.Use, and pass it an implementation of ISerializer, which is a minimal
+interface for a serializer that is capable of serializing and deserializing objects without
+being told in advance what type it's dealing with.
+
+*Please note that "a better, binary serializer" certainly does not mean the BinaryFormatter
+from the .NET Framework! It uses reflection and it is slow.*
 
 ## The Gossip Protocol
 
