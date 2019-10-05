@@ -562,9 +562,9 @@ namespace Shielded.Gossip
             // IsGossipActive is correct, and to guarantee that we actually are done.
             _gossipStates[hisNews.From] = new GossipState(hisNews.MessageId, endMsg.MessageId, default, lastPackageSize, MessageType.End);
             if (success)
-                _logger.LogDebug("Prepared GossipEnd reply, successful.");
+                _logger.LogDebug("Prepared GossipEnd reply {ServerId}/{MessageId}, successful.", endMsg.From, endMsg.MessageId);
             else
-                _logger.LogWarning("Prepared GossipEnd reply, unsuccessful.");
+                _logger.LogWarning("Prepared GossipEnd reply {ServerId}/{MessageId}, unsuccessful.", endMsg.From, endMsg.MessageId);
             return endMsg;
         }
 
@@ -586,8 +586,8 @@ namespace Shielded.Gossip
                         msg.ReplyToId, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
                 }));
             }
-            _logger.LogDebug("Prepared GossipReply to {ServerId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
-                server, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
+            _logger.LogDebug("Prepared GossipReply {ServerId}/{MessageId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
+                msg.From, msg.MessageId, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
             return msg;
         }
 
