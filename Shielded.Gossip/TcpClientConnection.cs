@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
@@ -13,7 +14,7 @@ namespace Shielded.Gossip
     {
         public const int MaxQueueLength = 100;
 
-        private enum State
+        public enum State
         {
             Disconnected,
             Connecting,
@@ -30,10 +31,13 @@ namespace Shielded.Gossip
         public readonly TcpTransport Transport;
         public readonly IPEndPoint TargetEndPoint;
 
-        public TcpClientConnection(TcpTransport transport, IPEndPoint targetEndPoint)
+        private readonly ILogger _logger;
+
+        public TcpClientConnection(TcpTransport transport, IPEndPoint targetEndPoint, ILogger logger)
         {
             Transport = transport;
             TargetEndPoint = targetEndPoint;
+            _logger = logger;
         }
 
         public void Send(byte[] message)
@@ -53,6 +57,7 @@ namespace Shielded.Gossip
 
         private void StartConnecting()
         {
+            _logger.LogInformation("Opening connection to {TargetEndPoint}", TargetEndPoint);
             _state = State.Connecting;
             var client = _client = new TcpClient() { ReceiveTimeout = Transport.ReceiveTimeout };
             // this is mostly just needed for ASP.NET WebForms which actively prohibits any awaits on its threads.
@@ -61,6 +66,8 @@ namespace Shielded.Gossip
 
         private void StartSending()
         {
+            _logger.LogDebug("Starting to send messages to {TargetEndPoint}. {MessageQueueLength} messages in queue.",
+                TargetEndPoint, _messageQueue.Count);
             _state = State.Sending;
             if (_keepAliveTimer != null)
             {
@@ -76,6 +83,7 @@ namespace Shielded.Gossip
             try
             {
                 await client.ConnectAsync(TargetEndPoint.Address, TargetEndPoint.Port).ConfigureAwait(false);
+                _logger.LogInformation("Connected to {TargetEndPoint}", TargetEndPoint);
                 lock (_lock)
                 {
                     if (_client != client)
@@ -101,6 +109,8 @@ namespace Shielded.Gossip
                 if (_client != client)
                     return; // skipping the RaiseError call below!
                 _client = null;
+                _logger.LogWarning(ex, "Outgoing connection to {TargetEndPoint} lost while in state {ClientState} with {MessageQueueLength} messages in queue.",
+                    TargetEndPoint, _state, _messageQueue.Count);
 
                 if (_state == State.Sending && _messageQueue.Count > 0)
                 {
@@ -108,6 +118,7 @@ namespace Shielded.Gossip
                 }
                 else
                 {
+                    _logger.LogInformation("Dropping messages from queue and remaining disconnected.");
                     _state = State.Disconnected;
                     _messageQueue.Clear();
                 }
@@ -144,6 +155,7 @@ namespace Shielded.Gossip
                             return;
                         if (_messageQueue.Count == 0)
                         {
+                            _logger.LogDebug("Message queue for {TargetEndPoint} empty, switching to state {ClientState}.", TargetEndPoint, State.Connected);
                             _state = State.Connected;
                             // a bit of paranoia:
                             if (_keepAliveTimer != null)
@@ -171,6 +183,7 @@ namespace Shielded.Gossip
                     // to block any concurrent attempts to send, since only one thread may send over a TcpClient at one time.
                     _state = State.Sending;
                 }
+                _logger.LogDebug("Sending keep-alive to {TargetEndPoint}", TargetEndPoint);
                 await TcpTransport.SendFramed(client.GetStream(), new byte[0]).ConfigureAwait(false);
                 lock (_lock)
                 {
@@ -190,6 +203,7 @@ namespace Shielded.Gossip
 
         public void Dispose()
         {
+            _logger.LogInformation("Disposing client connection to {TargetEndPoint}", TargetEndPoint);
             lock (_lock)
             {
                 _state = State.Disconnected;

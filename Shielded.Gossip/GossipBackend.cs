@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -18,6 +20,7 @@ namespace Shielded.Gossip
         private readonly ShieldedDictNc<string, MessageItem> _local = new ShieldedDictNc<string, MessageItem>();
         private readonly ReverseTimeIndex _freshIndex;
         private readonly ShieldedLocal<Dictionary<string, MessageItem>> _toMail = new ShieldedLocal<Dictionary<string, MessageItem>>();
+        private readonly ILogger _logger;
 
         private readonly Timer _gossipTimer;
         private readonly Timer _deletableTimer;
@@ -39,12 +42,14 @@ namespace Shielded.Gossip
         /// </summary>
         /// <param name="transport">The message transport to use. The backend will dispose it when it gets disposed.</param>
         /// <param name="configuration">The configuration.</param>
-        public GossipBackend(ITransport transport, GossipConfiguration configuration)
-            : this(transport, configuration, null) { }
+        /// <param name="logger">The logger to use.</param>
+        public GossipBackend(ITransport transport, GossipConfiguration configuration, ILogger logger = null)
+            : this(transport, configuration, null, logger) { }
 
-        internal GossipBackend(ITransport transport, GossipConfiguration configuration, object owner)
+        internal GossipBackend(ITransport transport, GossipConfiguration configuration, object owner, ILogger logger)
         {
             _owner = owner ?? this;
+            _logger = logger ?? NullLogger.Instance;
             Transport = transport ?? throw new ArgumentNullException(nameof(transport));
             Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _freshIndex = new ReverseTimeIndex(GetItemDirect);
@@ -59,40 +64,50 @@ namespace Shielded.Gossip
             var lockObj = new object();
             return _ =>
             {
-                bool lockTaken = false;
-                try
+                using (_logger.BeginScope("Deletable timer run {DeletableRunId}", Guid.NewGuid()))
                 {
-                    Monitor.TryEnter(lockObj, ref lockTaken);
-                    if (!lockTaken)
-                        return;
-                    var currTickCount = Environment.TickCount;
-                    var toRemove = Shield.InTransaction(() =>
-                        _freshIndex
-                            .Where(i => i.Item.RemovableSince.HasValue
-                                ? unchecked(currTickCount - i.Item.RemovableSince.Value) > Configuration.RemovableItemLingerMs
-                                : i.Item.ExpiresInMs <= 0)
-                            .Select(i => i.Item)
-                            .ToArray());
-                    Shield.InTransaction(() =>
+                    bool lockTaken = false;
+                    try
                     {
-                        foreach (var item in toRemove)
-                            if (_local.TryGetValue(item.Key, out var mi) && mi == item)
-                            {
-                                if (item.RemovableSince.HasValue)
-                                    _local.Remove(item.Key);
-                                else
-                                    Expire(item);
-                            }
-                    });
-                }
-                catch (Exception ex)
-                {
-                    RaiseError(new GossipBackendException("Unexpected error on deletable timer task.", ex));
-                }
-                finally
-                {
-                    if (lockTaken)
-                        Monitor.Exit(lockObj);
+                        Monitor.TryEnter(lockObj, ref lockTaken);
+                        if (!lockTaken)
+                        {
+                            _logger.LogWarning("Previous deletable timer tick still running.");
+                            return;
+                        }
+                        _logger.LogDebug("Searching for items to clean up.");
+                        var currTickCount = Environment.TickCount;
+                        var toRemove = Shield.InTransaction(() =>
+                            _freshIndex
+                                .Where(i => i.Item.RemovableSince.HasValue
+                                    ? unchecked(currTickCount - i.Item.RemovableSince.Value) > Configuration.RemovableItemLingerMs
+                                    : i.Item.ExpiresInMs <= 0)
+                                .Select(i => i.Item)
+                                .ToArray());
+                        _logger.LogDebug("Found {ToRemoveCount} items to clean up.", toRemove.Length);
+                        Shield.InTransaction(() =>
+                        {
+                            foreach (var item in toRemove)
+                                if (_local.TryGetValue(item.Key, out var mi) && mi == item)
+                                {
+                                    if (item.RemovableSince.HasValue)
+                                        _local.Remove(item.Key);
+                                    else
+                                        Expire(item);
+                                }
+                        });
+                        _logger.LogDebug("Clean-up complete.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Unexpected error on deletable timer task.");
+                        RaiseError(new GossipBackendException("Unexpected error on deletable timer task.", ex));
+                    }
+                    finally
+                    {
+                        if (lockTaken)
+                            Monitor.Exit(lockObj);
+                    }
                 }
             };
         }
@@ -190,33 +205,47 @@ namespace Shielded.Gossip
 
         private void SpreadRumors()
         {
-            try
+            using (_logger.BeginScope("Gossip timer run {GossipRunId}", Guid.NewGuid()))
             {
-                Shield.InTransaction(() =>
+                try
                 {
-                    var servers = Transport.Servers;
-                    if (servers == null || !servers.Any())
-                        return;
-                    var limit = Configuration.AntiEntropyHuntingLimit;
-                    var rand = new Random();
-                    string server;
-                    do
+                    Shield.InTransaction(() =>
                     {
-                        server = servers.Skip(rand.Next(servers.Count)).First();
-                    }
-                    while (!StartGossip(server) && --limit >= 0);
-                });
-            }
-            catch (Exception ex)
-            {
-                RaiseError(new GossipBackendException("Unexpected error on gossip timer task.", ex));
+                        _logger.LogDebug("Searching for server to gossip with");
+                        var servers = Transport.Servers;
+                        if (servers == null || !servers.Any())
+                        {
+                            _logger.LogDebug("No other server known.");
+                            return;
+                        }
+                        var limit = Configuration.AntiEntropyHuntingLimit;
+                        var rand = new Random();
+                        string server;
+                        do
+                        {
+                            server = servers.Skip(rand.Next(servers.Count)).First();
+                        }
+                        while (!StartGossip(server) && --limit >= 0);
+                        if (limit < 0)
+                            _logger.LogDebug("No server found to gossip with.");
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unexpected error on gossip timer task.");
+                    RaiseError(new GossipBackendException("Unexpected error on gossip timer task.", ex));
+                }
             }
         }
 
         private bool StartGossip(string server) => Shield.InTransaction(() =>
         {
             if (IsGossipActive(server))
+            {
+                _logger.LogDebug("Already gossiping with server {ServerId}.", server);
                 return false;
+            }
+            _logger.LogDebug("Starting gossip with server {ServerId}.", server);
             var lastReceivedId = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedMsgId : null;
             var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
             var msg = new GossipStart
@@ -230,7 +259,12 @@ namespace Shielded.Gossip
             };
             _gossipStates[server] = new GossipState(null, msg.MessageId, newWindowStart, Configuration.AntiEntropyInitialSize,
                 MessageType.Start, oldState?.LastSentMsgType == MessageType.End ? (int?)oldState.LastSentMsgId : null);
-            Shield.SideEffect(() => Transport.Send(server, msg, true));
+            Shield.SideEffect(() =>
+            {
+                _logger.LogDebug("Sending GossipStart to {ServerId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
+                    server, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
+                Transport.Send(server, msg, true);
+            });
             return true;
         });
 
@@ -239,40 +273,46 @@ namespace Shielded.Gossip
             switch (msg)
             {
                 case DirectMail trans:
+                    _logger.LogDebug("Direct mail received with {ItemCount} items.", trans.Items?.Length ?? 0);
                     ApplyItems(trans.Items, true);
                     return null;
 
                 case GossipMessage gossip:
-                    var pkg = gossip as NewGossip;
-                    long? ignoreUpToFreshness = null;
-                    HashSet<string> keysToIgnore = null;
-                    if (pkg?.Items != null && gossip.DatabaseHash != _freshIndex.DatabaseHash)
+                    using (_logger.BeginScope("Gossip message {ServerId}/{MessageId}", gossip.From, gossip.MessageId))
                     {
-                        Shield.InTransaction(() =>
+                        _logger.LogDebug("Gossip message received");
+                        var pkg = gossip as NewGossip;
+                        long? ignoreUpToFreshness = null;
+                        HashSet<string> keysToIgnore = null;
+                        if (pkg?.Items != null && gossip.DatabaseHash != _freshIndex.DatabaseHash)
                         {
-                            keysToIgnore = ApplyItems(pkg.Items, true);
-                            if (keysToIgnore != null)
+                            Shield.InTransaction(() =>
                             {
-                                if (!_local.Changes.Any())
-                                    ignoreUpToFreshness = _freshIndex.LastFreshness;
-                                else
-                                    Shield.SyncSideEffect(() =>
-                                    {
+                                keysToIgnore = ApplyItems(pkg.Items, true);
+                                if (keysToIgnore != null)
+                                {
+                                    if (!_local.Changes.Any())
+                                        ignoreUpToFreshness = _freshIndex.LastFreshness;
+                                    else
+                                        Shield.SyncSideEffect(() =>
+                                        {
                                         // we don't want to send back the same things we just received. so, ignore all keys from
                                         // the incoming msg for which the result of application was Greater or Equal, which means our
                                         // local value is (now) identical to the received one, unless they also appear in _toMail,
                                         // which means a Changed handler made further changes to them.
                                         // we need the max freshness in case these fields change after this transaction.
                                         ignoreUpToFreshness = _freshIndex.LastFreshness;
-                                        if (_toMail.HasValue)
-                                            keysToIgnore.ExceptWith(_toMail.Value.Keys);
-                                    });
-                            }
-                        });
+                                            if (_toMail.HasValue)
+                                                keysToIgnore.ExceptWith(_toMail.Value.Keys);
+                                        });
+                                }
+                            });
+                        }
+                        return GetReply(gossip, ignoreUpToFreshness, keysToIgnore);
                     }
-                    return GetReply(gossip, ignoreUpToFreshness, keysToIgnore);
 
                 case KillGossip kill:
+                    _logger.LogDebug("KillGossip message from {ServerId}, replying to our message ID {ReplyToId}", kill.From, kill.ReplyToId);
                     Shield.InTransaction(() =>
                     {
                         if (_gossipStates.TryGetValue(kill.From, out var state) && state.LastSentMsgId == kill.ReplyToId)
@@ -281,7 +321,9 @@ namespace Shielded.Gossip
                     return null;
 
                 default:
-                    throw new ApplicationException($"Unexpected message type: {msg.GetType()}");
+                    var msgType = msg.GetType();
+                    _logger.LogError("Unexpected message type: {MessageType}", msgType);
+                    throw new ApplicationException($"Unexpected message type: { msgType }");
             }
         }
 
@@ -300,6 +342,7 @@ namespace Shielded.Gossip
         {
             if (items == null || items.Length == 0)
                 return null;
+            _logger.LogDebug("Applying {ItemCount} items", items.Length);
             long prevItemFreshness = items[items.Length - 1].Freshness;
             bool freshnessUtilized = false;
             HashSet<string> equalKeys = null;
@@ -350,8 +393,17 @@ namespace Shielded.Gossip
             // if our state is obsolete, we will only accept starter messages.
             if (!_gossipStates.TryGetValue(msg.From, out var state) || HasTimedOut(state))
             {
-                sendKill = hisReply != null;
-                return isStarter;
+                if (isStarter)
+                {
+                    _logger.LogDebug("Message is a starter, and we have no current state. Will reply.");
+                    return true;
+                }
+                else
+                {
+                    sendKill = hisReply != null;
+                    _logger.LogDebug("Message is not a starter, and we have no current state. Will not reply. Will send kill: {SendKill}", sendKill);
+                    return false;
+                }
             }
 
             // we have an active state. handling starter messages first.
@@ -360,13 +412,20 @@ namespace Shielded.Gossip
                 // this means he was aware of our last message, whatever it was, and chose to send us this. OK.
                 // this may happen if he sent us a GossipEnd before, but we did not receive it (yet).
                 if (msg.ReplyToId == state.LastSentMsgId)
+                {
+                    _logger.LogDebug("An unexpected gossip start, but the ReplyToId {ReplyToId} is a match. Will reply.", msg.ReplyToId);
                     return true;
+                }
                 else
+                {
                     // otherwise, we can only accept a starter if our msg was an end msg, or in case of simultaneous start,
                     // if the other server has higher "prio".
-                    return state.LastSentMsgType == MessageType.End ||
+                    var res = state.LastSentMsgType == MessageType.End ||
                         state.LastSentMsgType == MessageType.Start &&
                             StringComparer.InvariantCultureIgnoreCase.Compare(msg.From, Transport.OwnId) < 0;
+                    _logger.LogDebug("A conflicting GossipStart. Will reply: {WillReply}", res);
+                    return res;
+                }
             }
 
             // he's replying. special case: he's replying to our end message, and we already sent a GossipStart after
@@ -376,22 +435,31 @@ namespace Shielded.Gossip
             {
                 // when replying to our end message, it must be a GossipReply and he should send us LastWindowStart == 0.
                 if (hisReply == null || hisReply.LastWindowStart > 0)
+                {
+                    _logger.LogError("Reply chain logic failure.");
                     throw new ApplicationException("Reply chain logic failure.");
+                }
+                _logger.LogDebug("Other side chooses to revive previous gossip exchange. Will reply.");
                 return true;
             }
             // otherwise if he's replying to something else, he must send us a correct ReplyToId
             if (state.LastSentMsgId != msg.ReplyToId)
             {
                 sendKill = hisReply != null && hisReply.MessageId != state.LastReceivedMsgId;
+                _logger.LogDebug("Incorrect ReplyToId {ReplyToId}. Will not reply. Will send kill: {SendKill}", msg.ReplyToId, sendKill);
                 return false;
             }
 
             // so, he's replying. this is just a safety check, to see if the windows match. they will.
             var ourLastStart = hisReply?.LastWindowStart ?? 0;
             if (ourLastStart > 0 && ourLastStart != (state.LastWindowStart.IsDone ? 0 : state.LastWindowStart.Current.Freshness))
+            {
+                _logger.LogError("Reply chain logic failure.");
                 throw new ApplicationException("Reply chain logic failure.");
+            }
 
             // OK, everything checks out
+            _logger.LogDebug("Gossip message OK. Will reply.");
             currentState = state;
             return true;
         }
@@ -407,7 +475,10 @@ namespace Shielded.Gossip
             if (!ShouldReply(replyTo, out var currentState, out var sendKill))
             {
                 if (sendKill)
+                {
+                    _logger.LogDebug("Preparing KillGossip reply to {ServerId}/{MessageId}", replyTo.From, replyTo.MessageId);
                     return new KillGossip { From = Transport.OwnId, ReplyToId = replyTo.MessageId };
+                }
                 return null;
             }
 
@@ -420,6 +491,7 @@ namespace Shielded.Gossip
                 if (hisEnd != null)
                 {
                     _gossipStates.Remove(server);
+                    _logger.LogDebug("Hashes match, gossip completed successfully.");
                     return null;
                 }
                 else
@@ -439,6 +511,7 @@ namespace Shielded.Gossip
                 if (hisNews == null)
                 {
                     _gossipStates.Remove(server);
+                    _logger.LogWarning("Hashes do not match, but nothing left to gossip about. Completed unsuccessfully.");
                     return null;
                 }
                 else if (hisNews.Items == null || hisNews.Items.Length == 0)
@@ -488,6 +561,10 @@ namespace Shielded.Gossip
             // if we're sending GossipEnd, we clear this in transaction, to make sure
             // IsGossipActive is correct, and to guarantee that we actually are done.
             _gossipStates[hisNews.From] = new GossipState(hisNews.MessageId, endMsg.MessageId, default, lastPackageSize, MessageType.End);
+            if (success)
+                _logger.LogDebug("Prepared GossipEnd reply, successful.");
+            else
+                _logger.LogWarning("Prepared GossipEnd reply, unsuccessful.");
             return endMsg;
         }
 
@@ -509,6 +586,8 @@ namespace Shielded.Gossip
                         msg.ReplyToId, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
                 }));
             }
+            _logger.LogDebug("Prepared GossipReply to {ServerId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
+                server, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
             return msg;
         }
 
@@ -885,6 +964,7 @@ namespace Shielded.Gossip
 
         public void Dispose()
         {
+            _logger.LogInformation("Disposing the backend.");
             Transport.Dispose();
             _gossipTimer.Dispose();
             _deletableTimer.Dispose();

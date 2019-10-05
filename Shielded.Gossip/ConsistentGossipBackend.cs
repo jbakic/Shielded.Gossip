@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -20,6 +22,8 @@ namespace Shielded.Gossip
     public class ConsistentGossipBackend : IGossipBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
+        private readonly ApplyMethods _compareMethods;
+        private readonly ILogger _logger;
 
         public ITransport Transport => _wrapped.Transport;
         public GossipConfiguration Configuration => _wrapped.Configuration;
@@ -50,10 +54,12 @@ namespace Shielded.Gossip
         /// </summary>
         /// <param name="transport">The message transport to use.</param>
         /// <param name="configuration">The configuration.</param>
-        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration)
+        /// <param name="logger">The logger to use.</param>
+        public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration, ILogger logger = null)
         {
             _compareMethods = new ApplyMethods((key, fi) => CheckOne(key, fi));
-            _wrapped = new GossipBackend(transport, configuration, this);
+            _logger = logger ?? NullLogger.Instance;
+            _wrapped = new GossipBackend(transport, configuration, this, _logger);
             Shield.InTransaction(() =>
                 _wrapped.Changed.Subscribe(_wrapped_Changed));
         }
@@ -338,6 +344,7 @@ namespace Shielded.Gossip
             {
                 if (!Self._transactions.Remove(TransactionId))
                     return;
+                Self._logger.LogDebug("Completing backend state of transaction {TransactionId}", TransactionId);
                 Self.UnlockFields(this);
                 Shield.SideEffect(() =>
                 {
@@ -396,77 +403,103 @@ namespace Shielded.Gossip
             if (Shield.IsInTransaction)
                 throw new InvalidOperationException("Prepare cannot be called within a transaction.");
 
-            CommitContinuation cont = null;
-            try
+            using (_logger.BeginScope("Consistent prepare ID {PrepareId}", Guid.NewGuid()))
             {
-                while (attempts --> 0)
+                CommitContinuation cont = null;
+                try
                 {
-                    BackendState ourState = null;
-                    TransactionInfo transaction = null;
-                    cont = Shield.RunToCommit(Timeout.Infinite, () =>
+                    while (attempts --> 0)
                     {
-                        ourState = null;
-                        transaction = null;
-                        var ourChanges = _currentState.Value = new Dictionary<string, MessageItem>();
-                        trans();
-
-                        if (ourChanges.Any() || _wrapped.Reads.Any())
+                        _logger.LogDebug("Preparing a consistent transaction, attempts left: {Attempts}", attempts + 1);
+                        BackendState ourState = null;
+                        TransactionInfo transaction = null;
+                        cont = Shield.RunToCommit(Timeout.Infinite, () =>
                         {
-                            var transParticipants = TransactionParticipants?.ToArray() ?? Transport.Servers;
-                            var exceptMe = transParticipants.Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId));
-                            var reads = _wrapped.Reads.ToArray();
-                            transaction = new TransactionInfo
+                            ourState = null;
+                            transaction = null;
+                            var ourChanges = _currentState.Value = new Dictionary<string, MessageItem>();
+                            trans();
+
+                            if (ourChanges.Any() || _wrapped.Reads.Any())
                             {
-                                Initiator = Transport.OwnId,
-                                InitiatorVotes = TransactionParticipants == null ||
-                                    transParticipants.Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase),
-                                Reads = reads
-                                    .Select(key => _wrapped.GetItem(key) ?? new MessageItem { Key = key })
-                                    .ToArray(),
-                                Changes = ourChanges.Values.ToArray(),
-                                State = new TransactionVector(
-                                    new[] { new VectorItem<TransactionState>(Transport.OwnId, TransactionState.Prepared) }
-                                    .Concat(exceptMe.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
-                                    .ToArray()),
-                            };
-                            ourState = new BackendState(WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString()),
-                                Transport.OwnId, this, reads);
+                                var transParticipants = TransactionParticipants?.ToArray() ?? Transport.Servers;
+                                var exceptMe = transParticipants.Where(s => !StringComparer.InvariantCultureIgnoreCase.Equals(s, Transport.OwnId));
+                                var reads = _wrapped.Reads.ToArray();
+                                transaction = new TransactionInfo
+                                {
+                                    Initiator = Transport.OwnId,
+                                    InitiatorVotes = TransactionParticipants == null ||
+                                        transParticipants.Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase),
+                                    Reads = reads
+                                        .Select(key => _wrapped.GetItem(key) ?? new MessageItem { Key = key })
+                                        .ToArray(),
+                                    Changes = ourChanges.Values.ToArray(),
+                                    State = new TransactionVector(
+                                        new[] { new VectorItem<TransactionState>(Transport.OwnId, TransactionState.Prepared) }
+                                        .Concat(exceptMe.Select(s => new VectorItem<TransactionState>(s, TransactionState.None)))
+                                        .ToArray()),
+                                };
+                                ourState = new BackendState(WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString()),
+                                    Transport.OwnId, this, reads);
 
-                            Shield.SideEffect(() => Commit(ourState), () => Fail(ourState));
-                        }
-                    });
-
-                    if (ourState == null)
-                        return cont;
-                    var id = ourState.TransactionId;
-                    Shield.InTransaction(() => _transactions.Add(id, ourState));
-                    async Task<PrepareResult> PreparationProcess()
-                    {
-                        var prepare = await PrepareInternal(ourState, transaction, true).ConfigureAwait(false);
-                        if (!prepare.Success)
-                            return prepare;
-                        Shield.InTransaction(() =>
-                        {
-                            if (_transactions.ContainsKey(id))
-                                _wrapped.Set(id, transaction);
+                                Shield.SideEffect(() => Commit(ourState), () => Fail(ourState));
+                            }
                         });
-                        return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
-                    }
-                    var result = await PreparationProcess().WithTimeout(GetNewTimeout()).ConfigureAwait(runTransOnCapturedContext);
-                    if (result.Success)
-                        return cont;
 
-                    cont.Rollback();
-                    if (result.WaitBeforeRetry != null)
-                        await result.WaitBeforeRetry.ConfigureAwait(runTransOnCapturedContext);
+                        if (ourState == null)
+                        {
+                            _logger.LogDebug("Transaction touched no backend fields, exiting with trivial success.");
+                            return cont;
+                        }
+                        var id = ourState.TransactionId;
+                        using (_logger.BeginScope("Local transaction {TransactionId}", id))
+                        {
+                            _logger.LogDebug("Participating servers: {TransactionServers}; initiator votes: {InitiatorVotes}",
+                                transaction.State.Select(s => s.ServerId).ToArray(), transaction.InitiatorVotes);
+                            Shield.InTransaction(() => _transactions.Add(id, ourState));
+                            async Task<PrepareResult> PreparationProcess()
+                            {
+                                var prepare = await PrepareInternal(ourState, transaction, true).ConfigureAwait(false);
+                                if (!prepare.Success)
+                                {
+                                    _logger.LogDebug("Failed to prepare transaction locally.");
+                                    return prepare;
+                                }
+                                Shield.InTransaction(() =>
+                                {
+                                    if (_transactions.ContainsKey(id))
+                                        _wrapped.Set(id, transaction);
+                                });
+                                _logger.LogDebug("Local prepare succeeded, awaiting other servers' votes.");
+                                return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
+                            }
+                            var result = await PreparationProcess().WithTimeout(GetNewTimeout()).ConfigureAwait(runTransOnCapturedContext);
+                            if (result.Success)
+                            {
+                                _logger.LogDebug("Successfully reached consensus with other servers.");
+                                return cont;
+                            }
+
+                            _logger.LogDebug("Failed to prepare transaction, rolling back.");
+                            cont.Rollback();
+
+                            if (result.WaitBeforeRetry != null && attempts >= 1)
+                            {
+                                _logger.LogDebug("Awaiting before retry.");
+                                await result.WaitBeforeRetry.ConfigureAwait(runTransOnCapturedContext);
+                            }
+                        }
+                    }
+                    _logger.LogWarning("Failed to prepare transaction in given number of attempts.");
+                    return null;
                 }
-                return null;
-            }
-            catch
-            {
-                if (cont != null && !cont.Completed)
-                    cont.TryRollback();
-                throw;
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Prepare interrupted by exception.");
+                    if (cont != null && !cont.Completed)
+                        cont.TryRollback();
+                    throw;
+                }
             }
         }
 
@@ -543,7 +576,13 @@ namespace Shielded.Gossip
                             return (Task)null;
                         if (IsHigherPrio(ourState, someState))
                             Shield.SideEffect(() =>
-                                someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task)));
+                            {
+                                _logger.LogDebug("Trying to interrupt conflicting lower prio transaction {OtherTransactionId}", someState.TransactionId);
+                                someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task));
+                            });
+                        else
+                            Shield.SideEffect(() =>
+                                _logger.LogDebug("Lock-conflict with transaction {OtherTransactionId}", someState.TransactionId));
                         return someState.Committer.Task;
                     }).Where(t => t != null).Distinct().ToArray();
 
@@ -555,10 +594,17 @@ namespace Shielded.Gossip
                     return null;
                 });
                 if (waitFor == null)
+                {
+                    _logger.LogDebug("Successfully locked the fields.");
                     return new PrepareResult(true);
+                }
                 if (waitFor.Length == 0)
+                {
+                    _logger.LogDebug("Transaction aborted while waiting for field locks.");
                     return new PrepareResult(false);
+                }
 
+                _logger.LogDebug("Awaiting for field locks to be released.");
                 if (await Task.WhenAny(prepareTask, Task.WhenAll(waitFor)).ConfigureAwait(false) == prepareTask)
                     return await prepareTask;
             }
@@ -576,8 +622,6 @@ namespace Shielded.Gossip
                     _fieldBlockers.Remove(key);
         });
 
-        private readonly ApplyMethods _compareMethods;
-
         private ComplexRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
             where TItem : IMergeable<TItem>
         {
@@ -591,6 +635,7 @@ namespace Shielded.Gossip
             if (!_transactions.TryGetValue(id, out var currState) || currState != ourState)
                 return false;
             bool result = true;
+            _logger.LogDebug("Checking transaction consistency.");
 
             if (transaction.Reads != null)
                 foreach (var read in transaction.Reads)
@@ -600,6 +645,7 @@ namespace Shielded.Gossip
                     {
                         if (_wrapped.GetActiveItem(read.Key) == null)
                             continue;
+                        _logger.LogDebug("Read not up to date, key {ItemKey}", read.Key);
                         if (initiatedLocally)
                             return false;
                         _wrapped.Touch(read.Key);
@@ -611,6 +657,7 @@ namespace Shielded.Gossip
                         // what you read must be Greater or Equal to what we have.
                         if ((comparer(read.Key, obj).GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
                         {
+                            _logger.LogDebug("Read not up to date, key {ItemKey}", read.Key);
                             if (initiatedLocally)
                                 return false;
                             _wrapped.Touch(read.Key);
@@ -628,6 +675,7 @@ namespace Shielded.Gossip
                     var cmp = comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs);
                     if (cmp != ComplexRelationship.Greater && cmp != ComplexRelationship.EqualButGreater)
                     {
+                        _logger.LogDebug("Written version not greater than old value, key {ItemKey}", change.Key);
                         if (initiatedLocally)
                             return false;
                         _wrapped.Touch(change.Key);
@@ -662,7 +710,7 @@ namespace Shielded.Gossip
             if (!newVal.State.Any(i => StringComparer.InvariantCultureIgnoreCase.Equals(i.ServerId, Transport.OwnId)))
             {
                 if (newVal.IsSuccess)
-                    Apply(newVal);
+                    Apply(id, newVal);
                 return;
             }
             if (newVal.State[Transport.OwnId] != TransactionState.None || newVal.IsDone || _transactions.ContainsKey(id))
@@ -678,17 +726,29 @@ namespace Shielded.Gossip
             _transactions.Add(id, ourState);
             Shield.SideEffect(async () =>
             {
-                try
+                using (_logger.BeginScope("External transaction {TransactionId}", id))
                 {
-                    var result = await PrepareInternal(ourState, newVal, false)
-                        .WithTimeout(Configuration.ConsistentPrepareTimeoutRange.Max).ConfigureAwait(false);
-                    if (!result.Success)
+                    try
+                    {
+                        _logger.LogDebug("Preparing external transaction");
+                        var result = await PrepareInternal(ourState, newVal, false)
+                            .WithTimeout(Configuration.ConsistentPrepareTimeoutRange.Max).ConfigureAwait(false);
+                        if (result.Success)
+                        {
+                            _logger.LogDebug("Successfully prepared. Waiting for initiator command.");
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Preparation failed.");
+                            SetRejected(id);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Unexpected error while preparing external transaction.");
                         SetRejected(id);
-                }
-                catch (Exception ex)
-                {
-                    SetRejected(id);
-                    _wrapped.RaiseError(new GossipBackendException("Unexpected error while preparing external transaction.", ex));
+                        _wrapped.RaiseError(new GossipBackendException("Unexpected error while preparing external transaction.", ex));
+                    }
                 }
             });
         }
@@ -699,6 +759,7 @@ namespace Shielded.Gossip
                 current.State[Transport.OwnId] != TransactionState.None ||
                 current.IsDone)
                 return false;
+            _logger.LogDebug("Changing state to Prepared on {TransactionId}", id);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Prepared));
             return true;
         });
@@ -709,6 +770,7 @@ namespace Shielded.Gossip
                 current.State[Transport.OwnId] != TransactionState.None ||
                 current.IsDone)
                 return false;
+            _logger.LogDebug("Changing state to Rejected on {TransactionId}", id);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Rejected));
             return true;
         });
@@ -718,6 +780,7 @@ namespace Shielded.Gossip
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 return;
+            _logger.LogDebug("Changing state to Fail on {TransactionId}", id);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Fail));
         });
 
@@ -726,6 +789,7 @@ namespace Shielded.Gossip
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
                 return false;
+            _logger.LogDebug("Changing state to Success on {TransactionId}", id);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
             return true;
         });
@@ -737,13 +801,15 @@ namespace Shielded.Gossip
             _transactions.TryGetValue(id, out var ourState);
             if (current.IsFail || current.IsRejected)
             {
+                _logger.LogDebug("Transaction {TransactionId} has been rejected or failed.", id);
                 SetFail(id);
                 if (ourState != null)
                     ourState.Complete();
             }
             else if (current.IsSuccess)
             {
-                Apply(current);
+                _logger.LogDebug("Transaction {TransactionId} has succeeded.", id);
+                Apply(id, current);
                 SetSuccess(id);
                 if (ourState != null)
                     ourState.Complete();
@@ -752,13 +818,17 @@ namespace Shielded.Gossip
                 StringComparer.InvariantCultureIgnoreCase.Equals(current.Initiator, Transport.OwnId))
             {
                 if (ourState != null)
+                {
+                    _logger.LogDebug("Local transaction {TransactionId} has been prepared by other servers.", id);
                     Shield.SideEffect(() =>
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
+                }
                 else
                 {
                     // in case this transaction previously succeeded, but some other servers never got the news,
                     // and were holding in Prepared - we send the latest state of these keys, to make sure they
                     // are up-to-date when they release their field locks.
+                    _logger.LogWarning("Local transaction {TransactionId} has been prepared by other servers, but is unknown locally! Failing it.", id);
                     foreach (var key in current.AllKeys)
                         _wrapped.Touch(key);
                     SetFail(id);
@@ -766,8 +836,9 @@ namespace Shielded.Gossip
             }
         }
 
-        private void Apply(TransactionInfo current)
+        private void Apply(string id, TransactionInfo current)
         {
+            _logger.LogDebug("Applying transaction {TransactionId}", id);
             _wrapped.ApplyItems(
                 (current.Reads ?? Enumerable.Empty<MessageItem>())
                 .Concat(current.Changes ?? Enumerable.Empty<MessageItem>())
@@ -779,8 +850,12 @@ namespace Shielded.Gossip
             var id = ourState.TransactionId;
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
+            {
+                _logger.LogCritical("Unexpected commit failure of transaction {TransactionId}.", ourState.TransactionId);
                 throw new ApplicationException("Critical error - unexpected commit failure.");
-            Apply(current);
+            }
+            Apply(ourState.TransactionId, current);
+            _logger.LogDebug("Changing state to Success on {TransactionId}", id);
             _wrapped.Set(id, current.WithState(Transport.OwnId, TransactionState.Success));
             ourState.Complete();
         });

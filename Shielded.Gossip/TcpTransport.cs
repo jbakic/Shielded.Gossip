@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,9 +22,11 @@ namespace Shielded.Gossip
         /// <param name="ownId">The ID of this server.</param>
         /// <param name="serverIPs">The dictionary with server IDs and IP endpoints, including this server. Do not make later
         /// changes to any of the IPEndPoint objects!</param>
-        public TcpTransport(string ownId, IDictionary<string, IPEndPoint> serverIPs)
+        /// <param name="logger">The logger to use.</param>
+        public TcpTransport(string ownId, IDictionary<string, IPEndPoint> serverIPs, ILogger logger = null)
         {
             OwnId = ownId ?? throw new ArgumentNullException(nameof(ownId));
+            _logger = logger ?? NullLogger.Instance;
             if (serverIPs == null)
                 throw new ArgumentNullException(nameof(serverIPs));
             LocalEndpoint = serverIPs[ownId];
@@ -30,7 +34,7 @@ namespace Shielded.Gossip
             {
                 var ips = new ShieldedDict<string, IPEndPoint>(serverIPs.Where(kvp => !StringComparer.InvariantCultureIgnoreCase.Equals(kvp.Key, ownId)));
                 var clients = new ConcurrentDictionary<string, TcpClientConnection>(
-                    ips.Select(kvp => new KeyValuePair<string, TcpClientConnection>(kvp.Key, new TcpClientConnection(this, kvp.Value))));
+                    ips.Select(kvp => new KeyValuePair<string, TcpClientConnection>(kvp.Key, new TcpClientConnection(this, kvp.Value, _logger))));
                 Shield.PreCommit(() => ips.TryGetValue("any", out var _) || true,
                     () => Shield.SyncSideEffect(UpdateClientConnections));
                 return (ips, clients);
@@ -63,26 +67,30 @@ namespace Shielded.Gossip
         private readonly object _listenerLock = new object();
         private readonly ConcurrentDictionary<string, TcpClientConnection> _clientConnections;
         private readonly ConcurrentDictionary<TcpClient, object> _serverConnections = new ConcurrentDictionary<TcpClient, object>();
+        private readonly ILogger _logger;
 
         private void UpdateClientConnections()
         {
-            foreach (var key in ServerIPs.Changes)
+            using (_logger.BeginScope("Updating client connections"))
             {
-                if (!ServerIPs.TryGetValue(key, out var endpoint))
+                foreach (var key in ServerIPs.Changes)
                 {
-                    if (_clientConnections.TryRemove(key, out var conn))
+                    if (!ServerIPs.TryGetValue(key, out var endpoint))
+                    {
+                        if (_clientConnections.TryRemove(key, out var conn))
+                        {
+                            conn.Dispose();
+                        }
+                    }
+                    else if (!_clientConnections.TryGetValue(key, out var conn))
+                    {
+                        _clientConnections[key] = new TcpClientConnection(this, endpoint, _logger);
+                    }
+                    else if (conn.TargetEndPoint != endpoint)
                     {
                         conn.Dispose();
+                        _clientConnections[key] = new TcpClientConnection(this, endpoint, _logger);
                     }
-                }
-                else if (!_clientConnections.TryGetValue(key, out var conn))
-                {
-                    _clientConnections[key] = new TcpClientConnection(this, endpoint);
-                }
-                else if (conn.TargetEndPoint != endpoint)
-                {
-                    conn.Dispose();
-                    _clientConnections[key] = new TcpClientConnection(this, endpoint);
                 }
             }
         }
@@ -92,6 +100,7 @@ namespace Shielded.Gossip
         /// </summary>
         public void StopListening()
         {
+            _logger.LogInformation("StopListening called.");
             lock (_listenerLock)
             {
                 var listener = _listener;
@@ -112,12 +121,18 @@ namespace Shielded.Gossip
         /// </summary>
         public void Dispose()
         {
-            StopListening();
-            foreach (var clConn in _clientConnections.Values)
-                clConn.Dispose();
-            foreach (var serverConn in _serverConnections.Keys)
-                serverConn.Dispose();
-            _serverConnections.Clear();
+            using (_logger.BeginScope("Transport disposal"))
+            {
+                StopListening();
+                foreach (var clConn in _clientConnections.Values)
+                    clConn.Dispose();
+                foreach (var serverConn in _serverConnections.Keys)
+                {
+                    _logger.LogInformation("Disposing received connection from {RemoteEndPoint}", serverConn.Client.RemoteEndPoint);
+                    serverConn.Dispose();
+                }
+                _serverConnections.Clear();
+            }
         }
 
         /// <summary>
@@ -132,12 +147,14 @@ namespace Shielded.Gossip
                     return;
                 listener = _listener = new TcpListener(LocalEndpoint);
             }
+            _logger.LogInformation("Starting to listen for incoming connections");
             try
             {
                 listener.Start();
                 while (true)
                 {
                     var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    _logger.LogInformation("Incoming connection from {RemoteEndPoint}", client.Client.RemoteEndPoint);
                     client.ReceiveTimeout = ReceiveTimeout;
                     _serverConnections.TryAdd(client, null);
                     var stream = client.GetStream();
@@ -145,13 +162,17 @@ namespace Shielded.Gossip
                         (c, ex) =>
                         {
                             if (_serverConnections.TryRemove(c, out var _) && ex != null)
+                            {
+                                _logger.LogWarning(ex, "Lost incoming connection from {RemoteEndPoint}", c.Client.RemoteEndPoint);
                                 RaiseError(ex);
+                            }
                         });
                 }
             }
             catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Unexpected error while listening for incoming connections.");
                 StopListening();
                 RaiseError(ex);
             }
