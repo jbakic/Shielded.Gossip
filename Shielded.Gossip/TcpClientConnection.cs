@@ -60,8 +60,9 @@ namespace Shielded.Gossip
             _logger.LogInformation("Opening connection to {TargetEndPoint}", TargetEndPoint);
             _state = State.Connecting;
             var client = _client = new TcpClient() { ReceiveTimeout = Transport.ReceiveTimeout };
-            // this is mostly just needed for ASP.NET WebForms which actively prohibits any awaits on its threads.
-            Task.Run(() => Connect(client));
+            using (ExecutionContext.SuppressFlow())
+                // this is mostly just needed for ASP.NET WebForms which actively prohibits any awaits on its threads.
+                Task.Run(() => Connect(client));
         }
 
         private void StartSending()
@@ -75,7 +76,8 @@ namespace Shielded.Gossip
                 _keepAliveTimer = null;
             }
             var client = _client;
-            Task.Run(() => WriterLoop(client));
+            using (ExecutionContext.SuppressFlow())
+                Task.Run(() => WriterLoop(client));
         }
 
         private async void Connect(TcpClient client)

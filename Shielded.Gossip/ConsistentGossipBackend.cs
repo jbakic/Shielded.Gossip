@@ -329,8 +329,8 @@ namespace Shielded.Gossip
             public readonly string Initiator;
             public readonly string TransactionId;
             public readonly string[] AllKeys;
-            public readonly TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>();
-            public readonly TaskCompletionSource<object> Committer = new TaskCompletionSource<object>();
+            public readonly TaskCompletionSource<PrepareResult> PrepareCompleter = new TaskCompletionSource<PrepareResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<object> Committer = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public BackendState(string id, string initiator, ConsistentGossipBackend self, string[] allKeys)
             {
