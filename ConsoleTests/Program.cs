@@ -28,7 +28,8 @@ namespace ConsoleTests
             _loggerFactory = LoggerFactory.Create(builder =>
             {
                 builder.SetMinimumLevel(LogLevel.Debug);
-                builder.AddConsole(options => options.IncludeScopes = true);
+                //builder.AddConsole(options => options.IncludeScopes = true);
+                builder.AddProvider(new MyConsoleLoggerProvider());
             });
 
             RunConsistentRace();

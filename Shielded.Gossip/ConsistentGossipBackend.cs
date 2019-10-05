@@ -577,12 +577,13 @@ namespace Shielded.Gossip
                         if (IsHigherPrio(ourState, someState))
                             Shield.SideEffect(() =>
                             {
-                                _logger.LogDebug("Trying to interrupt conflicting lower prio transaction {OtherTransactionId}", someState.TransactionId);
+                                _logger.LogDebug("Lock-conflict over key {Key}, trying to interrupt conflicting lower prio transaction {OtherTransactionId}",
+                                    key, someState.TransactionId);
                                 someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task));
                             });
                         else
                             Shield.SideEffect(() =>
-                                _logger.LogDebug("Lock-conflict with transaction {OtherTransactionId}", someState.TransactionId));
+                                _logger.LogDebug("Lock-conflict over key {Key} with transaction {OtherTransactionId}", key, someState.TransactionId));
                         return someState.Committer.Task;
                     }).Where(t => t != null).Distinct().ToArray();
 

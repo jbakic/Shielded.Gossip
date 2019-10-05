@@ -261,8 +261,8 @@ namespace Shielded.Gossip
                 MessageType.Start, oldState?.LastSentMsgType == MessageType.End ? (int?)oldState.LastSentMsgId : null);
             Shield.SideEffect(() =>
             {
-                _logger.LogDebug("Sending GossipStart to {ServerId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
-                    server, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
+                _logger.LogDebug("Sending GossipStart {ServerId}/{MessageId} to {TargetServerId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
+                    msg.From, msg.MessageId, server, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
                 Transport.Send(server, msg, true);
             });
             return true;
@@ -278,7 +278,7 @@ namespace Shielded.Gossip
                     return null;
 
                 case GossipMessage gossip:
-                    using (_logger.BeginScope("Gossip message {ServerId}/{MessageId}", gossip.From, gossip.MessageId))
+                    using (_logger.BeginScope("{MessageType} {ServerId}/{MessageId}", gossip.GetType().Name, gossip.From, gossip.MessageId))
                     {
                         _logger.LogDebug("Gossip message received");
                         var pkg = gossip as NewGossip;
