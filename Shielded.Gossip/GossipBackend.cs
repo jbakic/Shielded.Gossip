@@ -75,27 +75,8 @@ namespace Shielded.Gossip
                             _logger.LogWarning("Previous deletable timer tick still running.");
                             return;
                         }
-                        _logger.LogDebug("Searching for items to clean up.");
-                        var currTickCount = Environment.TickCount;
-                        var toRemove = Shield.InTransaction(() =>
-                            _freshIndex
-                                .Where(i => i.Item.RemovableSince.HasValue
-                                    ? unchecked(currTickCount - i.Item.RemovableSince.Value) > Configuration.RemovableItemLingerMs
-                                    : i.Item.ExpiresInMs <= 0)
-                                .Select(i => i.Item)
-                                .ToArray());
-                        _logger.LogDebug("Found {ToRemoveCount} items to clean up.", toRemove.Length);
-                        Shield.InTransaction(() =>
-                        {
-                            foreach (var item in toRemove)
-                                if (_local.TryGetValue(item.Key, out var mi) && mi == item)
-                                {
-                                    if (item.RemovableSince.HasValue)
-                                        _local.Remove(item.Key);
-                                    else
-                                        Expire(item);
-                                }
-                        });
+                        CleanUpFields();
+                        CleanUpGossipStates();
                         _logger.LogDebug("Clean-up complete.");
                     }
                     catch (Exception ex)
@@ -112,6 +93,31 @@ namespace Shielded.Gossip
             };
         }
 
+        private void CleanUpFields()
+        {
+            _logger.LogDebug("Searching for items to clean up.");
+            var currTickCount = Environment.TickCount;
+            var toRemove = Shield.InTransaction(() =>
+                _freshIndex
+                    .Where(i => i.Item.RemovableSince.HasValue
+                        ? unchecked(currTickCount - i.Item.RemovableSince.Value) > Configuration.RemovableItemLingerMs
+                        : i.Item.ExpiresInMs <= 0)
+                    .Select(i => i.Item)
+                    .ToArray());
+            _logger.LogDebug("Found {ToRemoveCount} items to clean up.", toRemove.Length);
+            Shield.InTransaction(() =>
+            {
+                foreach (var item in toRemove)
+                    if (_local.TryGetValue(item.Key, out var mi) && mi == item)
+                    {
+                        if (item.RemovableSince.HasValue)
+                            _local.Remove(item.Key);
+                        else
+                            Expire(item);
+                    }
+            });
+        }
+
         private void Expire(MessageItem item)
         {
             var hash = GetHash(item.Key, (IHasVersionBytes)item.Value);
@@ -123,6 +129,21 @@ namespace Shielded.Gossip
             };
             _local[item.Key] = newItem;
             _freshIndex.Append(newItem, hash);
+        }
+
+        private void CleanUpGossipStates()
+        {
+            _logger.LogDebug("Searching for stale gossip states to remove.");
+            // why this? well, if a server gets removed from Transport.Servers, an old state could stay in the states
+            // dictionary. if it stays for > 24.9 days, the HasTimedOut check would start overflowing...
+            var staleStates = Shield.InTransaction(() => _gossipStates.Where(kvp => HasTimedOut(kvp.Value)).ToArray());
+            _logger.LogDebug("Found {ToRemoveCount} stale states to remove.", staleStates.Length);
+            Shield.InTransaction(() =>
+            {
+                foreach (var kvp in staleStates)
+                    if (_gossipStates.TryGetValue(kvp.Key, out var current) && current == kvp.Value)
+                        _gossipStates.Remove(kvp.Key);
+            });
         }
 
         private void DoDirectMail(MessageItem[] items)
@@ -189,7 +210,7 @@ namespace Shielded.Gossip
         private ShieldedDictNc<string, GossipState> _gossipStates = new ShieldedDictNc<string, GossipState>(StringComparer.InvariantCultureIgnoreCase);
 
         private bool HasTimedOut(GossipState state) =>
-            unchecked(Environment.TickCount - state.CreationTickCount) >= Configuration.AntiEntropyIdleTimeout;
+            unchecked(TransactionalTickCount.Value - state.CreationTickCount) >= Configuration.AntiEntropyIdleTimeout;
 
         private bool IsGossipActive(string server) => Shield.InTransaction(() =>
         {
@@ -197,7 +218,7 @@ namespace Shielded.Gossip
                 return false;
             if (HasTimedOut(state))
             {
-                state.ReleaseEnumerator();
+                _gossipStates.Remove(server);
                 return false;
             }
             return true;
