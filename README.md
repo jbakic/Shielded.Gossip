@@ -125,10 +125,8 @@ Another option is to implement the IDeletable interface on a type, and when its
 CanDelete property becomes true, it will be deleted. CanDelete should only depend on
 the state of the object and nothing else.
 
-What happens if a removed key gets revived later is up to you. If you're handling
-KeyMissing events, you can restore the tombstone from an external storage when needed.
-Or you can react to Changed events and, when a new item is added which should not be
-there, simply remove it again.
+What happens if a removed key gets revived later is up to you. You can react to Changed
+events and, when a new item is added which should not be there, simply remove it again.
 
 ## Expiry
 

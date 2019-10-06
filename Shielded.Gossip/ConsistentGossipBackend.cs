@@ -364,15 +364,10 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// Fired after any key changes. Does not fire within consistent transactions, but only when
-        /// and if they commit their changes.
+        /// and if they commit their changes. Please note that it also fires during processing of
+        /// incoming gossip messages, so, unless you really need to, don't do anything slow here.
         /// </summary>
         public ShieldedEvent<ChangedEventArgs> Changed { get; } = new ShieldedEvent<ChangedEventArgs>();
-
-        /// <summary>
-        /// Fired when accessing a key that has no value or has expired. Handlers can specify a value to use,
-        /// which will be saved in the backend and returned to the original reader.
-        /// </summary>
-        public ShieldedEvent<KeyMissingEventArgs> KeyMissing => _wrapped.KeyMissing;
 
         private readonly ShieldedDictNc<string, BackendState> _transactions = new ShieldedDictNc<string, BackendState>();
         private readonly ShieldedDictNc<string, BackendState> _fieldBlockers = new ShieldedDictNc<string, BackendState>();

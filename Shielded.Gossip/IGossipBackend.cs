@@ -9,7 +9,6 @@ namespace Shielded.Gossip
     {
         /// <summary>
         /// Returns true if the backend contains a (non-deleted and non-expired) value under the key.
-        /// May trigger the <see cref="KeyMissing"/> event.
         /// </summary>
         bool ContainsKey(string key);
 
@@ -25,7 +24,7 @@ namespace Shielded.Gossip
 
         /// <summary>
         /// Returns true if the backend contains a value under the key, including any expired or deleted value
-        /// that still lingers. May trigger the <see cref="KeyMissing"/> event.
+        /// that still lingers.
         /// </summary>
         bool ContainsKeyWithInfo(string key);
 
@@ -72,15 +71,10 @@ namespace Shielded.Gossip
         void Touch(string key);
 
         /// <summary>
-        /// Fired after any key changes.
+        /// Fired after any key changes. Please note that it also fires during processing of incoming gossip
+        /// messages, so, unless you really need to, don't do anything slow here.
         /// </summary>
         ShieldedEvent<ChangedEventArgs> Changed { get; }
-
-        /// <summary>
-        /// Fired when accessing a key that has no value or has expired. Handlers can specify a value to use,
-        /// which will be saved in the backend and returned to the original reader.
-        /// </summary>
-        ShieldedEvent<KeyMissingEventArgs> KeyMissing { get; }
     }
 
     public static class GossipBackendExtensions

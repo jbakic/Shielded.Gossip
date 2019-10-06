@@ -52,7 +52,7 @@ namespace Shielded.Gossip
             _logger = logger ?? NullLogger.Instance;
             Transport = transport ?? throw new ArgumentNullException(nameof(transport));
             Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-            _freshIndex = new ReverseTimeIndex(GetItemDirect);
+            _freshIndex = new ReverseTimeIndex(GetItem);
             _gossipTimer = new Timer(_ => SpreadRumors(), null, Configuration.GossipInterval, Configuration.GossipInterval);
             _deletableTimer = new Timer(GetDeletableTimerMethod(), null, Configuration.CleanUpInterval, Configuration.CleanUpInterval);
             _applyMethods = new ApplyMethods((key, fi) => SetInternal(key, fi));
@@ -610,7 +610,7 @@ namespace Shielded.Gossip
                 if (newWindowStart.IsDone)
                     return result.ToArray();
                 // last time we iterated this one, we stopped without adding the current item. let's see if that item is still up to date.
-                if (newWindowStart.Current.Item != GetItemDirect(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
+                if (newWindowStart.Current.Item != GetItem(newWindowStart.Current.Item.Key) && !newWindowStart.MoveNext())
                     return result.ToArray();
             }
 
@@ -732,38 +732,7 @@ namespace Shielded.Gossip
             return mi == null ? null : new FieldInfo(mi);
         }
 
-        /// <summary>
-        /// For internal use, does not raise the KeyMissing event. Needed for checking if an item in the
-        /// fresh index is still current, because we do not want the data reloaded in that case.
-        /// </summary>
-        private MessageItem GetItemDirect(string key)
-        {
-            return _local.TryGetValue(key, out var mi) ? mi : null;
-        }
-
-        internal MessageItem GetItem(string key) => Shield.InTransaction(() =>
-        {
-            // expired items might be refetched by the KeyMissing event, so we do not consider those definitive.
-            if (_local.TryGetValue(key, out MessageItem mi) && !(mi.Expired || mi.ExpiresInMs <= 0))
-                return mi;
-
-            var (val, deleted, expInMs) = OnKeyMissing(key);
-            if (val == null)
-                return mi;
-            if (!deleted)
-                deleted = val is IDeletable del && del.CanDelete;
-            mi = new MessageItem
-            {
-                Key = key,
-                Value = val,
-                Deleted = deleted,
-                ExpiresInMs = deleted ? null : expInMs,
-                FreshnessOffset = _freshnessContext.GetValueOrDefault(),
-            };
-            _local[key] = mi;
-            _freshIndex.Append(mi, GetHash(key, val));
-            return mi;
-        });
+        internal MessageItem GetItem(string key) => _local.TryGetValue(key, out var mi) ? mi : null;
 
         internal MessageItem GetActiveItem(string key)
         {
@@ -945,22 +914,10 @@ namespace Shielded.Gossip
         }
 
         /// <summary>
-        /// Fired after any key changes.
+        /// Fired after any key changes. Please note that it also fires during processing of incoming gossip
+        /// messages, so, unless you really need to, don't do anything slow here.
         /// </summary>
         public ShieldedEvent<ChangedEventArgs> Changed { get; } = new ShieldedEvent<ChangedEventArgs>();
-
-        private (IHasVersionBytes ValueToUse, bool Deleted, int? ExpiresInMs) OnKeyMissing(string key)
-        {
-            var ev = new KeyMissingEventArgs(key);
-            KeyMissing.Raise(this, ev);
-            return (ev.ValueToUse, ev.ValueDeleted, ev.ExpiresInMs);
-        }
-
-        /// <summary>
-        /// Fired when accessing a key that has no value or has expired. Handlers can specify a value to use,
-        /// which will be saved in the backend and returned to the original reader.
-        /// </summary>
-        public ShieldedEvent<KeyMissingEventArgs> KeyMissing { get; } = new ShieldedEvent<KeyMissingEventArgs>();
 
         public void Dispose()
         {
