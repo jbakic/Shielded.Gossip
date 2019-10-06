@@ -344,7 +344,7 @@ namespace Shielded.Gossip
             {
                 if (!Self._transactions.Remove(TransactionId))
                     return;
-                Self._logger.LogDebug("Completing backend state of transaction {TransactionId}", TransactionId);
+                Self._logger.LogDebug("Completing backend state of {TransactionId}", TransactionId);
                 Self.UnlockFields(this);
                 Shield.SideEffect(() =>
                 {
@@ -452,7 +452,7 @@ namespace Shielded.Gossip
                             return cont;
                         }
                         var id = ourState.TransactionId;
-                        using (_logger.BeginScope("Local transaction {TransactionId}", id))
+                        using (_logger.BeginScope("Local {TransactionId}", id))
                         {
                             _logger.LogDebug("Participating servers: {TransactionServers}; initiator votes: {InitiatorVotes}",
                                 transaction.State.Select(s => s.ServerId).ToArray(), transaction.InitiatorVotes);
@@ -577,13 +577,13 @@ namespace Shielded.Gossip
                         if (IsHigherPrio(ourState, someState))
                             Shield.SideEffect(() =>
                             {
-                                _logger.LogDebug("Lock-conflict over key {Key}, trying to interrupt conflicting lower prio transaction {OtherTransactionId}",
+                                _logger.LogDebug("Lock-conflict over key {Key}, trying to interrupt conflicting lower prio {OtherTransactionId}",
                                     key, someState.TransactionId);
                                 someState.PrepareCompleter.TrySetResult(new PrepareResult(false, ourState.Committer.Task));
                             });
                         else
                             Shield.SideEffect(() =>
-                                _logger.LogDebug("Lock-conflict over key {Key} with transaction {OtherTransactionId}", key, someState.TransactionId));
+                                _logger.LogDebug("Lock-conflict over key {Key} with {OtherTransactionId}", key, someState.TransactionId));
                         return someState.Committer.Task;
                     }).Where(t => t != null).Distinct().ToArray();
 
@@ -727,7 +727,7 @@ namespace Shielded.Gossip
             _transactions.Add(id, ourState);
             Shield.SideEffect(async () =>
             {
-                using (_logger.BeginScope("External transaction {TransactionId}", id))
+                using (_logger.BeginScope("External {TransactionId}", id))
                 {
                     try
                     {
@@ -802,14 +802,14 @@ namespace Shielded.Gossip
             _transactions.TryGetValue(id, out var ourState);
             if (current.IsFail || current.IsRejected)
             {
-                _logger.LogDebug("Transaction {TransactionId} has been rejected or failed.", id);
+                _logger.LogDebug("{TransactionId} has been rejected or failed.", id);
                 SetFail(id);
                 if (ourState != null)
                     ourState.Complete();
             }
             else if (current.IsSuccess)
             {
-                _logger.LogDebug("Transaction {TransactionId} has succeeded.", id);
+                _logger.LogDebug("{TransactionId} has succeeded.", id);
                 Apply(id, current);
                 SetSuccess(id);
                 if (ourState != null)
@@ -820,7 +820,7 @@ namespace Shielded.Gossip
             {
                 if (ourState != null)
                 {
-                    _logger.LogDebug("Local transaction {TransactionId} has been prepared by other servers.", id);
+                    _logger.LogDebug("Local {TransactionId} has been prepared by other servers.", id);
                     Shield.SideEffect(() =>
                         ourState.PrepareCompleter.TrySetResult(new PrepareResult(true)));
                 }
@@ -829,7 +829,7 @@ namespace Shielded.Gossip
                     // in case this transaction previously succeeded, but some other servers never got the news,
                     // and were holding in Prepared - we send the latest state of these keys, to make sure they
                     // are up-to-date when they release their field locks.
-                    _logger.LogWarning("Local transaction {TransactionId} has been prepared by other servers, but is unknown locally! Failing it.", id);
+                    _logger.LogWarning("Local {TransactionId} has been prepared by other servers, but is unknown locally! Failing it.", id);
                     foreach (var key in current.AllKeys)
                         _wrapped.Touch(key);
                     SetFail(id);
@@ -839,7 +839,7 @@ namespace Shielded.Gossip
 
         private void Apply(string id, TransactionInfo current)
         {
-            _logger.LogDebug("Applying transaction {TransactionId}", id);
+            _logger.LogDebug("Applying {TransactionId}", id);
             _wrapped.ApplyItems(
                 (current.Reads ?? Enumerable.Empty<MessageItem>())
                 .Concat(current.Changes ?? Enumerable.Empty<MessageItem>())
@@ -852,7 +852,7 @@ namespace Shielded.Gossip
             if (!_wrapped.TryGet(id, out TransactionInfo current) ||
                 (current.State[Transport.OwnId] & TransactionState.Done) != 0)
             {
-                _logger.LogCritical("Unexpected commit failure of transaction {TransactionId}.", ourState.TransactionId);
+                _logger.LogCritical("Unexpected commit failure of {TransactionId}.", ourState.TransactionId);
                 throw new ApplicationException("Critical error - unexpected commit failure.");
             }
             Apply(ourState.TransactionId, current);
