@@ -75,6 +75,17 @@ namespace Shielded.Gossip
         /// messages, so, unless you really need to, don't do anything slow here.
         /// </summary>
         ShieldedEvent<ChangedEventArgs> Changed { get; }
+
+        /// <summary>
+        /// An enumerable of keys read or written into by the current transaction. Includes
+        /// keys that did not have a value.
+        /// </summary>
+        IEnumerable<string> Reads { get; }
+
+        /// <summary>
+        /// An enumerable of keys written into by the current transaction.
+        /// </summary>
+        IEnumerable<string> Changes { get; }
     }
 
     public static class GossipBackendExtensions

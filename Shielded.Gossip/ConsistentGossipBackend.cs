@@ -311,6 +311,17 @@ namespace Shielded.Gossip
             return true;
         }
 
+        /// <summary>
+        /// An enumerable of keys read or written into by the current transaction. Includes
+        /// keys that did not have a value.
+        /// </summary>
+        public IEnumerable<string> Reads => _wrapped.Reads;
+
+        /// <summary>
+        /// An enumerable of keys written into by the current transaction.
+        /// </summary>
+        public IEnumerable<string> Changes => IsInConsistentTransaction ? _currentState.Value.Keys : _wrapped.Changes;
+
         private struct PrepareResult
         {
             public readonly bool Success;
