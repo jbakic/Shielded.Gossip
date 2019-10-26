@@ -21,7 +21,7 @@ namespace Shielded.Gossip
 
         public bool CanDelete => Value is IDeletable del && del.CanDelete;
 
-        public IEnumerable<byte[]> GetVersionBytes() => new[] { BitConverter.GetBytes(Version) };
+        public IEnumerable<byte[]> GetVersionBytes() => new[] { SafeBitConverter.GetBytes(Version) };
 
         public IntVersioned<T> MergeWith(IntVersioned<T> other) => Version >= other.Version ? this : other;
 

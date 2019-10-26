@@ -182,7 +182,7 @@ namespace Shielded.Gossip
         {
             public readonly int? LastReceivedMsgId;
             public readonly int LastSentMsgId;
-            public ReverseTimeIndex.Enumerator LastWindowStart { get; private set; }
+            public readonly ReverseTimeIndex.Enumerator LastWindowStart;
             public readonly int LastPackageSize;
             public readonly MessageType LastSentMsgType;
             // used only when LastSentMsgType == MessageType.Start
@@ -199,11 +199,6 @@ namespace Shielded.Gossip
                 LastPackageSize = lastPackageSize;
                 LastSentMsgType = lastSentMsgType;
                 PreviousSentEndMsgId = previousSentEndMsgId;
-            }
-
-            public void ReleaseEnumerator()
-            {
-                LastWindowStart = default;
             }
         }
 
@@ -317,12 +312,12 @@ namespace Shielded.Gossip
                                     else
                                         Shield.SyncSideEffect(() =>
                                         {
-                                        // we don't want to send back the same things we just received. so, ignore all keys from
-                                        // the incoming msg for which the result of application was Greater or Equal, which means our
-                                        // local value is (now) identical to the received one, unless they also appear in _toMail,
-                                        // which means a Changed handler made further changes to them.
-                                        // we need the max freshness in case these fields change after this transaction.
-                                        ignoreUpToFreshness = _freshIndex.LastFreshness;
+                                            // we don't want to send back the same things we just received. so, ignore all keys from
+                                            // the incoming msg for which the result of application was Greater or Equal, which means our
+                                            // local value is (now) identical to the received one, unless they also appear in _toMail,
+                                            // which means a Changed handler made further changes to them.
+                                            // we need the max freshness in case these fields change after this transaction.
+                                            ignoreUpToFreshness = _freshIndex.LastFreshness;
                                             if (_toMail.HasValue)
                                                 keysToIgnore.ExceptWith(_toMail.Value.Keys);
                                         });
@@ -350,7 +345,7 @@ namespace Shielded.Gossip
 
         private readonly ApplyMethods _applyMethods;
 
-        private static readonly ShieldedLocal<long> _freshnessContext = new ShieldedLocal<long>();
+        private readonly ShieldedLocal<long> _freshnessContext = new ShieldedLocal<long>();
 
         /// <summary>
         /// Applies the given items internally, does not cause any direct mail. Applies them
@@ -512,7 +507,7 @@ namespace Shielded.Gossip
                 if (hisEnd != null)
                 {
                     _gossipStates.Remove(server);
-                    _logger.LogDebug("Hashes match, gossip completed successfully.");
+                    Shield.SideEffect(() => _logger.LogDebug("Hashes match, gossip completed successfully."));
                     return null;
                 }
                 else
@@ -532,7 +527,8 @@ namespace Shielded.Gossip
                 if (hisNews == null)
                 {
                     _gossipStates.Remove(server);
-                    _logger.LogWarning("Hashes do not match, but nothing left to gossip about. Completed unsuccessfully.");
+                    Shield.SideEffect(() =>
+                        _logger.LogWarning("Hashes do not match, but nothing left to gossip about. Completed unsuccessfully."));
                     return null;
                 }
                 else if (hisNews.Items == null || hisNews.Items.Length == 0)
@@ -583,9 +579,9 @@ namespace Shielded.Gossip
             // IsGossipActive is correct, and to guarantee that we actually are done.
             _gossipStates[hisNews.From] = new GossipState(hisNews.MessageId, endMsg.MessageId, default, lastPackageSize, MessageType.End);
             if (success)
-                _logger.LogDebug("Prepared GossipEnd reply {ServerId}/{MessageId}, successful.", endMsg.From, endMsg.MessageId);
+                Shield.SideEffect(() => _logger.LogDebug("Prepared GossipEnd reply {ServerId}/{MessageId}, successful.", endMsg.From, endMsg.MessageId));
             else
-                _logger.LogWarning("Prepared GossipEnd reply {ServerId}/{MessageId}, unsuccessful.", endMsg.From, endMsg.MessageId);
+                Shield.SideEffect(() => _logger.LogWarning("Prepared GossipEnd reply {ServerId}/{MessageId}, unsuccessful.", endMsg.From, endMsg.MessageId));
             return endMsg;
         }
 
@@ -607,8 +603,9 @@ namespace Shielded.Gossip
                         msg.ReplyToId, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
                 }));
             }
-            _logger.LogDebug("Prepared GossipReply {ServerId}/{MessageId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
-                msg.From, msg.MessageId, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
+            Shield.SideEffect(() =>
+                _logger.LogDebug("Prepared GossipReply {ServerId}/{MessageId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
+                    msg.From, msg.MessageId, msg.Items?.Length ?? 0, msg.WindowStart, msg.WindowEnd));
             return msg;
         }
 

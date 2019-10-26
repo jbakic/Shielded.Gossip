@@ -20,7 +20,7 @@ namespace Shielded.Gossip
 
         public bool CanDelete => Value is IDeletable del && del.CanDelete;
 
-        public IEnumerable<byte[]> GetVersionBytes() => new[] { BitConverter.GetBytes(Time.UtcDateTime.ToBinary()) };
+        public IEnumerable<byte[]> GetVersionBytes() => new[] { SafeBitConverter.GetBytes(Time.UtcDateTime.ToBinary()) };
 
         public Lww<T> MergeWith(Lww<T> other) => Time >= other.Time ? this : other;
 

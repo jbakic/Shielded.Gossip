@@ -205,7 +205,7 @@ namespace Shielded.Gossip
                         onCloseOrError(client, null);
                         return;
                     }
-                    var length = BitConverter.ToInt32(lengthBytes, 0);
+                    var length = SafeBitConverter.ToInt32(lengthBytes, 0);
                     if (length == 0)
                         continue;
 
@@ -260,7 +260,7 @@ namespace Shielded.Gossip
 
         internal static async Task SendFramed(NetworkStream stream, byte[] bytes)
         {
-            var lengthBytes = BitConverter.GetBytes(bytes.Length);
+            var lengthBytes = SafeBitConverter.GetBytes(bytes.Length);
             await stream.WriteAsync(lengthBytes, 0, 4).ConfigureAwait(false);
             if (bytes.Length > 0)
                 await stream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);

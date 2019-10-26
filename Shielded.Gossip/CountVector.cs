@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
 
@@ -29,7 +30,7 @@ namespace Shielded.Gossip
             public override bool Equals(object obj) => obj is Item i && Equals(i);
 
             public override int GetHashCode() =>
-                FNV1a32.Hash(BitConverter.GetBytes(Increments), BitConverter.GetBytes(Decrements));
+                FNV1a32.Hash(SafeBitConverter.GetBytes(Increments), SafeBitConverter.GetBytes(Decrements));
 
             public override string ToString() =>
                 string.Format("+{0}, -{1}", Increments, Decrements);
@@ -51,6 +52,12 @@ namespace Shielded.Gossip
 
         protected override VectorRelationship Compare(Item left, Item right) =>
             left.Increments.VectorCompare(right.Increments) | left.Decrements.VectorCompare(right.Decrements);
+
+        protected override IEnumerable<byte[]> GetBytes(Item val)
+        {
+            yield return SafeBitConverter.GetBytes(val.Increments);
+            yield return SafeBitConverter.GetBytes(val.Decrements);
+        }
 
         public static implicit operator long(CountVector cv) => cv.Value;
 

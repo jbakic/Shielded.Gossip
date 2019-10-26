@@ -65,7 +65,7 @@ namespace Shielded.Gossip
             var ser = new DataContractSerializer(type);
             var typeName = TypeId.GetId(type);
             var nameBytes = Encoding.UTF8.GetBytes(typeName);
-            var lengthBytes = BitConverter.GetBytes(nameBytes.Length);
+            var lengthBytes = SafeBitConverter.GetBytes(nameBytes.Length);
             using (var ms = new MemoryStream())
             {
                 ms.Write(lengthBytes, 0, lengthBytes.Length);
@@ -77,7 +77,7 @@ namespace Shielded.Gossip
 
         public object Deserialize(byte[] bytes)
         {
-            var nameLength = BitConverter.ToInt32(bytes, 0);
+            var nameLength = SafeBitConverter.ToInt32(bytes, 0);
             var name = Encoding.UTF8.GetString(bytes, 4, nameLength);
             var type = TypeId.GetType(name);
             if (type == null)

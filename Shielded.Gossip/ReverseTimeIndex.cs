@@ -102,51 +102,32 @@ namespace Shielded.Gossip
             _currentItemGetter = currentItemGetter ?? throw new ArgumentNullException();
         }
 
-        private class CurrentTransactionEffects
-        {
-            public readonly Dictionary<string, ListElement> ToAppend = new Dictionary<string, ListElement>();
-        }
-
-        private readonly ShieldedLocal<CurrentTransactionEffects> _currFx = new ShieldedLocal<CurrentTransactionEffects>();
-
         public void Append(MessageItem item, VersionHash hashEffect)
         {
             if (item == null)
                 throw new ArgumentNullException(nameof(item));
-            var currFx = _currFx.GetValueOrDefault();
-            if (currFx == null)
-            {
-                _currFx.Value = currFx = new CurrentTransactionEffects();
-                _listHead.Commute(AppendCommute);
-            }
 
-            _databaseHash.Commute((ref VersionHash h) => h ^= hashEffect);
-            if (currFx.ToAppend.TryGetValue(item.Key, out var oldElem))
-            {
-                oldElem.Item = item;
-            }
-            else
-            {
-                currFx.ToAppend[item.Key] = new ListElement { Item = item };
-            }
-        }
+            if (hashEffect != default)
+                _databaseHash.Commute((ref VersionHash h) => h ^= hashEffect);
 
-        private void AppendCommute(ref ListElement cell)
-        {
-            var newFresh = (cell?.Freshness ?? 0) + 1;
-            var referenceTickCount = Environment.TickCount;
-            foreach (var kvp in _currFx.Value.ToAppend.OrderBy(kvp => kvp.Value.Item.FreshnessOffset))
+            _listHead.Commute((ref ListElement el) =>
             {
-                var element = kvp.Value;
-                var item = element.Item;
-                element.Freshness = item.Freshness = newFresh + item.FreshnessOffset;
+                var lastFreshness = Shield.ReadOldState(() => _listHead.Value?.Freshness ?? 0);
+                var freshness = lastFreshness + 1 + item.FreshnessOffset;
+                if (freshness < el?.Freshness)
+                    throw new InvalidOperationException("FreshnessOffset may only increase during a transaction.");
+                item.Freshness = freshness;
+                var referenceTickCount = TransactionalTickCount.Value;
                 item.ActivateExpiry(referenceTickCount);
                 if (item.Deleted || item.Expired)
                     item.RemovableSince = referenceTickCount;
-
-                element.Previous = cell;
-                cell = element;
-            }
+                el = new ListElement
+                {
+                    Freshness = freshness,
+                    Item = item,
+                    Previous = el,
+                };
+            });
         }
 
         public Enumerator GetCloneableEnumerator() => new Enumerator(this);

@@ -27,13 +27,16 @@ namespace ConsoleTests
         {
             _loggerFactory = LoggerFactory.Create(builder =>
             {
-                builder.SetMinimumLevel(LogLevel.Debug);
+                //builder.SetMinimumLevel(LogLevel.Debug);
                 //builder.AddConsole(options => options.IncludeScopes = true);
                 builder.AddProvider(new MyConsoleLoggerProvider());
             });
+            var backends = PrepareBackends();
 
-            RunConsistentRace();
+            foreach (var _ in Enumerable.Repeat(0, 100))
+                RunConsistentRace(backends);
 
+            DisposeBackends(backends.Values);
             _loggerFactory.Dispose();
         }
 
@@ -45,22 +48,12 @@ namespace ConsoleTests
             public int Counter { get; set; }
         }
 
-        public static void RunConsistentRace()
+        public static void RunConsistentRace(Dictionary<string, ConsistentGossipBackend> backends)
         {
             const int transactions = 100;
             const int fieldCount = 10;
 
-            var backends = _addresses.ToDictionary(kvp => kvp.Key, kvp =>
-            {
-                var transport = new TcpTransport(kvp.Key, _addresses, _loggerFactory.CreateLogger("Transport" + kvp.Key));
-                transport.StartListening();
-                return new ConsistentGossipBackend(transport, new GossipConfiguration
-                {
-                    DirectMail = DirectMailType.StartGossip
-                }, _loggerFactory.CreateLogger("Backend" + kvp.Key));
-            });
-
-            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+            var bools = Task.WhenAll(ParallelEnumerable.Range(0, transactions).Select(i =>
             {
                 var backend = backends.Values.Skip(i % 3).First();
                 var id = (i % fieldCount);
@@ -83,6 +76,25 @@ namespace ConsoleTests
                     backends[B].TryGetVecVersioned<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
 
             _loggerFactory.CreateLogger("Program").LogInformation("Completed with success {Success}, and total {Total}", read.Success, read.Value);
+        }
+
+        private static Dictionary<string, ConsistentGossipBackend> PrepareBackends()
+        {
+            return _addresses.ToDictionary(kvp => kvp.Key, kvp =>
+            {
+                var transport = new TcpTransport(kvp.Key, _addresses, _loggerFactory.CreateLogger("Transport" + kvp.Key));
+                transport.StartListening();
+                return new ConsistentGossipBackend(transport, new GossipConfiguration
+                {
+                    DirectMail = DirectMailType.StartGossip
+                }, _loggerFactory.CreateLogger("Backend" + kvp.Key));
+            });
+        }
+
+        private static void DisposeBackends(IEnumerable<IGossipBackend> backends)
+        {
+            foreach (var backend in backends)
+                backend.Dispose();
         }
     }
 }

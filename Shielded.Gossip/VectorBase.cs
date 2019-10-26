@@ -53,12 +53,9 @@ namespace Shielded.Gossip
 
         public int Count => Items?.Length ?? 0;
 
-        protected virtual IEqualityComparer<T> EqualityComparer => EqualityComparer<T>.Default;
-
         public bool Equals(TVec other)
         {
-            var eqComparer = EqualityComparer;
-            return Join(other, (left, right) => eqComparer.Equals(left, right)).All(b => b);
+            return Join(other, (left, right) => Compare(left, right) == VectorRelationship.Equal).All(b => b);
         }
 
         public override bool Equals(object obj) => (obj is TVec vec) && Equals(vec);
@@ -78,13 +75,20 @@ namespace Shielded.Gossip
             if (Items == null || Items.Length == 0)
                 yield break;
             var idComparer = StringComparer.InvariantCultureIgnoreCase;
-            var valueComparer = EqualityComparer;
             foreach (var item in Items.OrderBy(vi => vi.ServerId, idComparer))
             {
                 yield return Encoding.UTF8.GetBytes(item.ServerId.ToLowerInvariant());
-                yield return BitConverter.GetBytes(valueComparer.GetHashCode(item.Value));
+                foreach (var subItem in GetBytes(item.Value))
+                    yield return subItem;
             }
         }
+
+        /// <summary>
+        /// Gets the bytes of the items, used to determine the hash of the version. Needed to make
+        /// sure that the hash is equal on all servers. Do not use .NET's GetHashCode, and if you
+        /// use the BitConverter, pay attention to IsLittleEndian!
+        /// </summary>
+        protected abstract IEnumerable<byte[]> GetBytes(T val);
 
         public override string ToString()
         {
@@ -94,13 +98,7 @@ namespace Shielded.Gossip
                 string.Format("(\"{0}\", {1})", i.ServerId, i.Value)));
         }
 
-        protected virtual VectorRelationship Compare(T left, T right)
-        {
-            var cmp = Comparer<T>.Default.Compare(left, right);
-            return
-                cmp == 0 ? VectorRelationship.Equal :
-                cmp > 0 ? VectorRelationship.Greater : VectorRelationship.Less;
-        }
+        protected abstract VectorRelationship Compare(T left, T right);
 
         public VectorRelationship VectorCompare(TVec other)
         {

@@ -17,7 +17,14 @@ namespace Shielded.Gossip
 
         public static implicit operator VersionVector((string, int) t) => new VersionVector(t.Item1, t.Item2);
 
+        protected override VectorRelationship Compare(int left, int right) => left.VectorCompare(right);
+
         protected override int Merge(int left, int right) => Math.Max(left, right);
+
+        protected override IEnumerable<byte[]> GetBytes(int val)
+        {
+            yield return SafeBitConverter.GetBytes(val);
+        }
 
         /// <summary>
         /// Produce next version for this server, returning the result in a new VectorClock.

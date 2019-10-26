@@ -34,8 +34,15 @@ namespace Shielded.Gossip
 
         public static implicit operator TransactionVector((string, TransactionState) t) => new TransactionVector(t.Item1, t.Item2);
 
+        protected override VectorRelationship Compare(TransactionState left, TransactionState right) => ((int)left).VectorCompare((int)right);
+
         protected override TransactionState Merge(TransactionState left, TransactionState right) =>
             right > left ? right : left;
+
+        protected override IEnumerable<byte[]> GetBytes(TransactionState val)
+        {
+            yield return SafeBitConverter.GetBytes((int)val);
+        }
     }
 
     /// <summary>
