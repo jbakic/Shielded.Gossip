@@ -770,7 +770,7 @@ namespace Shielded.Gossip
         /// </summary>
         public ICollection<string> KeysWithInfo => _local.Keys;
 
-        private VersionHash GetHash(string key, IHasVersionBytes i)
+        private VersionHash GetHash<TItem>(string key, TItem i) where TItem : IHasVersionBytes
         {
             return VersionHash.Hash(
                 new[] { Encoding.UTF8.GetBytes(key) }
