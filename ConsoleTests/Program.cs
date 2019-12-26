@@ -27,13 +27,13 @@ namespace ConsoleTests
         {
             _loggerFactory = LoggerFactory.Create(builder =>
             {
-                //builder.SetMinimumLevel(LogLevel.Debug);
+                builder.SetMinimumLevel(LogLevel.Debug);
                 //builder.AddConsole(options => options.IncludeScopes = true);
                 builder.AddProvider(new MyConsoleLoggerProvider());
             });
             var backends = PrepareBackends();
 
-            foreach (var _ in Enumerable.Repeat(0, 100))
+            //foreach (var _ in Enumerable.Repeat(0, 100))
                 RunConsistentRace(backends);
 
             DisposeBackends(backends.Values);
@@ -50,8 +50,8 @@ namespace ConsoleTests
 
         public static void RunConsistentRace(Dictionary<string, ConsistentGossipBackend> backends)
         {
-            const int transactions = 100;
-            const int fieldCount = 10;
+            const int transactions = 5;
+            const int fieldCount = 2;
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(0, transactions).Select(i =>
             {

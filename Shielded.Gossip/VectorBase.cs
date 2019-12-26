@@ -201,5 +201,7 @@ namespace Shielded.Gossip
                     Items.FirstOrDefault(i => i.ServerId.Equals(serverId, StringComparison.InvariantCultureIgnoreCase)).Value;
             }
         }
+
+        public bool HasServer(string serverId) => Items.Any(i => StringComparer.InvariantCultureIgnoreCase.Equals(i.ServerId, serverId));
     }
 }

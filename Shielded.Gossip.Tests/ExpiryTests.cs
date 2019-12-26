@@ -73,28 +73,28 @@ namespace Shielded.Gossip.Tests
             Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
         }
 
-        [TestMethod]
-        public async Task Expiry_NoExpiryDuringConsistentPrepare()
-        {
-            using (var cont = await _backends[A].Prepare(() =>
-            {
-                _backends[A].SetHasVec("test", true.Version(A, 1), 50);
+        //[TestMethod]
+        //public async Task Expiry_NoExpiryDuringConsistentPrepare()
+        //{
+        //    using (var cont = await _backends[A].Prepare(() =>
+        //    {
+        //        _backends[A].SetHasVec("test", true.Version(A, 1), 50);
 
-                Thread.Sleep(70);
-                Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
-            }))
-            {
-                Assert.IsNotNull(cont);
+        //        Thread.Sleep(70);
+        //        Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
+        //    }))
+        //    {
+        //        Assert.IsNotNull(cont);
 
-                // the expiry clock is not running until we commit.
-                Thread.Sleep(70);
-                cont.Commit();
-            }
-            Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
+        //        // the expiry clock is not running until we commit.
+        //        Thread.Sleep(70);
+        //        cont.Commit();
+        //    }
+        //    Assert.IsTrue(_backends[A].TryGetVecVersioned<bool>("test").Single().Value);
 
-            Thread.Sleep(70);
-            Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
-        }
+        //    Thread.Sleep(70);
+        //    Assert.IsFalse(_backends[A].TryGetVecVersioned<bool>("test").Any());
+        //}
 
         [TestMethod]
         public void Expiry_NoExpiryDuringConsistentTransaction()

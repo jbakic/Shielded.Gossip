@@ -12,13 +12,10 @@ namespace Shielded.Gossip
     [Flags]
     public enum TransactionState
     {
-        None = 0,
-        Prepared = 1,
-        Rejected = 2,
-        Done = 4,
-
-        Success = Prepared | Done,
-        Fail = Rejected | Done,
+        None,
+        Promised,
+        Accepted,
+        Rejected,
     }
 
     /// <summary>
@@ -52,13 +49,10 @@ namespace Shielded.Gossip
     [DataContract(Namespace = ""), Serializable]
     public class TransactionInfo : IMergeable<TransactionInfo>, IDeletable
     {
-        /// <summary>
-        /// ID of the server that started the transaction.
-        /// </summary>
         [DataMember]
         public string Initiator { get; set; }
         [DataMember]
-        public bool InitiatorVotes { get; set; }
+        public long BallotNumber { get; set; }
         [DataMember]
         public MessageItem[] Reads { get; set; }
         [DataMember]
@@ -69,29 +63,24 @@ namespace Shielded.Gossip
         /// <summary>
         /// An enumerable of all keys involved in the transaction, reads and writes.
         /// </summary>
-        public IEnumerable<string> AllKeys =>
-            Reads?.Select(r => r.Key) ?? Enumerable.Empty<string>();
+        public IEnumerable<string> AllKeys => Reads?.Select(r => r.Key) ?? Enumerable.Empty<string>();
 
-        private IEnumerable<TransactionState> VotingStates =>
-            (InitiatorVotes ? State : State.Without(Initiator)).Select(vi => vi.Value);
-
-        public bool IsPrepared => VotingStates.Count(s => (s & TransactionState.Prepared) != 0) > (VotingStates.Count() / 2);
+        public bool IsPromised => State.Count(s => s.Value == TransactionState.Promised || s.Value == TransactionState.Accepted) > (State.Count / 2);
         public bool IsRejected
         {
             get
             {
-                var voterCount = VotingStates.Count();
-                var rejectVotes = VotingStates.Count(s => (s & TransactionState.Rejected) != 0);
+                var voterCount = State.Count;
+                var rejectVotes = State.Count(s => s.Value == TransactionState.Rejected);
                 // if the voterCount is even, the threshold for rejection is exactly 1/2, i.e. in case we ever have
                 // equal number of Prepared and Rejected votes, we reject.
                 var rejectThreshold = voterCount / 2 + voterCount % 2;
                 return rejectVotes >= rejectThreshold;
             }
         }
-
-        public bool IsDone => State.Any(i => (i.Value & TransactionState.Done) != 0);
-        public bool IsSuccess => State.Any(i => i.Value == TransactionState.Success);
-        public bool IsFail => State.Any(i => i.Value == TransactionState.Fail);
+        public bool HasAcceptedVotes => State.Any(s => s.Value == TransactionState.Accepted);
+        public bool IsSuccessful => State.Count(s => s.Value == TransactionState.Accepted) > (State.Count / 2);
+        public bool IsDone => IsRejected || IsSuccessful;
 
         /// <summary>
         /// True as soon as the transaction completes.
@@ -107,7 +96,7 @@ namespace Shielded.Gossip
             return new TransactionInfo
             {
                 Initiator = Initiator,
-                InitiatorVotes = InitiatorVotes,
+                BallotNumber = BallotNumber,
                 Reads = Reads,
                 Changes = Changes,
                 State = (State ?? new TransactionVector()).MergeWith(newState)
@@ -117,5 +106,26 @@ namespace Shielded.Gossip
         public TransactionInfo WithState(string ownServerId, TransactionState newState) => WithState((ownServerId, newState));
 
         public VectorRelationship VectorCompare(TransactionInfo other) => (State ?? new TransactionVector()).VectorCompare(other?.State);
+
+        public int ComparePriority(TransactionInfo other)
+        {
+            var ballotComp = BallotComparer.Compare(BallotNumber, other.BallotNumber);
+            if (ballotComp != 0)
+                return ballotComp;
+            return StringComparer.InvariantCultureIgnoreCase.Compare(Initiator, other.Initiator);
+        }
+    }
+
+    public static class BallotComparer
+    {
+        public static int Compare(long a, long b)
+        {
+            var ballotDiff = unchecked(a - b);
+            return
+                // reverse order - higher numbers go first
+                ballotDiff > 0 ? -1 :
+                ballotDiff < 0 ? 1 :
+                0;
+        }
     }
 }

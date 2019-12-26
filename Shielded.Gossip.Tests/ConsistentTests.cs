@@ -151,35 +151,35 @@ namespace Shielded.Gossip.Tests
             Assert.AreEqual((VersionVector)(A, 1) | (B, 1), saved.MergedClock);
         }
 
-        [TestMethod]
-        public void Consistent_PrepareAndRollback()
-        {
-            var testEntity = new TestClass { Id = 1, Name = "One" };
+        //[TestMethod]
+        //public void Consistent_PrepareAndRollback()
+        //{
+        //    var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            using (var cont = _backends[A].Prepare(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result)
-            {
-                Assert.IsNotNull(cont);
-                Assert.IsFalse(cont.Completed);
+        //    using (var cont = _backends[A].Prepare(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result)
+        //    {
+        //        Assert.IsNotNull(cont);
+        //        Assert.IsFalse(cont.Completed);
 
-                Assert.IsTrue(cont.TryRollback());
-                Assert.IsTrue(cont.Completed);
-                Assert.IsFalse(cont.Committed);
-            }
+        //        Assert.IsTrue(cont.TryRollback());
+        //        Assert.IsTrue(cont.Completed);
+        //        Assert.IsFalse(cont.Committed);
+        //    }
 
-            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<TestClass>("key"))
-                .Result;
+        //    var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<TestClass>("key"))
+        //        .Result;
 
-            Assert.IsTrue(success);
-            Assert.IsFalse(multi.Any());
+        //    Assert.IsTrue(success);
+        //    Assert.IsFalse(multi.Any());
 
-            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
-                .Result;
+        //    (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
+        //        .Result;
 
-            CheckProtocols();
+        //    CheckProtocols();
 
-            Assert.IsTrue(success);
-            Assert.IsFalse(multi.Any());
-        }
+        //    Assert.IsTrue(success);
+        //    Assert.IsFalse(multi.Any());
+        //}
 
         [TestMethod]
         public void Consistent_Race()
