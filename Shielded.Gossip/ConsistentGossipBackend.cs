@@ -577,7 +577,7 @@ namespace Shielded.Gossip
             Shield.SideEffect(() => tcs.TrySetResult(success));
             RemoveFromHolders(id, transaction);
             _activeTransactions.Remove(id);
-            Shield.SideEffect(() =>
+            Shield.SideEffect(() => Shield.InTransaction(() =>
             {
                 foreach (var (otherId, _) in SortByPrio(GetCompetitors(id, transaction)))
                 {
@@ -592,7 +592,7 @@ namespace Shielded.Gossip
                     else if (ourOtherState == TransactionState.None)
                         TrySetPromised(otherId, other);
                 }
-            });
+            }));
         });
 
         private void RemoveFromHolders(string id, TransactionInfo transaction)
