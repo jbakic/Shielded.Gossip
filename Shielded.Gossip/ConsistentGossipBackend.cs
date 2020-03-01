@@ -393,8 +393,7 @@ namespace Shielded.Gossip
         /// <param name="attempts">The number of attempts to make, default 10.</param>
         /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
         /// always run your lambda in that context.</param>
-        /// <returns>Result of the task is a continuation for later committing/rolling back, or null if
-        /// preparation failed.</returns>
+        /// <returns>Eventually a bool indicating whether the transaction succeeded.</returns>
         public async Task<bool> RunConsistent(Action trans, int attempts = 10, bool runTransOnCapturedContext = true)
         {
             if (trans == null)
@@ -493,10 +492,10 @@ namespace Shielded.Gossip
 
         private PrepareResult PrepareLocal(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
         {
-            var problems = CheckFields(transaction.AllKeys);
+            var problems = CheckFieldsAreFree(transaction.AllKeys);
             if (problems.Any())
             {
-                Shield.SideEffect(() => _logger.LogDebug("Local transaction failed to get exclusive access to fields."));
+                _logger.LogDebug("Local transaction failed to get exclusive access to fields.");
                 return PrepareResult.Failed(Task.WhenAll(problems));
             }
             if (!Check(transaction, true))
@@ -506,14 +505,14 @@ namespace Shielded.Gossip
             var completer = _activeTransactions[id] = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             if (transaction.State.HasServer(Transport.OwnId))
             {
-                Shield.SideEffect(() => _logger.LogDebug("Voting Promised on {TransactionId}", id));
+                _logger.LogDebug("Voting Promised on {TransactionId}", id);
                 transaction = transaction.WithState(Transport.OwnId, TransactionState.Promised);
             }
             _wrapped.Set(id, transaction);
             return PrepareResult.Ok(completer.Task);
         });
 
-        private Task[] CheckFields(IEnumerable<string> keys) => Shield.InTransaction(() =>
+        private Task[] CheckFieldsAreFree(IEnumerable<string> keys) => Shield.InTransaction(() =>
         {
             return keys
                 .SelectMany(key => _fieldHolders.TryGetValue(key, out var otherIds) ? otherIds : Enumerable.Empty<string>())
@@ -526,7 +525,7 @@ namespace Shielded.Gossip
         {
             if (!Check(transaction, false))
             {
-                Shield.SideEffect(() => _logger.LogDebug("Voting Rejected and in the future ignoring {TransactionId}", id));
+                _logger.LogDebug("Voting Rejected and in the future ignoring {TransactionId}", id);
                 _wrapped.Set(id, transaction.WithState(Transport.OwnId, TransactionState.Rejected));
                 return false;
             }
@@ -574,39 +573,26 @@ namespace Shielded.Gossip
             if (!_activeTransactions.TryGetValue(id, out var tcs))
                 return;
             bool success = transaction.IsSuccessful;
-            Shield.SideEffect(() => _logger.LogDebug("Completing {TransactionId}, successful: {Successful}", id, success));
+            _logger.LogDebug("Completing {TransactionId}, successful: {Successful}", id, success);
             Shield.SideEffect(() => tcs.TrySetResult(success));
             RemoveFromHolders(id, transaction);
             _activeTransactions.Remove(id);
-            var competitors = new HashSet<string>(transaction.AllKeys.SelectMany(key => _fieldHolders.TryGetValue(key, out var h) ? h : Enumerable.Empty<string>()));
-            if (success)
+            Shield.SideEffect(() =>
             {
-                foreach (var otherId in competitors.ToArray())
+                foreach (var (otherId, _) in SortByPrio(GetCompetitors(id, transaction)))
                 {
+                    // since any iteration of this loop can trigger further changes, we must reload.
                     if (!_wrapped.TryGet(otherId, out TransactionInfo other))
                         continue;
-                    if (other.State[Transport.OwnId] != TransactionState.Rejected && !Check(other, true))
-                    {
-                        Shield.SideEffect(() => _logger.LogDebug("Completion causing rejection of {TransactionId}", otherId));
-                        // NB this may trigger a recursion, but success will be false in it.
-                        TrySetRejected(otherId, other);
-                        competitors.Remove(otherId);
-                    }
+                    var ourOtherState = other.State[Transport.OwnId];
+                    if (ourOtherState == TransactionState.Rejected || ourOtherState == TransactionState.Accepted)
+                        continue;
+                    if (other.IsPromised)
+                        TrySetAccepted(otherId, other);
+                    else if (ourOtherState == TransactionState.None)
+                        TrySetPromised(otherId, other);
                 }
-            }
-            foreach (var (otherId, _) in GetPrioSorted(competitors))
-            {
-                // since any iteration of this loop can trigger further changes, we must reload.
-                if (!_wrapped.TryGet(otherId, out TransactionInfo other))
-                    continue;
-                var ourOtherState = other.State[Transport.OwnId];
-                if (ourOtherState == TransactionState.Rejected || ourOtherState == TransactionState.Accepted || !Check(other, true))
-                    continue;
-                if (ourOtherState == TransactionState.None)
-                    TrySetPromised(otherId, other);
-                else if (ourOtherState == TransactionState.Promised && other.IsPromised)
-                    TrySetAccepted(otherId, other);
-            }
+            });
         });
 
         private void RemoveFromHolders(string id, TransactionInfo transaction)
@@ -623,11 +609,9 @@ namespace Shielded.Gossip
             }
         }
 
-        private IEnumerable<(string Id, TransactionInfo Transaction)> GetPrioSorted(IEnumerable<string> ids)
+        private IEnumerable<(string Id, TransactionInfo Transaction)> SortByPrio(IEnumerable<(string Id, TransactionInfo Transaction)> transactions)
         {
-            return ids.Select(id => (Id: id, Transaction: _wrapped.TryGet(id, out TransactionInfo transaction) ? transaction : null))
-                .Where(pair => pair.Transaction != null)
-                .OrderBy(pair => pair.Transaction, Comparer<TransactionInfo>.Create((a, b) => a.ComparePriority(b)));
+            return transactions.OrderBy(pair => pair.Transaction, Comparer<TransactionInfo>.Create((a, b) => a.ComparePriority(b)));
         }
 
         private ComplexRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
@@ -671,23 +655,6 @@ namespace Shielded.Gossip
                     }
                 }
 
-            if (transaction.Changes != null)
-                foreach (var change in transaction.Changes)
-                {
-                    var obj = change.Value;
-                    var comparer = _compareMethods.Get(obj.GetType());
-                    // writes must be Greater than what we have, or EqualButGreater, if you just extended the expiry
-                    var cmp = comparer(change.Key, obj, change.Deleted, false, change.ExpiresInMs);
-                    if (cmp != ComplexRelationship.Greater && cmp != ComplexRelationship.EqualButGreater)
-                    {
-                        _logger.LogDebug("Written version not greater than old value, key {ItemKey}", change.Key);
-                        if (quickCheck)
-                            return false;
-                        _wrapped.Touch(change.Key);
-                        result = false;
-                    }
-                }
-
             return result;
         });
 
@@ -699,7 +666,25 @@ namespace Shielded.Gossip
             }
             else if (e.Key.StartsWith(PublicPfx))
             {
+                CheckTransactions(e.Key);
                 OnChanged(e.Key.Substring(PublicPfx.Length), e.OldValue, e.NewValue, e.Deleted);
+            }
+        }
+
+        private void CheckTransactions(string key)
+        {
+            if (!_fieldHolders.TryGetValue(key, out var holders))
+                return;
+            foreach (var transId in holders)
+            {
+                if (!_wrapped.TryGet(transId, out TransactionInfo trans) ||
+                    trans.State[Transport.OwnId] == TransactionState.Rejected)
+                    continue;
+                if (!Check(trans, true))
+                {
+                    _logger.LogDebug("Field change for {Key} causing rejection of {TransactionId}", key, transId);
+                    TrySetRejected(transId, trans);
+                }
             }
         }
 
@@ -734,39 +719,32 @@ namespace Shielded.Gossip
         private IEnumerable<(string Id, TransactionInfo Transaction)> GetCompetitors(string id, TransactionInfo transaction)
         {
             return transaction.AllKeys
-                .SelectMany(key => _fieldHolders[key].Where(otherId => otherId != id))
+                .SelectMany(key => _fieldHolders.TryGetValue(key, out var h) ? h.Where(otherId => otherId != id) : Enumerable.Empty<string>())
                 .Distinct()
-                .Select(otherId => (Id: otherId, Transaction: _wrapped.TryGet(otherId, out TransactionInfo other) ? other : throw new ApplicationException()));
+                .Select(otherId => (Id: otherId, Transaction: _wrapped.TryGet(otherId, out TransactionInfo other) ? other : null))
+                .Where(pair => pair.Transaction != null);
         }
 
-        private bool CanMakeProgress(string id, TransactionInfo transaction, bool forAccept)
+        private bool CanMakeProgress(string id, TransactionInfo transaction)
         {
             var currHasAcceptedVotes = transaction.HasAcceptedVotes;
             foreach (var (otherId, other) in GetCompetitors(id, transaction))
             {
                 var competitorState = other.State[Transport.OwnId];
                 var beforeMe = other.ComparePriority(transaction) < 0;
-                if (!forAccept)
-                {
-                    if (competitorState == TransactionState.Accepted && (beforeMe || !currHasAcceptedVotes))
-                        return false;
-                    if (competitorState == TransactionState.Promised && beforeMe)
-                        return false;
-                }
-                else
-                {
-                    if (competitorState == TransactionState.Accepted && (beforeMe || !currHasAcceptedVotes))
-                        return false;
-                    if (competitorState == TransactionState.Promised && beforeMe)
-                        return false;
-                }
+                if (competitorState == TransactionState.Accepted && (beforeMe || !currHasAcceptedVotes))
+                    return false;
+                if (competitorState == TransactionState.Promised && beforeMe)
+                    return false;
             }
             return true;
         }
 
         private bool TrySetPromised(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
         {
-            if (!transaction.State.HasServer(Transport.OwnId) || !CanMakeProgress(id, transaction, false))
+            if (!transaction.State.HasServer(Transport.OwnId))
+                throw new ApplicationException("Trying to set state on a transaction we're not a part of.");
+            if (!CanMakeProgress(id, transaction))
                 return false;
             _logger.LogDebug("Changing state to Promised on {TransactionId}", id);
             _wrapped.Set(id, transaction.WithState(Transport.OwnId, TransactionState.Promised));
@@ -775,7 +753,9 @@ namespace Shielded.Gossip
 
         private bool TrySetAccepted(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
         {
-            if (/*transaction.State[Transport.OwnId] != TransactionState.Promised ||*/ !transaction.State.HasServer(Transport.OwnId) || !CanMakeProgress(id, transaction, true))
+            if (!transaction.State.HasServer(Transport.OwnId))
+                throw new ApplicationException("Trying to set state on a transaction we're not a part of.");
+            if (!CanMakeProgress(id, transaction))
                 return false;
             _logger.LogDebug("Changing state to Accepted on {TransactionId}", id);
             _wrapped.Set(id, transaction.WithState(Transport.OwnId, TransactionState.Accepted));
@@ -785,7 +765,7 @@ namespace Shielded.Gossip
         private bool TrySetRejected(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
         {
             if (!transaction.State.HasServer(Transport.OwnId))
-                return false;
+                throw new ApplicationException("Trying to set state on a transaction we're not a part of.");
             _logger.LogDebug("Changing state to Rejected on {TransactionId}", id);
             _wrapped.Set(id, transaction.WithState(Transport.OwnId, TransactionState.Rejected));
             return true;
@@ -803,10 +783,10 @@ namespace Shielded.Gossip
             else if (transaction.IsSuccessful)
             {
                 _logger.LogDebug("{TransactionId} has succeeded.", id);
-                Apply(id, transaction);
                 Complete(id, transaction);
+                Apply(id, transaction);
             }
-            else if (transaction.IsPromised /*&& transaction.State[Transport.OwnId] == TransactionState.Promised*/)
+            else if (transaction.IsPromised && transaction.State[Transport.OwnId] == TransactionState.Promised)
             {
                 _logger.LogDebug("{TransactionId} has reached promise majority.", id);
                 TrySetAccepted(id, transaction);

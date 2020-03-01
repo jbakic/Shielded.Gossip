@@ -27,13 +27,13 @@ namespace ConsoleTests
         {
             _loggerFactory = LoggerFactory.Create(builder =>
             {
-                builder.SetMinimumLevel(LogLevel.Debug);
+                //builder.SetMinimumLevel(LogLevel.Debug);
                 //builder.AddConsole(options => options.IncludeScopes = true);
                 builder.AddProvider(new MyConsoleLoggerProvider());
             });
             var backends = PrepareBackends();
 
-            //foreach (var _ in Enumerable.Repeat(0, 100))
+            foreach (var _ in Enumerable.Repeat(0, 100))
                 RunConsistentRace(backends);
 
             DisposeBackends(backends.Values);
@@ -50,23 +50,30 @@ namespace ConsoleTests
 
         public static void RunConsistentRace(Dictionary<string, ConsistentGossipBackend> backends)
         {
-            const int transactions = 5;
-            const int fieldCount = 2;
+            const int transactions = 1000;
+            const int fieldCount = 100;
+            const int prime1 = 113;
+            const int prime2 = 149;
+            var backendsArray = backends.Values.ToArray();
 
             var bools = Task.WhenAll(ParallelEnumerable.Range(0, transactions).Select(i =>
             {
-                var backend = backends.Values.Skip(i % 3).First();
-                var id = (i % fieldCount);
-                var key = "key" + id;
+                var backend = backendsArray.Skip(i % backends.Count).First();
+                var key1 = "key" + (i * prime1 % fieldCount);
+                var key2 = "key" + ((i + 1) * prime2 % fieldCount);
+                if (key1 == key2)
+                    key2 = "key" + (((i + 1) * prime2 + 1) % fieldCount);
                 return backend.RunConsistent(() =>
                 {
-                    var newVal = backend.TryGetVecVersioned<TestClass>(key)
+                    var val1 = backend.TryGetVecVersioned<int>(key1)
                         .SingleOrDefault()
                         .NextVersion(backend.Transport.OwnId);
-                    if (newVal.Value == null)
-                        newVal.Value = new TestClass { Id = id };
-                    newVal.Value.Counter = newVal.Value.Counter + 1;
-                    backend.SetHasVec(key, newVal);
+                    val1.Value = val1.Value + 1;
+
+                    var val2 = backend.TryGetVecVersioned<int>(key2)
+                        .SingleOrDefault()
+                        .NextVersion(backend.Transport.OwnId);
+                    val2.Value = val2.Value - 1;
                 }, 100);
             })).Result;
             var expected = bools.Count(b => b);
@@ -75,7 +82,7 @@ namespace ConsoleTests
                 Enumerable.Range(0, fieldCount).Sum(i =>
                     backends[B].TryGetVecVersioned<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
 
-            _loggerFactory.CreateLogger("Program").LogInformation("Completed with success {Success}, and total {Total}", read.Success, read.Value);
+            _loggerFactory.CreateLogger("Program").LogInformation("Completed with success {Success}, and total {Total}", read.Success && expected == transactions, read.Value);
         }
 
         private static Dictionary<string, ConsistentGossipBackend> PrepareBackends()
