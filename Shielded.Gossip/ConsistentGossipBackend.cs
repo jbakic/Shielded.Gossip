@@ -22,7 +22,7 @@ namespace Shielded.Gossip
     public class ConsistentGossipBackend : IGossipBackend, IDisposable
     {
         private readonly GossipBackend _wrapped;
-        private readonly ApplyMethods _compareMethods;
+        private readonly ApplyMethods _checkOneMethods;
         private readonly ILogger _logger;
 
         public ITransport Transport => _wrapped.Transport;
@@ -57,7 +57,7 @@ namespace Shielded.Gossip
         /// <param name="logger">The logger to use.</param>
         public ConsistentGossipBackend(ITransport transport, GossipConfiguration configuration, ILogger logger = null)
         {
-            _compareMethods = new ApplyMethods((key, fi) => CheckOne(key, fi));
+            _checkOneMethods = new ApplyMethods((key, fi) => CheckOne(key, fi));
             _logger = logger ?? NullLogger.Instance;
             _wrapped = new GossipBackend(transport, configuration, this, _logger);
             Shield.InTransaction(() =>
@@ -468,6 +468,24 @@ namespace Shielded.Gossip
             }
         }
 
+        /// <summary>
+        /// Runs a distributed consistent transaction. May be called from within another consistent
+        /// transaction, but not from a non-consistent one.
+        /// </summary>
+        /// <param name="trans">The lambda to run as a distributed transaction.</param>
+        /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
+        /// transaction, this argument is ignored.</param>
+        /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
+        /// always run your lambda in that context.</param>
+        /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
+        /// the result that the lambda returned.</returns>
+        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10, bool runTransOnCapturedContext = true)
+        {
+            T res = default;
+            var success = await RunConsistent(() => { res = trans(); }, attempts, runTransOnCapturedContext).ConfigureAwait(runTransOnCapturedContext);
+            return (success, success ? res : default);
+        }
+
         private class TransactionMeta : IComparable<TransactionMeta>
         {
             public readonly string Id;
@@ -490,24 +508,6 @@ namespace Shielded.Gossip
         private readonly ShieldedDictNc<string, TaskCompletionSource<bool>> _activeTransactions = new ShieldedDictNc<string, TaskCompletionSource<bool>>();
         private readonly ShieldedDictNc<string, TransactionMeta[]> _fieldHolders = new ShieldedDictNc<string, TransactionMeta[]>();
         private readonly Shielded<long> _ballotCounter = new Shielded<long>();
-
-        /// <summary>
-        /// Runs a distributed consistent transaction. May be called from within another consistent
-        /// transaction, but not from a non-consistent one.
-        /// </summary>
-        /// <param name="trans">The lambda to run as a distributed transaction.</param>
-        /// <param name="attempts">The number of attempts to make, default 10. If nested in another consistent
-        /// transaction, this argument is ignored.</param>
-        /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
-        /// always run your lambda in that context.</param>
-        /// <returns>Result indicates if we succeeded in the given number of attempts, and returns
-        /// the result that the lambda returned.</returns>
-        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, int attempts = 10, bool runTransOnCapturedContext = true)
-        {
-            T res = default;
-            var success = await RunConsistent(() => { res = trans(); }, attempts, runTransOnCapturedContext).ConfigureAwait(runTransOnCapturedContext);
-            return (success, success ? res : default);
-        }
 
         private PrepareResult PrepareLocal(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
         {
@@ -566,95 +566,6 @@ namespace Shielded.Gossip
             return TrySetPromised(id, transaction);
         });
 
-        private void Complete(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
-        {
-            if (!_activeTransactions.TryGetValue(id, out var tcs))
-                return;
-            bool success = transaction.IsSuccessful;
-            _logger.LogDebug("Completing {TransactionId}, successful: {Successful}", id, success);
-            Shield.SideEffect(() => tcs.TrySetResult(success));
-            RemoveFromHolders(id, transaction);
-            _activeTransactions.Remove(id);
-
-            if (success)
-            {
-                // rejections due to this commit we must do now, in this Shielded transaction, to prevent any later Changed event handlers
-                // that come in this same transaction from mistakenly progressing on transactions that should be rejected.
-                foreach (var otherId in GetTransactionsByKeysSorted(transaction.AllKeys))
-                {
-                    if (!_wrapped.TryGet(otherId, out TransactionInfo other))
-                        continue;
-                    var ourOtherState = other.State[Transport.OwnId];
-                    // we may not change Accepted vote to Rejected. yes, probably the "other" will never be committed. but there is a
-                    // chance that the other servers have already committed "other", and the current "transaction" is in fact a consistent
-                    // follow-up of it! in that case, even though "other" does not check out any more, it will in fact soon be successful.
-                    if (ourOtherState == TransactionState.Rejected || ourOtherState == TransactionState.Accepted)
-                        continue;
-                    if (!Check(other, quickCheck: true))
-                        // note that this may recurse into Complete, but only with success == false.
-                        TrySetRejected(otherId, other);
-                }
-            }
-
-            // moving competitors forward will be done in a side-effect, to avoid crazy recursions.
-            PostCommitProgressCheck(transaction.AllKeys);
-        });
-
-        private ShieldedLocal<HashSet<string>> _fieldsToCheck = new ShieldedLocal<HashSet<string>>();
-
-        private void PostCommitProgressCheck(IEnumerable<string> keys)
-        {
-            var fieldsToCheck = _fieldsToCheck.GetValueOrDefault();
-            if (fieldsToCheck == null)
-                fieldsToCheck = CreateProgressCheckSubscription();
-            foreach (var key in keys)
-                fieldsToCheck.Add(key);
-        }
-
-        private HashSet<string> CreateProgressCheckSubscription()
-        {
-            HashSet<string> fieldsToCheck = _fieldsToCheck.Value = new HashSet<string>();
-            Shield.SideEffect(() => Shield.InTransaction(() =>
-            {
-                foreach (var otherId in GetTransactionsByKeysSorted(fieldsToCheck))
-                {
-                    if (!_wrapped.TryGet(otherId, out TransactionInfo other))
-                        continue;
-                    var ourOtherState = other.State[Transport.OwnId];
-                    if (ourOtherState == TransactionState.Rejected || ourOtherState == TransactionState.Accepted)
-                        continue;
-                    if (other.IsPromised)
-                        TrySetAccepted(otherId, other);
-                    else if (ourOtherState == TransactionState.None)
-                        TrySetPromised(otherId, other);
-                }
-            }));
-            return fieldsToCheck;
-        }
-
-        private void RemoveFromHolders(string id, TransactionInfo transaction)
-        {
-            foreach (var key in transaction.AllKeys)
-            {
-                var holders = _fieldHolders[key];
-                if (holders.Length == 1)
-                    _fieldHolders.Remove(key);
-                else
-                    _fieldHolders[key] = holders.Where(other => other.Id != id).ToArray();
-            }
-        }
-
-        private static TransactionMeta[] _emptyMetaArr = new TransactionMeta[0];
-
-        private IEnumerable<string> GetTransactionsByKeysSorted(IEnumerable<string> keys)
-        {
-            return keys
-                .SelectMany(key => _fieldHolders.TryGetValue(key, out var h) ? h : _emptyMetaArr)
-                .Distinct()
-                .OrderBy(m => m)
-                .Select(m => m.Id);
-        }
-
         private ComplexRelationship CheckOne<TItem>(string key, FieldInfo<TItem> value)
             where TItem : IMergeable<TItem>
         {
@@ -683,7 +594,7 @@ namespace Shielded.Gossip
                     }
                     else
                     {
-                        var comparer = _compareMethods.Get(obj.GetType());
+                        var comparer = _checkOneMethods.Get(obj.GetType());
                         // what you read must be Greater or Equal to what we have.
                         if ((comparer(read.Key, obj).GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
                         {
@@ -736,6 +647,117 @@ namespace Shielded.Gossip
             {
                 _logger.LogDebug("Preparing external transaction");
                 var result = PrepareExternal(id, newVal);
+            }
+        }
+
+        private void OnStateChange(string id, TransactionInfo transaction)
+        {
+            if (!_activeTransactions.ContainsKey(id))
+                return;
+            if (transaction.IsRejected)
+            {
+                _logger.LogDebug("{TransactionId} has been rejected or failed.", id);
+                Complete(id, transaction);
+            }
+            else if (transaction.IsSuccessful)
+            {
+                _logger.LogDebug("{TransactionId} has succeeded.", id);
+                Apply(id, transaction);
+                Complete(id, transaction);
+            }
+            else if (transaction.IsPromised && transaction.State[Transport.OwnId] == TransactionState.Promised)
+            {
+                _logger.LogDebug("{TransactionId} has reached promise majority.", id);
+                TrySetAccepted(id, transaction);
+            }
+        }
+
+        private void Complete(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
+        {
+            if (!_activeTransactions.TryGetValue(id, out var tcs))
+                return;
+            bool success = transaction.IsSuccessful;
+            _logger.LogDebug("Completing {TransactionId}, successful: {Successful}", id, success);
+            Shield.SideEffect(() => tcs.TrySetResult(success));
+            RemoveFromHolders(id, transaction);
+            _activeTransactions.Remove(id);
+
+            if (success)
+            {
+                // rejections due to this commit we must do now, in this Shielded transaction, to prevent any later Changed event handlers
+                // that come in this same transaction from mistakenly progressing on transactions that should be rejected.
+                foreach (var otherId in GetTransactionsByKeysSorted(transaction.AllKeys))
+                {
+                    if (!_wrapped.TryGet(otherId, out TransactionInfo other))
+                        continue;
+                    var ourOtherState = other.State[Transport.OwnId];
+                    // we may not change Accepted vote to Rejected. yes, probably the "other" will never be committed. but there is a
+                    // chance that the other servers have already committed "other", and the current "transaction" is in fact a consistent
+                    // follow-up of it! in that case, even though "other" does not check out any more, it will in fact soon be successful.
+                    if (ourOtherState == TransactionState.Rejected || ourOtherState == TransactionState.Accepted)
+                        continue;
+                    if (!Check(other, quickCheck: true))
+                        // note that this may recurse into Complete, but only with success == false.
+                        TrySetRejected(otherId, other);
+                }
+            }
+
+            // moving competitors forward will be done in a side-effect, to avoid crazy recursions.
+            PostCommitProgressCheck(transaction.AllKeys);
+        });
+
+        private static TransactionMeta[] _emptyMetaArr = new TransactionMeta[0];
+
+        private IEnumerable<string> GetTransactionsByKeysSorted(IEnumerable<string> keys)
+        {
+            return keys
+                .SelectMany(key => _fieldHolders.TryGetValue(key, out var h) ? h : _emptyMetaArr)
+                .Distinct()
+                .OrderBy(m => m)
+                .Select(m => m.Id);
+        }
+
+        private ShieldedLocal<HashSet<string>> _fieldsToCheck = new ShieldedLocal<HashSet<string>>();
+
+        private void PostCommitProgressCheck(IEnumerable<string> keys)
+        {
+            var fieldsToCheck = _fieldsToCheck.GetValueOrDefault();
+            if (fieldsToCheck == null)
+                fieldsToCheck = CreateProgressCheckSubscription();
+            foreach (var key in keys)
+                fieldsToCheck.Add(key);
+        }
+
+        private HashSet<string> CreateProgressCheckSubscription()
+        {
+            HashSet<string> fieldsToCheck = _fieldsToCheck.Value = new HashSet<string>();
+            Shield.SideEffect(() => Shield.InTransaction(() =>
+            {
+                foreach (var otherId in GetTransactionsByKeysSorted(fieldsToCheck))
+                {
+                    if (!_wrapped.TryGet(otherId, out TransactionInfo other))
+                        continue;
+                    var ourOtherState = other.State[Transport.OwnId];
+                    if (ourOtherState == TransactionState.Rejected || ourOtherState == TransactionState.Accepted)
+                        continue;
+                    if (other.IsPromised)
+                        TrySetAccepted(otherId, other);
+                    else if (ourOtherState == TransactionState.None)
+                        TrySetPromised(otherId, other);
+                }
+            }));
+            return fieldsToCheck;
+        }
+
+        private void RemoveFromHolders(string id, TransactionInfo transaction)
+        {
+            foreach (var key in transaction.AllKeys)
+            {
+                var holders = _fieldHolders[key];
+                if (holders.Length == 1)
+                    _fieldHolders.Remove(key);
+                else
+                    _fieldHolders[key] = holders.Where(other => other.Id != id).ToArray();
             }
         }
 
@@ -795,28 +817,6 @@ namespace Shielded.Gossip
             _wrapped.Set(id, transaction.WithState(Transport.OwnId, TransactionState.Rejected));
             return true;
         });
-
-        private void OnStateChange(string id, TransactionInfo transaction)
-        {
-            if (!_activeTransactions.ContainsKey(id))
-                return;
-            if (transaction.IsRejected)
-            {
-                _logger.LogDebug("{TransactionId} has been rejected or failed.", id);
-                Complete(id, transaction);
-            }
-            else if (transaction.IsSuccessful)
-            {
-                _logger.LogDebug("{TransactionId} has succeeded.", id);
-                Apply(id, transaction);
-                Complete(id, transaction);
-            }
-            else if (transaction.IsPromised && transaction.State[Transport.OwnId] == TransactionState.Promised)
-            {
-                _logger.LogDebug("{TransactionId} has reached promise majority.", id);
-                TrySetAccepted(id, transaction);
-            }
-        }
 
         private void Apply(string id, TransactionInfo current)
         {
