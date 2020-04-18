@@ -107,12 +107,14 @@ namespace Shielded.Gossip
 
         public VectorRelationship VectorCompare(TransactionInfo other) => (State ?? new TransactionVector()).VectorCompare(other?.State);
 
-        public int ComparePriority(TransactionInfo other)
+        public int ComparePriority(TransactionInfo other) => ComparePriority(Initiator, BallotNumber, other.Initiator, other.BallotNumber);
+
+        public static int ComparePriority(string initiatorA, long ballotA, string initiatorB, long ballotB)
         {
-            var ballotComp = BallotComparer.Compare(BallotNumber, other.BallotNumber);
+            var ballotComp = BallotComparer.Compare(ballotA, ballotB);
             if (ballotComp != 0)
                 return ballotComp;
-            return StringComparer.InvariantCultureIgnoreCase.Compare(Initiator, other.Initiator);
+            return StringComparer.InvariantCultureIgnoreCase.Compare(initiatorA, initiatorB);
         }
     }
 

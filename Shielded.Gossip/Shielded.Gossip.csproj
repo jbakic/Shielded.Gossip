@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="3.0.0" />
-    <PackageReference Include="Shielded" Version="4.4.8" />
+    <PackageReference Include="Shielded" Version="4.4.9" />
   </ItemGroup>
 
 </Project>
