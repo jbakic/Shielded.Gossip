@@ -179,10 +179,10 @@ The consistent transactions are implemented using the ordinary, eventually consi
 backend. The transaction state is stored in a CRDT type, and the servers react to changes to it
 by making appropriate state transitions, following a simplified Paxos-like protocol.
 
-*It is capable of surviving partitions, and most of the time the majority partition will be able
-to continue executing transactions. However, right now it is rather simple and there are cases
-where a majority partition could get blocked where a proper Paxos implementation would not.
-This is still a work in progress. More details on the implementation are given below.*
+It is capable of surviving partitions, and most of the time the majority partition will be able
+to continue executing transactions. However, right now it is rather simple and there are possible
+scenarios where a majority partition could get blocked, where a proper Paxos implementation would
+not. This is still a work in progress. More details on the implementation are given below.
 
 You should avoid using the same fields from both consistent and non-consistent transaction,
 but FYI, if you access the same fields from non-consistent transactions, the non-consistent
@@ -260,12 +260,12 @@ Accepted on it, we will not move forward with this one.
 Accepted state on it, we will not move forward with this one, unless it already has at least one
 other Accepted vote.
 
-So, a promise can switch to a higher ballot competitor, but once we have accepted a transaction,
-we cannot accept any conflicting one, even if it has a higher ballot. We should stay in this
-state and wait until a majority is formed for one or the other transaction. However, if a higher
-ballot transaction has managed to reach at least one Accepted vote, then we know for sure that
-our transaction can never commit! A majority of servers must have voted Promised on that other
-transaction for it to get the Accepted vote, so at least some of those who voted Promised for
+So, our promise can switch from a lower to a higher ballot competitor, but once we have accepted
+a transaction, we cannot accept any conflicting one, even if it has a higher ballot. We should
+stay in this state and wait until a majority is formed for one or the other transaction. However,
+if a higher ballot transaction has managed to reach at least one Accepted vote, then we know for
+sure that our transaction can never commit! A majority of servers must have voted Promised on that
+other transaction for it to get the Accepted vote, so at least some of those who voted Promised for
 ours have switched to the new one and will not vote for us any more (see first rule above).
 
 It's important to note a gossip-specific point here - we cannot reject lower ballot transactions
