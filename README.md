@@ -173,31 +173,16 @@ The code above will take all the money from a hypothetical bank account, if the 
 any funds. If another server is trying to perform the same operation, only one of them will
 succeed. The variable success will be set to true on both, but one will get withdrawn == 0m.
 Success will only be false if we fail to achieve agreement with other servers after a number of
-attempts. How many attempts to make can be controlled by an extra argument to RunConsistent,
-by default it is 10.
-
-If you wish to synchronize the transactions with an external system, the method Prepare should
-be used - it prepares the transaction, and if successful, returns a continuation which you can
-use to commit or roll back the transaction later. As long as the continuation is not completed,
-the system will block any other consistent transactions accessing the same fields as yours.
-
-*The library needs more work in this regard - there's currently no event raised when a transaction
-is received from another server. Presumably, a server who did not initiate a transaction might
-also want to do some external work in sync with that transaction, so I plan to add some events
-like TransactionPreparing, TransactionCommitting, TransactionFailing... for this purpose.
-Also missing is the ability to wait for a number of servers to fully confirm the transaction,
-currently you'll get a result as soon as possible, as soon as the transaction has been checked
-by enough servers.*
+attempts.
 
 The consistent transactions are implemented using the ordinary, eventually consistent gossip
 backend. The transaction state is stored in a CRDT type, and the servers react to changes to it
-by making appropriate state transitions, in effect performing a simple 2-phase commit protocol.
+by making appropriate state transitions, following a simplified Paxos-like protocol.
 
-The transaction metadata carries information about all the read and written fields, and will
-insist that all the fields you read were up to date, and that all your writes have versions
-that are strictly greater than the versions on other servers. It is enough for a majority of
-servers to confirm (or reject) a transaction, so the system should work in case of partitions,
-as long as you're in the partition that contains more than half of the servers.
+*It is capable of surviving partitions, and most of the time the majority partition will be able
+to continue executing transactions. However, right now it is rather simple and there are cases
+where a majority partition could get blocked where a proper Paxos implementation would not.
+This is still a work in progress. More details on the implementation are given below.*
 
 You should avoid using the same fields from both consistent and non-consistent transaction,
 but FYI, if you access the same fields from non-consistent transactions, the non-consistent
@@ -216,7 +201,7 @@ being told in advance what type it's dealing with.
 *Please note that "a better, binary serializer" certainly does not mean the BinaryFormatter
 from the .NET Framework! It uses reflection and it is slow.*
 
-## The Gossip Protocol
+## The Gossip Protocol Implementation
 
 The library is based on the article "Epidemic Algorithms for Replicated Database Maintenance" by
 Demers et al., 1987. It employs only the direct mail and anti-entropy messages, but the
@@ -247,3 +232,84 @@ they will terminate quickly. If not, they will continue until they are both in s
 
 The database hash is a simple XOR of hashes of individual keys and the versions of their values.
 This enables it to be incrementaly updated, with no need to iterate over all the keys.
+
+## The Consistent Protocol Implementation
+
+Consistent transactions follow a simple Paxos-like protocol, with special consideration for the
+fact that it is running over a gossip network.
+
+When a transaction is started, the initiator will check it locally and if it is OK and does not
+conflict with any currently running transaction, it will vote Promised on it and write it into
+the underlying gossip store to distribute it to other servers. Every server that receives the
+transaction will check it and vote Promised or Rejected depending on the result. When a server
+is Promised on a transaction, and it witnesses a majority of Promised votes, it raises its state
+to Accepted. When a majority of Accepted votes is witnessed by any server, it commits the
+transaction's writes into the gossip store, and we're done. If a majority of Rejected votes is
+seen, the transaction fails. The initiator may then make a new attempt, reading newer data, but
+this will have a new unique ID and will be handled like any other, independent transaction.
+
+Every transaction is assigned a ballot number, which comes from a
+[Lamport clock](https://en.wikipedia.org/wiki/Lamport_timestamps) kept by the servers. Every time
+a server wishes to move its state forward on a transaction, it finds all active transactions
+that are in conflict with it, and checks the following:
+
+* If there is a conflicting transaction with a higher ballot number, and we are Promised or
+Accepted on it, we will not move forward with this one.
+
+* If there is a conflicting transaction with a lower ballot number, and we are in the
+Accepted state on it, we will not move forward with this one, unless it already has at least one
+other Accepted vote.
+
+So, a promise can switch to a higher ballot competitor, but once we have accepted a transaction,
+we cannot accept any conflicting one, even if it has a higher ballot. We should stay in this
+state and wait until a majority is formed for one or the other transaction. However, if a higher
+ballot transaction has managed to reach at least one Accepted vote, then we know for sure that
+our transaction can never commit! A majority of servers must have voted Promised on that other
+transaction for it to get the Accepted vote, so at least some of those who voted Promised for
+ours have switched to the new one and will not vote for us any more (see first rule above).
+
+It's important to note a gossip-specific point here - we cannot reject lower ballot transactions
+straight away! A transaction may be revived after a long time, by a server that was disconnected,
+and after other servers have forgotten about that transaction. To guarantee that this will not lead
+to such a zombie transaction being committed, servers only vote Rejected once it is absolutely certain
+that it can never commit. That means, we will wait until another transaction successfully writes into
+the field, preventing others from passing the consistency check.
+
+This is why the servers do not simply keep a record of just one transaction for every field, as you
+might expect if you know how Paxos works. Instead they keep track of all currently active transactions.
+If a higher-ballot transaction ends up failing (perhaps an even higher-ballot competitor committed and
+killed it), the servers might yet commit its lower-ballot competitor.
+
+All in all, this approach means that the initiator is rather irrelevant. Transactions take on a life
+of their own when in the network, and even if the initiator gets disconnected, the others can easily
+continue and resolve the transaction on their own, without requiring repeated proposal rounds to resolve
+conflicts.
+
+In case of a partition, when two transactions are in conflict and have already been accepted by at
+least some servers, then the one with the higher ballot will win and be committed. Likewise, if both
+are just promised. But if one lower ballot transaction has been accepted by some, while others have
+promised on a higher ballot one, and neither group can reach majority without the other, then the
+system will be blocked until the partition heals. Any attempt to switch votes here would either cause
+consistency issues or blockages in other situations.
+
+This is where we do need those further rounds of proposing from Paxos. The proposer in a next round
+would, since it's a new ballot, win over all the reachable servers' promises and then select to go
+forward with the accepted value. I plan to similarly bump up lower ballot transactions in such
+situations. If a server has accepted a transaction, and that transaction does not reach resolution
+after a certain time, the server will start a new voting round for it, with a new ballot number.
+If the partition then suddenly heals, and we see that the old voting round had a resolution, fine,
+we commit or reject depending on that vote. But if not, the new voting round should win over to this
+transaction those servers who were previously promised on a newer competitor, and thus resolve this
+block.
+
+I believe that with that improvement the algorithm should become equivalent to full-blown Paxos.
+But, that will significantly increase its complexity, and in any case, to prove such a big claim a lot
+of work will be needed, particularly since this is not a simple, direct implementation of Paxos. But
+I hope I've convinced you that it is well suited for a gossip-based system. It resolves many types
+of conflict efficiently and without centralized coordination. Even now, in this simple version, it is
+better than the two-phase commit used here previously, which depended much more on the initiator
+(AKA the coordinator in descriptions of 2PC), and which would definitely block if the initiator were
+to end up in a minority partition.
+
+If you see any problems here, please let me know! Open an issue in the issue tracker here and we can
+discuss it.

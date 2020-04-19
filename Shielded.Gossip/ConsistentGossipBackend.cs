@@ -801,7 +801,7 @@ namespace Shielded.Gossip
         {
             if (!transaction.State.HasServer(Transport.OwnId))
                 throw new ApplicationException("Trying to set state on a transaction we're not a part of.");
-            if (transaction.State.Count(s => s.Value == TransactionState.Promised) == transaction.State.Count / 2)
+            if (transaction.PromiseCount >= transaction.State.Count / 2)
                 return TrySetAccepted(id, transaction);
             if (!CanMakeProgress(id, transaction))
                 return false;

@@ -65,7 +65,9 @@ namespace Shielded.Gossip
         /// </summary>
         public IEnumerable<string> AllKeys => Reads?.Select(r => r.Key) ?? Enumerable.Empty<string>();
 
-        public bool IsPromised => State.Count(s => s.Value == TransactionState.Promised || s.Value == TransactionState.Accepted) > (State.Count / 2);
+        public int PromiseCount => State.Count(s => s.Value == TransactionState.Promised || s.Value == TransactionState.Accepted);
+
+        public bool IsPromised => PromiseCount > (State.Count / 2);
         public bool IsRejected
         {
             get
@@ -73,7 +75,7 @@ namespace Shielded.Gossip
                 var voterCount = State.Count;
                 var rejectVotes = State.Count(s => s.Value == TransactionState.Rejected);
                 // if the voterCount is even, the threshold for rejection is exactly 1/2, i.e. in case we ever have
-                // equal number of Prepared and Rejected votes, we reject.
+                // equal number of Promised and Rejected votes, we reject.
                 var rejectThreshold = voterCount / 2 + voterCount % 2;
                 return rejectVotes >= rejectThreshold;
             }

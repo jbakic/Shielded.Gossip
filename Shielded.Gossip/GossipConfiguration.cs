@@ -72,13 +72,6 @@
         public int AntiEntropyHuntingLimit { get; set; } = 2;
 
         /// <summary>
-        /// When preparing a consistent transaction, we may get deadlocked with another server. For this
-        /// reason, there is a timeout on prepare. This determines the min and max for this timeout,
-        /// the backend will pick a random value between the two for every transaction attempt.
-        /// </summary>
-        public (int Min, int Max) ConsistentPrepareTimeoutRange { get; set; } = (10000, 30000);
-
-        /// <summary>
         /// How often should the garbage collection take place.
         /// </summary>
         public int CleanUpInterval { get; set; } = 2000;
