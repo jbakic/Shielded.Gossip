@@ -54,7 +54,7 @@ namespace Shielded.Gossip.Tests
                     newVal.Value = newVal.Value + 1;
                     newVal.Version = newVal.Version.Next(backend.Transport.OwnId);
                     backend.SetHasVec(key, newVal);
-                }, 100);
+                });
             })).Result;
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);
@@ -96,7 +96,7 @@ namespace Shielded.Gossip.Tests
                     newVal.Value = newVal.Value + 1;
                     newVal.Version = newVal.Version.Next(backend.Transport.OwnId);
                     backend.SetHasVec(key, newVal);
-                }, 100);
+                });
             })).Result;
             var expected = bools.Count(b => b);
             Assert.AreEqual(transactions, expected);

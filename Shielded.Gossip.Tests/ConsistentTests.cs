@@ -206,7 +206,7 @@ namespace Shielded.Gossip.Tests
                         newVal.Value = new TestClass { Id = id };
                     newVal.Value.Counter = newVal.Value.Counter + 1;
                     backend.SetHasVec(key, newVal);
-                }, 100);
+                });
             })).Result;
             var expected = bools.Count(b => b);
 
@@ -279,7 +279,7 @@ namespace Shielded.Gossip.Tests
                         .NextVersion(backend.Transport.OwnId);
                     val2.Value = val2.Value - 1;
                     Assert.AreEqual(VectorRelationship.Greater, backend.SetHasVec(key2, val2));
-                }, 100);
+                });
             })).Result;
             var successCount = bools.Count(b => b);
             Assert.AreEqual(transactions, successCount);

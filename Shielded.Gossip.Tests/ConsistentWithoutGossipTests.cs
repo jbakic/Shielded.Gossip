@@ -62,7 +62,7 @@ namespace Shielded.Gossip.Tests
             });
             _backends[C].Configuration.DirectMail = DirectMailType.GossipSupressed;
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", "accepted".Version(A)); }, 1).Result);
+            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", "accepted".Version(A)); }, attempts: 1).Result);
 
             CheckProtocols();
 
@@ -104,7 +104,7 @@ namespace Shielded.Gossip.Tests
 
             // we can make only one attempt, because the B/C version will be sent to us as part of their rejection of
             // the transaction. after that, this would succeed, but with SetHasVec result == Conflict.
-            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", "accepted".Version(A)); }, 1).Result);
+            Assert.IsFalse(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", "accepted".Version(A)); }, attempts: 1).Result);
 
             CheckProtocols();
 
@@ -221,7 +221,7 @@ namespace Shielded.Gossip.Tests
             {
                 _backends[A].Set("key", "first".Version(1));
                 Assert.AreEqual(VectorRelationship.Greater, _backends[A].Set("key", "second".Version(2)));
-            }, 1).Result);
+            }, attempts: 1).Result);
 
             CheckProtocols();
 

@@ -74,7 +74,7 @@ namespace ConsoleTests
                         .SingleOrDefault()
                         .NextVersion(backend.Transport.OwnId);
                     val2.Value = val2.Value - 1;
-                }, 100);
+                });
             })).Result;
             var expected = bools.Count(b => b);
 
