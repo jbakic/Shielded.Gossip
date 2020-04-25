@@ -154,7 +154,8 @@ namespace Shielded.Gossip
                 while (true)
                 {
                     var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
-                    _logger.LogInformation("Incoming connection from {RemoteEndPoint}", client.Client.RemoteEndPoint);
+                    var endpoint = client.Client.RemoteEndPoint;
+                    _logger.LogInformation("Incoming connection from {RemoteEndPoint}", endpoint);
                     client.ReceiveTimeout = ReceiveTimeout;
                     _serverConnections.TryAdd(client, null);
                     var stream = client.GetStream();
@@ -163,7 +164,7 @@ namespace Shielded.Gossip
                         {
                             if (_serverConnections.TryRemove(c, out var _) && ex != null)
                             {
-                                _logger.LogWarning(ex, "Lost incoming connection from {RemoteEndPoint}", c.Client.RemoteEndPoint);
+                                _logger.LogWarning(ex, "Lost incoming connection from {RemoteEndPoint}", endpoint);
                                 RaiseError(ex);
                             }
                         });

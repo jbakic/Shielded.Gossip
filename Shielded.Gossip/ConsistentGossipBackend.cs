@@ -389,16 +389,16 @@ namespace Shielded.Gossip
         /// Runs a distributed consistent transaction. May be called from within another consistent
         /// transaction, but not from a non-consistent one.
         /// </summary>
-        /// <param name="trans">The lambda to run as a distributed transaction.</param>
-        /// <param name="cancellationToken">The cancellation token to stop further retries. We will still wait
-        /// for the current attempt to complete. If nested in another consistent transaction, this argument is
-        /// ignored.</param>
-        /// <param name="attempts">The number of attempts to make, default 100. If nested in another consistent
+        /// <param name="trans">The lambda to run as a distributed transaction. Runs in a Shielded transaction and
+        /// may be executed more than once.</param>
+        /// <param name="cancellationToken">The cancellation token. If nested in another consistent transaction,
+        /// this argument is ignored.</param>
+        /// <param name="attempts">The max number of attempts to make, default 100. If nested in another consistent
         /// transaction, this argument is ignored.</param>
         /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
         /// always run your lambda in that context.</param>
-        /// <returns>Eventually a bool indicating whether the transaction succeeded.</returns>
-        public async Task<bool> RunConsistent(Action trans, CancellationToken cancellationToken = default,
+        /// <returns>The outcome of the transaction.</returns>
+        public async Task<ConsistentOutcome> RunConsistent(Action trans, CancellationToken cancellationToken = default,
             int attempts = 100, bool runTransOnCapturedContext = true)
         {
             if (trans == null)
@@ -409,17 +409,20 @@ namespace Shielded.Gossip
             if (IsInConsistentTransaction)
             {
                 trans();
-                return true;
+                return ConsistentOutcome.Success;
             }
             if (Shield.IsInTransaction)
                 throw new InvalidOperationException("RunConsistent cannot be called within non-consistent transactions.");
 
             using (_logger.BeginScope("RunConsistent call ID {PrepareId}", Guid.NewGuid()))
             {
+                var cancelTcs = new TaskCompletionSource<object>(TaskContinuationOptions.RunContinuationsAsynchronously);
+                cancellationToken.Register(() => cancelTcs.TrySetResult(null));
+
                 CommitContinuation cont = null;
                 try
                 {
-                    while (!cancellationToken.IsCancellationRequested && attempts > 0)
+                    while (attempts > 0)
                     {
                         _logger.LogDebug("Attempting a consistent transaction, attempts left: {Attempts}", attempts);
                         attempts--;
@@ -428,8 +431,12 @@ namespace Shielded.Gossip
                         if (transaction == null)
                         {
                             _logger.LogDebug("Transaction touched no backend fields, exiting with trivial success.");
-                            return cont.TryCommit();
+                            cont.Commit();
+                            return ConsistentOutcome.Success;
                         }
+                        if (cancellationToken.IsCancellationRequested)
+                            return ConsistentOutcome.Cancelled;
+
                         var id = WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString());
                         Shield.InTransaction(() => _ballotCounter.Modify((ref long c) => transaction.BallotNumber = unchecked(++c)));
 
@@ -444,27 +451,33 @@ namespace Shielded.Gossip
                                 if (prepare.WaitBeforeRetry != null && attempts > 0)
                                 {
                                     _logger.LogDebug("Awaiting before retry.");
-                                    await prepare.WaitBeforeRetry.ConfigureAwait(runTransOnCapturedContext);
+                                    await Task.WhenAny(prepare.WaitBeforeRetry, cancelTcs.Task).ConfigureAwait(runTransOnCapturedContext);
+                                    if (cancellationToken.IsCancellationRequested)
+                                        return ConsistentOutcome.Cancelled;
                                 }
-                            }
-                            else if (await prepare.CompletionTask.ConfigureAwait(runTransOnCapturedContext))
-                            {
-                                _logger.LogDebug("Successfully reached consensus.");
-                                cont.Commit();
-                                return true;
                             }
                             else
                             {
-                                _logger.LogDebug("Failed to reach consensus, rolling back.");
-                                cont.Rollback();
+                                var completeOrCancelled = await Task.WhenAny(prepare.CompletionTask, cancelTcs.Task).ConfigureAwait(runTransOnCapturedContext);
+                                if (cancellationToken.IsCancellationRequested)
+                                {
+                                    return ConsistentOutcome.CancelledWhileRunning;
+                                }
+                                // if cancellation was not requested, then CompletionTask must have completed, .Result will not block.
+                                else if (prepare.CompletionTask.Result)
+                                {
+                                    _logger.LogDebug("Successfully reached consensus.");
+                                    cont.Commit();
+                                    return ConsistentOutcome.Success;
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("Failed to reach consensus, rolling back.");
+                                    cont.Rollback();
+                                }
                             }
                         }
                     }
-                    if (attempts == 0)
-                        _logger.LogWarning("Failed to prepare transaction in given number of attempts.");
-                    else
-                        _logger.LogDebug("Will not retry, further attempts have been cancelled.");
-                    return false;
                 }
                 catch (Exception ex)
                 {
@@ -473,6 +486,8 @@ namespace Shielded.Gossip
                         cont.TryRollback();
                     throw;
                 }
+                _logger.LogWarning("Failed to prepare transaction in given number of attempts.");
+                return ConsistentOutcome.MaxAttemptsFailed;
             }
         }
 
@@ -480,22 +495,21 @@ namespace Shielded.Gossip
         /// Runs a distributed consistent transaction. May be called from within another consistent
         /// transaction, but not from a non-consistent one.
         /// </summary>
-        /// <param name="trans">The lambda to run as a distributed transaction.</param>
-        /// <param name="cancellationToken">The cancellation token to stop further retries. We will still wait
-        /// for the current attempt to complete. If nested in another consistent transaction, this argument is
-        /// ignored.</param>
-        /// <param name="attempts">The number of attempts to make, default 100. If nested in another consistent
+        /// <param name="trans">The lambda to run as a distributed transaction. Runs in a Shielded transaction and
+        /// may be executed more than once.</param>
+        /// <param name="cancellationToken">The cancellation token. If nested in another consistent transaction,
+        /// this argument is ignored.</param>
+        /// <param name="attempts">The max number of attempts to make, default 100. If nested in another consistent
         /// transaction, this argument is ignored.</param>
         /// <param name="runTransOnCapturedContext">Whether to capture the current synchronization context and
         /// always run your lambda in that context.</param>
-        /// <returns>Result indicates if we succeeded, and if yes also returns the result of the lambda.</returns>
-        public async Task<(bool Success, T Value)> RunConsistent<T>(Func<T> trans, CancellationToken cancellationToken = default,
+        /// <returns>The outcome of the transaction and, if Success, the value returned by your lambda's last run.</returns>
+        public async Task<ConsistentResult<T>> RunConsistent<T>(Func<T> trans, CancellationToken cancellationToken = default,
             int attempts = 100, bool runTransOnCapturedContext = true)
         {
             T res = default;
-            var success = await RunConsistent(() => { res = trans(); }, cancellationToken, attempts, runTransOnCapturedContext)
-                .ConfigureAwait(runTransOnCapturedContext);
-            return (success, success ? res : default);
+            var outcome = await RunConsistent(() => { res = trans(); }, cancellationToken, attempts, runTransOnCapturedContext);
+            return new ConsistentResult<T>(outcome, res);
         }
 
         private class TransactionMeta : IComparable<TransactionMeta>

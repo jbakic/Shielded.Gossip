@@ -56,7 +56,7 @@ namespace ConsoleTests
             const int prime2 = 149;
             var backendsArray = backends.Values.ToArray();
 
-            var bools = Task.WhenAll(ParallelEnumerable.Range(0, transactions).Select(i =>
+            var outcomes = Task.WhenAll(ParallelEnumerable.Range(0, transactions).Select(i =>
             {
                 var backend = backendsArray.Skip(i % backends.Count).First();
                 var key1 = "key" + (i * prime1 % fieldCount);
@@ -76,13 +76,14 @@ namespace ConsoleTests
                     val2.Value = val2.Value - 1;
                 });
             })).Result;
-            var expected = bools.Count(b => b);
+            var expected = outcomes.Count(b => b == ConsistentOutcome.Success);
 
             var read = backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
                     backends[B].TryGetVecVersioned<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
 
-            _loggerFactory.CreateLogger("Program").LogInformation("Completed with success {Success}, and total {Total}", read.Success && expected == transactions, read.Value);
+            _loggerFactory.CreateLogger("Program").LogInformation("Completed with success {Success}, and total {Total}",
+                read.Outcome == ConsistentOutcome.Success && expected == transactions, read.Value);
         }
 
         private static Dictionary<string, ConsistentGossipBackend> PrepareBackends()

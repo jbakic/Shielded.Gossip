@@ -35,7 +35,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() =>
+            Assert.AreEqual(ConsistentOutcome.Success, _backends[A].RunConsistent(() =>
             {
                 Assert.IsFalse(_backends[A].ContainsKey("key"));
                 Assert.IsFalse(_backends[A].ContainsKeyWithInfo("key"));
@@ -51,11 +51,11 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
+            var res = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
-            Assert.IsTrue(success);
-            var read = multi.Single();
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            var read = res.Value.Single();
             Assert.AreEqual(testEntity.Id, read.Value.Id);
             Assert.AreEqual(testEntity.Name, read.Value.Name);
             Assert.AreEqual((A, 1), read.Version);
@@ -66,7 +66,7 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() =>
+            Assert.AreEqual(ConsistentOutcome.Success, _backends[A].RunConsistent(() =>
             {
                 Assert.IsFalse(_backends[A].ContainsKey("key"));
                 Assert.IsFalse(_backends[A].ContainsKeyWithInfo("key"));
@@ -88,11 +88,11 @@ namespace Shielded.Gossip.Tests
 
             CheckProtocols();
 
-            var (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
+            var res = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
-            Assert.IsTrue(success);
-            Assert.IsFalse(multi.Any());
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            Assert.IsFalse(res.Value.Any());
         }
 
         [TestMethod]
@@ -107,23 +107,23 @@ namespace Shielded.Gossip.Tests
 
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
+            Assert.AreEqual(ConsistentOutcome.Success, _backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
 
             CheckProtocols();
 
-            var (success, multi) = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<TestClass>("key"))
+            var res = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<TestClass>("key"))
                 .Result;
 
-            Assert.IsTrue(success);
-            var read = multi.Single();
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            var read = res.Value.Single();
             Assert.AreEqual(testEntity.Id, read.Value.Id);
             Assert.AreEqual(testEntity.Name, read.Value.Name);
             Assert.AreEqual((A, 1), read.Version);
 
-            (success, multi) = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
+            res = _backends[B].RunConsistent(() => _backends[B].TryGetVecVersioned<TestClass>("key"))
                 .Result;
-            Assert.IsTrue(success);
-            Assert.IsFalse(multi.Any());
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            Assert.IsFalse(res.Value.Any());
         }
 
         [TestMethod]
@@ -131,18 +131,18 @@ namespace Shielded.Gossip.Tests
         {
             var testEntity = new TestClass { Id = 1, Name = "One" };
 
-            Assert.IsTrue(_backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
+            Assert.AreEqual(ConsistentOutcome.Success, _backends[A].RunConsistent(() => { _backends[A].SetHasVec("key", testEntity.Version(A)); }).Result);
 
             var testEntity2 = new TestClass { Id = 1, Name = "One, Bs version" };
 
             // even though this is a conflicting edit, the merged data - a Multiple which will contain both
             // versions of the data - gets actually saved and transmitted, and it is Greater than both versions.
-            var (success, comp) = _backends[B].RunConsistent(() => _backends[B].SetHasVec("key", testEntity2.Version(B))).Result;
+            var res = _backends[B].RunConsistent(() => _backends[B].SetHasVec("key", testEntity2.Version(B))).Result;
 
             CheckProtocols();
 
-            Assert.IsTrue(success);
-            Assert.AreEqual(VectorRelationship.Conflict, comp);
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            Assert.AreEqual(VectorRelationship.Conflict, res.Value);
 
             var saved = _backends[B].TryGetVecVersioned<TestClass>("key");
 
@@ -192,7 +192,7 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
             }
 
-            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+            var outcomes = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
             {
                 var backend = _backends.Values.Skip(i % 3).First();
                 var id = (i % fieldCount);
@@ -208,7 +208,7 @@ namespace Shielded.Gossip.Tests
                     backend.SetHasVec(key, newVal);
                 });
             })).Result;
-            var expected = bools.Count(b => b);
+            var expected = outcomes.Count(b => b == ConsistentOutcome.Success);
 
             CheckProtocols();
 
@@ -216,7 +216,7 @@ namespace Shielded.Gossip.Tests
                 Enumerable.Range(0, fieldCount).Sum(i =>
                     _backends[B].TryGetVecVersioned<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
 
-            Assert.IsTrue(read.Success);
+            Assert.AreEqual(ConsistentOutcome.Success, read.Outcome);
             Assert.AreEqual(expected, read.Value);
             Assert.AreEqual(transactions, read.Value);
         }
@@ -229,18 +229,18 @@ namespace Shielded.Gossip.Tests
             _backends[A].RunConsistent(() => { _backends[A].Set("key", testEntity.Version(1)); }).Wait();
 
             IntVersioned<TestClass> read = default, next = default;
-            var (success, readName) = _backends[B].RunConsistent(() =>
+            var res = _backends[B].RunConsistent(() =>
             {
                 read = _backends[B].TryGetIntVersioned<TestClass>("key");
-                var res = read.Value?.Name;
+                var name = read.Value?.Name;
 
                 next = read.NextVersion();
                 next.Value = new TestClass { Id = 1, Name = "Version 2" };
                 _backends[B].Set("key", next);
-                return res;
+                return name;
             }).Result;
-            Assert.IsTrue(success);
-            Assert.AreEqual(testEntity.Name, readName);
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            Assert.AreEqual(testEntity.Name, res.Value);
 
             read = _backends[C].RunConsistent(() => _backends[C].TryGetIntVersioned<TestClass>("key")).Result.Value;
             Assert.AreEqual(next.Value.Name, read.Value.Name);
@@ -259,7 +259,7 @@ namespace Shielded.Gossip.Tests
                 back.Configuration.DirectMail = DirectMailType.Always;
             }
 
-            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+            var outcomes = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
             {
                 var backend = _backends.Values.Skip(i % 3).First();
                 var key1 = "key" + (i * prime1 % fieldCount);
@@ -281,7 +281,7 @@ namespace Shielded.Gossip.Tests
                     Assert.AreEqual(VectorRelationship.Greater, backend.SetHasVec(key2, val2));
                 });
             })).Result;
-            var successCount = bools.Count(b => b);
+            var successCount = outcomes.Count(b => b == ConsistentOutcome.Success);
             Assert.AreEqual(transactions, successCount);
 
             CheckProtocols();
@@ -290,7 +290,7 @@ namespace Shielded.Gossip.Tests
                 Enumerable.Range(0, fieldCount).Sum(i =>
                     _backends[B].TryGetVecVersioned<int>("key" + i).SingleOrDefault().Value)).Result;
 
-            Assert.IsTrue(totalSum.Success);
+            Assert.AreEqual(ConsistentOutcome.Success, totalSum.Outcome);
             Assert.AreEqual(0, totalSum.Value);
         }
     }

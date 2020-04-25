@@ -42,7 +42,7 @@ namespace Shielded.Gossip.Tests
             foreach (var back in _backends.Values)
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
-            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+            var outcomes = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
             {
                 var backend = _backends.Values.Skip(i % 3).First();
                 var id = (i % fieldCount);
@@ -56,17 +56,17 @@ namespace Shielded.Gossip.Tests
                     backend.SetHasVec(key, newVal);
                 });
             })).Result;
-            var expected = bools.Count(b => b);
+            var expected = outcomes.Count(b => b == ConsistentOutcome.Success);
             Assert.AreEqual(transactions, expected);
 
             CheckProtocols();
 
-            var (success, value) = _backends[B].RunConsistent(() =>
+            var res = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
                     _backends[B].TryGetHasVec<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
 
-            Assert.IsTrue(success);
-            Assert.AreEqual(expected, value);
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            Assert.AreEqual(expected, res.Value);
         }
 
         [TestMethod]
@@ -83,7 +83,7 @@ namespace Shielded.Gossip.Tests
             foreach (var back in _backends.Values)
                 back.Configuration.DirectMail = DirectMailType.StartGossip;
 
-            var bools = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
+            var outcomes = Task.WhenAll(ParallelEnumerable.Range(1, transactions).Select(i =>
             {
                 // updates only on A and B
                 var backend = _backends.Skip(i % 2).First().Value;
@@ -98,17 +98,17 @@ namespace Shielded.Gossip.Tests
                     backend.SetHasVec(key, newVal);
                 });
             })).Result;
-            var expected = bools.Count(b => b);
+            var expected = outcomes.Count(b => b == ConsistentOutcome.Success);
             Assert.AreEqual(transactions, expected);
 
             CheckProtocols();
 
-            var (success, value) = _backends[B].RunConsistent(() =>
+            var res = _backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
                     _backends[B].TryGetHasVec<TestClass>("key" + i).SingleOrDefault()?.Value)).Result;
 
-            Assert.IsTrue(success);
-            Assert.AreEqual(expected, value);
+            Assert.AreEqual(ConsistentOutcome.Success, res.Outcome);
+            Assert.AreEqual(expected, res.Value);
         }
     }
 }
