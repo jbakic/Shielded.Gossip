@@ -10,6 +10,7 @@ namespace Shielded.Gossip.Tests
     public class DodgyTransport : ITransport
     {
         private readonly TcpTransport _wrapped;
+        private readonly int _receiveDelayMaxMs;
         private readonly double _lossRisk;
         private readonly int _repeatLimit;
         private readonly double _repeatRisk;
@@ -17,9 +18,12 @@ namespace Shielded.Gossip.Tests
 
         public int CountLosses, CountRepeats;
 
-        public DodgyTransport(TcpTransport wrapped, double lossRisk = 0.1, int repeatLimit = 5, double repeatRisk = 0.25, int repeatDelayMaxMs = 300)
+        public bool CutOff { get; set; }
+
+        public DodgyTransport(TcpTransport wrapped, int receiveDelayMaxMs = 300, double lossRisk = 0.1, int repeatLimit = 5, double repeatRisk = 0.25, int repeatDelayMaxMs = 300)
         {
             _wrapped = wrapped;
+            _receiveDelayMaxMs = receiveDelayMaxMs;
             _lossRisk = lossRisk;
             _repeatLimit = repeatLimit;
             _repeatRisk = repeatRisk;
@@ -28,15 +32,23 @@ namespace Shielded.Gossip.Tests
             _wrapped.Error += _wrapped_Error;
         }
 
+        private int _randomSeed = Environment.TickCount;
+
+        private int GetReceiveDelay()
+        {
+            var rnd = new Random(Interlocked.Increment(ref _randomSeed));
+            return rnd.Next(_repeatDelayMaxMs);
+        }
+
         private bool ShouldLoseMsg()
         {
-            var rnd = new Random();
+            var rnd = new Random(Interlocked.Increment(ref _randomSeed));
             return rnd.NextDouble() < _lossRisk;
         }
 
-        private int? GetMsgDelay()
+        private int? GetRepeatDelay()
         {
-            var rnd = new Random();
+            var rnd = new Random(Interlocked.Increment(ref _randomSeed));
             if (rnd.NextDouble() >= _repeatRisk)
                 return null;
             return rnd.Next(_repeatDelayMaxMs);
@@ -44,9 +56,13 @@ namespace Shielded.Gossip.Tests
 
         private object _wrapped_MessageHandler(object msg)
         {
+            if (CutOff)
+                return null;
             var from = (msg as GossipMessage)?.From;
             Task.Run(async () =>
             {
+                int receiveDelay = GetReceiveDelay();
+                await Task.Delay(receiveDelay);
                 int count = _repeatLimit;
                 while (count-- > 0)
                 {
@@ -58,7 +74,7 @@ namespace Shielded.Gossip.Tests
                     }
                     else
                         Interlocked.Increment(ref CountLosses);
-                    var delay = GetMsgDelay();
+                    var delay = GetRepeatDelay();
                     if (delay == null)
                         return;
                     Interlocked.Increment(ref CountRepeats);
@@ -83,6 +99,8 @@ namespace Shielded.Gossip.Tests
 
         public void Broadcast(object msg)
         {
+            if (CutOff)
+                return;
             _wrapped.Broadcast(msg);
         }
 
@@ -93,6 +111,8 @@ namespace Shielded.Gossip.Tests
 
         public void Send(string server, object msg, bool replyExpected)
         {
+            if (CutOff)
+                return;
             _wrapped.Send(server, msg, false);
         }
     }
