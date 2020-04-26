@@ -438,8 +438,6 @@ namespace Shielded.Gossip
                             return ConsistentOutcome.Cancelled;
 
                         var id = WrapInternalKey(TransactionPfx, Guid.NewGuid().ToString());
-                        Shield.InTransaction(() => _ballotCounter.Modify((ref long c) => transaction.BallotNumber = unchecked(++c)));
-
                         using (_logger.BeginScope("Local {TransactionId}", id))
                         {
                             _logger.LogDebug("Participating servers: {TransactionServers}", string.Join(",", transaction.State.Select(s => s.ServerId)));
@@ -515,25 +513,22 @@ namespace Shielded.Gossip
         private class TransactionMeta : IComparable<TransactionMeta>
         {
             public readonly string Id;
-            public readonly string Initiator;
-            public readonly long BallotNumber;
 
             public TransactionMeta(string id, TransactionInfo transaction)
             {
                 Id = id;
-                Initiator = transaction.Initiator;
-                BallotNumber = transaction.BallotNumber;
             }
 
             public int CompareTo(TransactionMeta other)
             {
-                return TransactionInfo.ComparePriority(Initiator, BallotNumber, other.Initiator, other.BallotNumber);
+                return Id.CompareTo(other.Id);
             }
+
+            public static int ComparePrios(string trans1Id, string trans2Id) => trans1Id.CompareTo(trans2Id);
         }
 
         private readonly ShieldedDictNc<string, TaskCompletionSource<bool>> _activeTransactions = new ShieldedDictNc<string, TaskCompletionSource<bool>>();
         private readonly ShieldedDictNc<string, TransactionMeta[]> _fieldHolders = new ShieldedDictNc<string, TransactionMeta[]>();
-        private readonly Shielded<long> _ballotCounter = new Shielded<long>();
 
         private PrepareResult PrepareLocal(string id, TransactionInfo transaction) => Shield.InTransaction(() =>
         {
@@ -650,13 +645,8 @@ namespace Shielded.Gossip
 
         private void OnTransactionChanged(string id, TransactionInfo newVal)
         {
-            if (BallotComparer.Compare(newVal.BallotNumber, _ballotCounter) < 0)
-                _ballotCounter.Value = newVal.BallotNumber;
-
             if (!newVal.State.HasServer(Transport.OwnId))
             {
-                if (newVal.IsSuccessful)
-                    Apply(id, newVal);
                 return;
             }
             if (newVal.State[Transport.OwnId] != TransactionState.None || _activeTransactions.ContainsKey(id) || newVal.IsDone)
@@ -802,7 +792,7 @@ namespace Shielded.Gossip
             foreach (var (otherId, other) in GetCompetitors(id, transaction))
             {
                 var competitorState = other.State[Transport.OwnId];
-                var beforeMe = other.ComparePriority(transaction) < 0;
+                var beforeMe = TransactionMeta.ComparePrios(otherId, id) < 0;
                 if (competitorState == TransactionState.Accepted && (beforeMe || !currHasAcceptedVotes))
                     return false;
                 if (competitorState == TransactionState.Promised && beforeMe)

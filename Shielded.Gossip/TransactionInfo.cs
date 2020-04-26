@@ -52,8 +52,6 @@ namespace Shielded.Gossip
         [DataMember]
         public string Initiator { get; set; }
         [DataMember]
-        public long BallotNumber { get; set; }
-        [DataMember]
         public MessageItem[] Reads { get; set; }
         [DataMember]
         public MessageItem[] Changes { get; set; }
@@ -98,7 +96,6 @@ namespace Shielded.Gossip
             return new TransactionInfo
             {
                 Initiator = Initiator,
-                BallotNumber = BallotNumber,
                 Reads = Reads,
                 Changes = Changes,
                 State = (State ?? new TransactionVector()).MergeWith(newState)
@@ -108,28 +105,5 @@ namespace Shielded.Gossip
         public TransactionInfo WithState(string ownServerId, TransactionState newState) => WithState((ownServerId, newState));
 
         public VectorRelationship VectorCompare(TransactionInfo other) => (State ?? new TransactionVector()).VectorCompare(other?.State);
-
-        public int ComparePriority(TransactionInfo other) => ComparePriority(Initiator, BallotNumber, other.Initiator, other.BallotNumber);
-
-        public static int ComparePriority(string initiatorA, long ballotA, string initiatorB, long ballotB)
-        {
-            var ballotComp = BallotComparer.Compare(ballotA, ballotB);
-            if (ballotComp != 0)
-                return ballotComp;
-            return StringComparer.InvariantCultureIgnoreCase.Compare(initiatorA, initiatorB);
-        }
-    }
-
-    public static class BallotComparer
-    {
-        public static int Compare(long a, long b)
-        {
-            var ballotDiff = unchecked(a - b);
-            return
-                // reverse order - higher numbers go first
-                ballotDiff > 0 ? -1 :
-                ballotDiff < 0 ? 1 :
-                0;
-        }
     }
 }
