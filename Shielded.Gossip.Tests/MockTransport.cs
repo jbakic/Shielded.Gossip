@@ -27,31 +27,50 @@ namespace Shielded.Gossip.Tests
 
         public object ReceiveAndGetReply(object msg)
         {
-            var prevCount = SentMessages.Count;
+            var prevCount = _sentMessages.Count;
             Receive(msg);
-            if (SentMessages.Count == prevCount)
+            if (_sentMessages.Count == prevCount)
                 return null;
-            if (SentMessages.Count > prevCount + 1)
+            if (_sentMessages.Count > prevCount + 1)
                 throw new ApplicationException("More than one reply generated.");
             return LastSentMessage.Msg;
         }
 
-        public List<(string To, object Msg)> SentMessages = new List<(string, object)>();
+        private object _lock = new object();
+        private List<(string To, object Msg)> _sentMessages = new List<(string, object)>();
 
-        public (string To, object Msg) LastSentMessage => SentMessages.Count == 0
-            ? throw new InvalidOperationException("No messages sent.")
-            : SentMessages[SentMessages.Count - 1];
+        public List<(string To, object Msg)> SentMessages
+        {
+            get
+            {
+                lock (_lock)
+                    return _sentMessages.ToList();
+            }
+        }
+
+        public (string To, object Msg) LastSentMessage
+        {
+            get
+            {
+                lock (_lock)
+                    return _sentMessages.Count == 0
+                        ? throw new InvalidOperationException("No messages sent.")
+                        : _sentMessages[_sentMessages.Count - 1];
+            }
+        }
 
         public void Broadcast(object msg)
         {
-            SentMessages.AddRange(Servers.Select(s => (s, msg)));
+            lock (_lock)
+                _sentMessages.AddRange(Servers.Select(s => (s, msg)));
         }
 
         public void Dispose() { }
 
         public void Send(string server, object msg, bool replyExpected)
         {
-            SentMessages.Add((server, msg));
+            lock (_lock)
+                _sentMessages.Add((server, msg));
         }
     }
 }

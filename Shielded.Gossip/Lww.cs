@@ -27,17 +27,16 @@ namespace Shielded.Gossip
         public VectorRelationship VectorCompare(Lww<T> other) => Time.VectorCompare(other.Time);
 
         /// <summary>
-        /// Produces a new wrapper with the same value, and a Time that is definitely greater
-        /// than this wrapper's time.
+        /// Produces a new wrapper containing the given value, and either DateTimeOffset.UtcNow, or this wrapper's
+        /// time plus one tick, whichever is greater.
         /// </summary>
-        /// <param name="time">Time of the write. If not given, will use DateTimeOffset.UtcNow.</param>
         /// <remarks>If one server's clock is ahead, then after he makes a write, other servers
         /// would, if they just use their own current time, keep failing to write into that
         /// field. This method should be used to produce successor versions reliably.</remarks>
-        public Lww<T> NextVersion()
+        public Lww<T> NextVersion(T value)
         {
             var now = DateTimeOffset.UtcNow;
-            return Value.Lww(now > Time ? now : Time.AddTicks(1));
+            return value.Lww(now > Time ? now : Time.AddTicks(1));
         }
     }
 

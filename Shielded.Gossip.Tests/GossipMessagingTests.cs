@@ -294,7 +294,7 @@ namespace Shielded.Gossip.Tests
                         for (int j = 0; j < 10; j++)
                         {
                             var key = $"key-{i:00}-{j:00}";
-                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A));
+                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A, true));
                         }
                     });
                 }
@@ -328,7 +328,7 @@ namespace Shielded.Gossip.Tests
                         for (int j = 0; j < 10; j++)
                         {
                             var key = $"key-{i:00}-{j:00}";
-                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A));
+                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A, true));
                         }
                     });
                 }
@@ -363,7 +363,7 @@ namespace Shielded.Gossip.Tests
                         for (int j = 0; j < 10; j++)
                         {
                             var key = $"key-{i:00}-{j:00}";
-                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A));
+                            backendA.SetHasVec(key, backendA.TryGetVecVersioned<bool>(key).Single().NextVersion(A, true));
                         }
                     });
                 }
@@ -474,8 +474,8 @@ namespace Shielded.Gossip.Tests
                         if (changed.Key == "key-00-06" && ((Multiple<VecVersioned<bool>>)changed.NewValue).MergedClock[B] == 0)
                         {
                             // we'll change it and one unrelated key, just to be more evil.
-                            backendB.SetHasVec("key-00-06", ((Multiple<VecVersioned<bool>>)changed.NewValue).Single().NextVersion(B));
-                            backendB.SetHasVec("key-00-04", backendB.TryGetVecVersioned<bool>("key-00-04").SingleOrDefault().NextVersion(B));
+                            backendB.SetHasVec("key-00-06", ((Multiple<VecVersioned<bool>>)changed.NewValue).Single().NextVersion(B, true));
+                            backendB.SetHasVec("key-00-04", backendB.TryGetVecVersioned<bool>("key-00-04").SingleOrDefault().NextVersion(B, true));
                         }
                     }));
 

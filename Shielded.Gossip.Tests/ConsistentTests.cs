@@ -199,13 +199,12 @@ namespace Shielded.Gossip.Tests
                 var key = "key" + id;
                 return backend.RunConsistent(() =>
                 {
-                    var newVal = backend.TryGetVecVersioned<TestClass>(key)
-                        .SingleOrDefault()
-                        .NextVersion(backend.Transport.OwnId);
-                    if (newVal.Value == null)
-                        newVal.Value = new TestClass { Id = id };
-                    newVal.Value.Counter = newVal.Value.Counter + 1;
-                    backend.SetHasVec(key, newVal);
+                    var val = backend.TryGetVecVersioned<TestClass>(key).SingleOrDefault();
+                    val = val.NextVersion(backend.Transport.OwnId, val.Value);
+                    if (val.Value == null)
+                        val.Value = new TestClass { Id = id };
+                    val.Value.Counter = val.Value.Counter + 1;
+                    backend.SetHasVec(key, val);
                 });
             })).Result;
             var expected = outcomes.Count(b => b == ConsistentOutcome.Success);
@@ -234,8 +233,7 @@ namespace Shielded.Gossip.Tests
                 read = _backends[B].TryGetIntVersioned<TestClass>("key");
                 var name = read.Value?.Name;
 
-                next = read.NextVersion();
-                next.Value = new TestClass { Id = 1, Name = "Version 2" };
+                next = read.NextVersion(new TestClass { Id = 1, Name = "Version 2" });
                 _backends[B].Set("key", next);
                 return name;
             }).Result;
@@ -268,16 +266,12 @@ namespace Shielded.Gossip.Tests
                     key2 = "key" + (((i + 1) * prime2 + 1) % fieldCount);
                 return backend.RunConsistent(() =>
                 {
-                    var val1 = backend.TryGetVecVersioned<int>(key1)
-                        .SingleOrDefault()
-                        .NextVersion(backend.Transport.OwnId);
-                    val1.Value = val1.Value + 1;
+                    var val1 = backend.TryGetVecVersioned<int>(key1).SingleOrDefault();
+                    val1 = val1.NextVersion(backend.Transport.OwnId, val1.Value + 1);
                     Assert.AreEqual(VectorRelationship.Greater, backend.SetHasVec(key1, val1));
 
-                    var val2 = backend.TryGetVecVersioned<int>(key2)
-                        .SingleOrDefault()
-                        .NextVersion(backend.Transport.OwnId);
-                    val2.Value = val2.Value - 1;
+                    var val2 = backend.TryGetVecVersioned<int>(key2).SingleOrDefault();
+                    val2 = val2.NextVersion(backend.Transport.OwnId, val2.Value - 1);
                     Assert.AreEqual(VectorRelationship.Greater, backend.SetHasVec(key2, val2));
                 });
             })).Result;

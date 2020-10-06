@@ -646,12 +646,17 @@ namespace Shielded.Gossip
         private void OnTransactionChanged(string id, TransactionInfo newVal)
         {
             if (!newVal.State.HasServer(Transport.OwnId))
-            {
                 return;
-            }
-            if (newVal.State[Transport.OwnId] != TransactionState.None || _activeTransactions.ContainsKey(id) || newVal.IsDone)
+            if (_activeTransactions.ContainsKey(id) || newVal.IsDone)
             {
                 OnStateChange(id, newVal);
+                return;
+            }
+            if (newVal.State[Transport.OwnId] != TransactionState.None)
+            {
+                // this can only happen if a previously completed transaction, which has already been cleaned up, has now
+                // been revived. we must try to get rid of it, or it might remain in a half-done state indefinitely.
+                TrySetRejected(id, newVal);
                 return;
             }
             if (StringComparer.InvariantCultureIgnoreCase.Equals(newVal.Initiator, Transport.OwnId))

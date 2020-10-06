@@ -41,13 +41,6 @@ namespace ConsoleTests
         }
 
 
-        public class TestClass
-        {
-            public int Id { get; set; }
-            public string Name { get; set; }
-            public int Counter { get; set; }
-        }
-
         public static void RunConsistentRace(Dictionary<string, ConsistentGossipBackend> backends)
         {
             const int transactions = 1000;
@@ -65,22 +58,18 @@ namespace ConsoleTests
                     key2 = "key" + (((i + 1) * prime2 + 1) % fieldCount);
                 return backend.RunConsistent(() =>
                 {
-                    var val1 = backend.TryGetVecVersioned<int>(key1)
-                        .SingleOrDefault()
-                        .NextVersion(backend.Transport.OwnId);
-                    val1.Value = val1.Value + 1;
+                    var val1 = backend.TryGetVecVersioned<int>(key1).SingleOrDefault();
+                    backend.SetHasVec(key1, val1.NextVersion(backend.Transport.OwnId, val1.Value + 1));
 
-                    var val2 = backend.TryGetVecVersioned<int>(key2)
-                        .SingleOrDefault()
-                        .NextVersion(backend.Transport.OwnId);
-                    val2.Value = val2.Value - 1;
+                    var val2 = backend.TryGetVecVersioned<int>(key2).SingleOrDefault();
+                    backend.SetHasVec(key2, val2.NextVersion(backend.Transport.OwnId, val2.Value - 1));
                 });
             })).Result;
             var expected = outcomes.Count(b => b == ConsistentOutcome.Success);
 
             var read = backends[B].RunConsistent(() =>
                 Enumerable.Range(0, fieldCount).Sum(i =>
-                    backends[B].TryGetVecVersioned<TestClass>("key" + i).SingleOrDefault().Value?.Counter)).Result;
+                    backends[B].TryGetVecVersioned<int>("key" + i).SingleOrDefault().Value)).Result;
 
             _loggerFactory.CreateLogger("Program").LogInformation("Completed with success {Success}, and total {Total}",
                 read.Outcome == ConsistentOutcome.Success && expected == transactions, read.Value);

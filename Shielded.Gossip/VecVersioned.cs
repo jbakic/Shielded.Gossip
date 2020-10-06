@@ -21,10 +21,10 @@ namespace Shielded.Gossip
         public bool CanDelete => Value is IDeletable del && del.CanDelete;
 
         /// <summary>
-        /// Produces a new wrapper with the same value, but with the version moved up by one
+        /// Produces a new wrapper containing the given value, and a version moved up by one
         /// for this server.
         /// </summary>
-        public VecVersioned<T> NextVersion(string ownServerId) => Value.Version(Version?.Next(ownServerId) ?? (ownServerId, 1));
+        public VecVersioned<T> NextVersion(string ownServerId, T value) => value.Version(Version?.Next(ownServerId) ?? (ownServerId, 1));
     }
 
     public static class VecVersionedExtensions

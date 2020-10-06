@@ -28,9 +28,9 @@ namespace Shielded.Gossip
         public VectorRelationship VectorCompare(IntVersioned<T> other) => Version.VectorCompare(other.Version);
 
         /// <summary>
-        /// Produces a new wrapper with the same (by ref!) value, but with the version moved up by one.
+        /// Produces a new wrapper containing the given value, and a version +1 from this one.
         /// </summary>
-        public IntVersioned<T> NextVersion() => Value.Version(checked(Version + 1));
+        public IntVersioned<T> NextVersion(T value) => value.Version(checked(Version + 1));
     }
 
     public static class VersionedExtensions

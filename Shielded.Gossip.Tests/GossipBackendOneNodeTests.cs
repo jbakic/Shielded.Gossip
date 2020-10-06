@@ -212,14 +212,13 @@ namespace Shielded.Gossip.Tests
             var read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.AreEqual(testEntity.Name, read.Value.Name);
 
-            var next = read.NextVersion();
-            next.Value = new TestClass { Id = 1, Name = "Version 2" };
+            var next = read.NextVersion(new TestClass { Id = 1, Name = "Version 2" });
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
             read = Shield.InTransaction(() => _backend.TryGetLww<TestClass>("key"));
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
-            next = read.NextVersion();
+            next = read.NextVersion(read.Value);
             next.Value.CanDelete = true;
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
@@ -247,14 +246,13 @@ namespace Shielded.Gossip.Tests
             var read = Shield.InTransaction(() => _backend.TryGetIntVersioned<TestClass>("key"));
             Assert.AreEqual(testEntity.Name, read.Value.Name);
 
-            var next = read.NextVersion();
-            next.Value = new TestClass { Id = 1, Name = "Version 2" };
+            var next = read.NextVersion(new TestClass { Id = 1, Name = "Version 2" });
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
             read = Shield.InTransaction(() => _backend.TryGetIntVersioned<TestClass>("key"));
             Assert.AreEqual(next.Value.Name, read.Value.Name);
 
-            next = read.NextVersion();
+            next = read.NextVersion(read.Value);
             next.Value.CanDelete = true;
             Shield.InTransaction(() => { _backend.Set("key", next); });
 
