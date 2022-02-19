@@ -7,6 +7,17 @@ using System.Threading;
 namespace Shielded.Gossip.Backend
 {
     [DataContract(Namespace = ""), Serializable]
+    public class DirectMail
+    {
+        [DataMember]
+        public string From { get; set; }
+
+        // currently will always be just one.
+        [DataMember]
+        public CausalTransaction[] Transactions { get; set; }
+    }
+
+    [DataContract(Namespace = ""), Serializable]
     public class CausalTransaction
     {
         [DataMember]

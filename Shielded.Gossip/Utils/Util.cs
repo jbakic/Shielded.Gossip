@@ -4,7 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Shielded.Gossip
+namespace Shielded.Gossip.Utils
 {
     internal static class Util
     {

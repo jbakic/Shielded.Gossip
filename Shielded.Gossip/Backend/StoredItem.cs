@@ -1,4 +1,5 @@
 ﻿using Shielded.Gossip.Serializing;
+using Shielded.Gossip.Utils;
 using System;
 using System.Collections.Generic;
 using System.Text;

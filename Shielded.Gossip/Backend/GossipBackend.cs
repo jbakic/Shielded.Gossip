@@ -163,28 +163,44 @@ namespace Shielded.Gossip.Backend
             });
         }
 
-        private void DoDirectMail(CausalTransaction package)
+        private void DoDirectMail(TransactionInfo trans)
         {
-            if (Configuration.DirectMail == DirectMailType.Off || package.Changes == null || package.Changes.Length == 0)
+            if (trans.DisableMailFx || Configuration.DirectMail == DirectMailType.Off || trans.Changes == null || trans.Changes.Count == 0)
                 return;
+
+            DirectMail createPackage(TransactionInfo trans) =>
+                new DirectMail
+                {
+                    From = Transport.OwnId,
+                    Transactions = new[]
+                    {
+                        new CausalTransaction
+                        {
+                            Changes = trans.Changes.Values.Select(si => (MessageItem)si).ToArray(),
+                            Dependencies = trans.Dependencies.Values.Where(d => !trans.Changes.ContainsKey(d.Key)).Select(d => new Dependency
+                            {
+                                Key = d.Key,
+                                VersionData = d.VersionData,
+                            }).ToArray(),
+                        }
+                    }
+                };
+
             if (Configuration.DirectMail == DirectMailType.Always)
             {
-                Transport.Broadcast(package);
+                Transport.Broadcast(createPackage(trans));
             }
-            else
+            else if (Configuration.DirectMail == DirectMailType.GossipSupressed)
+            {
+                var package = createPackage(trans);
+                foreach (var server in Transport.Servers.Where(s => !IsGossipActive(s)))
+                    Transport.Send(server, package, false);
+            }
+            else if (Configuration.DirectMail == DirectMailType.StartGossip)
             {
                 foreach (var server in Transport.Servers)
-                    SendMail(server, package);
+                    StartGossip(server);
             }
-        }
-
-        private void SendMail(string server, CausalTransaction package)
-        {
-            if (Configuration.DirectMail == DirectMailType.Always ||
-                Configuration.DirectMail == DirectMailType.GossipSupressed && !IsGossipActive(server))
-                Transport.Send(server, package, false);
-            else if (Configuration.DirectMail == DirectMailType.StartGossip)
-                StartGossip(server);
         }
 
         private enum MessageType
@@ -307,10 +323,16 @@ namespace Shielded.Gossip.Backend
         {
             switch (msg)
             {
-                case CausalTransaction trans:
-                    _logger.LogDebug("Direct mail received with {ItemCount} items and {DependencyCount} dependencies.",
-                        trans.Changes?.Length ?? 0, trans.Dependencies?.Length ?? 0);
-                    ApplyTransactions(null, trans);
+                case DirectMail directMail:
+                    _logger.LogDebug("Direct mail received from {ServerId} with {TransactionCount} transactions.",
+                        directMail.From, directMail.Transactions?.Length ?? 0);
+                    var (_, waitingStore) = ApplyTransactions(null, directMail.Transactions);
+                    if (waitingStore != null && Configuration.DirectMailCausalityFailStartsGossip)
+                    {
+                        _logger.LogDebug("Direct mail received from {ServerId} has unmet dependencies. Starting gossip with that server.",
+                            directMail.From, directMail.Transactions?.Length ?? 0);
+                        StartGossip(directMail.From);
+                    }
                     return null;
 
                 case GossipMessage gossip:
@@ -325,7 +347,11 @@ namespace Shielded.Gossip.Backend
                         {
                             Shield.InTransaction(() =>
                             {
-                                var waitingStore = _gossipStates.TryGetValue(gossip.From, out var gossipState) ? gossipState.WaitingStore : null;
+                                // we must check LastSentMsgId of the gossip state, because we are only allowed to use the waitingStore if
+                                // this is the correct reply. ApplyTransaction optimization where it does not re-compare dependencies of
+                                // waitingStore transactions would otherwise be dangerous.
+                                var waitingStore = _gossipStates.TryGetValue(gossip.From, out var gossipState) &&
+                                    gossipState.LastSentMsgId == gossip.ReplyToId ? gossipState.WaitingStore : null;
                                 (keysToIgnore, newWaitingStore) = ApplyTransactions(waitingStore, pkg.Transactions);
                                 if (keysToIgnore != null)
                                 {
@@ -874,8 +900,12 @@ namespace Shielded.Gossip.Backend
                     }
                     itemCount++;
                     currentChanges.Add((MessageItem)item.Item);
-                    if (currentDeps == null)
-                        currentDeps = GetDependenciesForPackage(item.Freshness, item.Item.Dependencies).ToArray();
+                    if (currentChanges.Count == 1)
+                    {
+                        var deps = GetDependenciesForPackage(item.Freshness, item.Item.Dependencies).ToArray();
+                        if (deps.Length > 0)
+                            currentDeps = deps;
+                    }
                 }
             }
             while (enumerator.MoveNext());
@@ -895,12 +925,11 @@ namespace Shielded.Gossip.Backend
             foreach (var dep in dependencies)
             {
                 var currItem = GetItem(dep.Key);
-                // special case: say currItem is not null, but is Deleted or Expired. what if it disappears by the
-                // time we build the next message? eternally unmet dependency? not possible - it must be a future dependency
-                // in that case - either this transaction or a later one sets Deleted/Expired to true, because CloseDependencies
-                // would not have pulled it in as a dependency if it was already Deleted/Expired. and future dependencies
-                // do not block ApplyTransactions.
-                if (currItem == null || currItem.Freshness == freshness)
+                // CloseDependencies does not pull in dependencies that are deleted or expired. so, if we see a dep
+                // here to something deleted/expired, we know that the deletion happened later, so it's a future
+                // dependency. but also, since any future changes to keys of this transaction will not pull a dep on
+                // something deleted/expired, then we do not need this dependency at all.
+                if (currItem == null || currItem.Deleted || currItem.Expired || currItem.Freshness == freshness)
                     continue;
                 yield return new Dependency
                 {
@@ -1035,22 +1064,13 @@ namespace Shielded.Gossip.Backend
                 trans.Changes = new Dictionary<string, StoredItem>();
                 _freshIndex.RegisterTransaction(trans);
                 if (!trans.DisableMailFx)
-                    Shield.SideEffect(() =>
-                    {
-                        if (!trans.DisableMailFx)
-                            DoDirectMail(new CausalTransaction
-                            {
-                                Changes = trans.Changes.Values.Select(si => (MessageItem)si).ToArray(),
-                                Dependencies = trans.Dependencies.Values.Where(d => !trans.Changes.ContainsKey(d.Key)).Select(d => new Dependency
-                                {
-                                    Key = d.Key,
-                                    VersionData = d.VersionData,
-                                }).ToArray(),
-                            });
-                    });
+                    Shield.SideEffect(() => DoDirectMail(trans));
             }
             trans.Changes[newItem.Key] = newItem;
-            trans.Dependencies[newItem.Key] = new StoredDependency { Key = newItem.Key, Comparable = value.GetVersionOnly() };
+            if (newItem.Deleted || newItem.Expired)
+                trans.Dependencies.Remove(newItem.Key);
+            else
+                trans.Dependencies[newItem.Key] = new StoredDependency { Key = newItem.Key, Comparable = value.GetVersionOnly() };
             // this pulls in the key's old dependencies.
             EnlistRead(newItem.Key, oldItem);
             trans.HashEffect ^= hashEffect;

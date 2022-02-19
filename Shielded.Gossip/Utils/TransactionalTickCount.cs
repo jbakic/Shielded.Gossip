@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Shielded.Gossip
+namespace Shielded.Gossip.Utils
 {
     /// <summary>
     /// Like Environment.TickCount, but freezes within a Shielded transaction.

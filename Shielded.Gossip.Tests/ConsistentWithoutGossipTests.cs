@@ -70,7 +70,9 @@ namespace Shielded.Gossip.Tests
             CheckProtocols();
 
             // the field will now have two versions on all servers, due to the C server transmitting his version
-            // as part of rejecting the transaction.
+            // as part of rejecting the transaction. though, we should give him some time for that.
+            Thread.Sleep(100);
+
             var readA = _backends[A].RunConsistent(() => _backends[A].TryGetVecVersioned<string>("key"))
                 .Result.Value;
 

@@ -1,4 +1,5 @@
 ﻿using Shielded.Gossip.Mergeables;
+using Shielded.Gossip.Serializing;
 using Shielded.Gossip.Utils;
 using System;
 using System.Collections.Generic;
@@ -64,7 +65,7 @@ namespace Shielded.Gossip.Backend
         [DataMember]
         public bool InitiatorVotes { get; set; }
         [DataMember]
-        public MessageItem[] Reads { get; set; }
+        public ConsistentDependency[] Reads { get; set; }
         [DataMember]
         public MessageItem[] Changes { get; set; }
         [DataMember]
@@ -123,5 +124,33 @@ namespace Shielded.Gossip.Backend
         public VectorRelationship VectorCompare(TransactionInfo other) => (State ?? new TransactionVector()).VectorCompare(other?.State);
 
         public IVersion<TransactionInfo> GetVersionOnly() => State ?? new TransactionVector();
+    }
+
+    [DataContract(Namespace = ""), Serializable]
+    public class ConsistentDependency
+    {
+        [DataMember]
+        public string Key { get; set; }
+        [DataMember]
+        public byte[] VersionData { get; set; }
+
+        [IgnoreDataMember]
+        public object Comparable
+        {
+            get => VersionData == null ? null : Serializer.Deserialize(VersionData);
+            set => VersionData = value == null ? null : Serializer.Serialize(value);
+        }
+
+        internal static ConsistentDependency Create(string key, StoredItem item)
+        {
+            var dep = item == null ? null :
+                item.OpenTransaction != null ? item.OpenTransaction.Dependencies.Values.FirstOrDefault(d => d.Key == key) :
+                item.Dependencies?.FirstOrDefault(d => d.Key == key);
+            return new ConsistentDependency
+            {
+                Key = key,
+                VersionData = dep?.VersionData,
+            };
+        }
     }
 }

@@ -29,6 +29,12 @@
         public DirectMailType DirectMail { get; set; } = DirectMailType.GossipSupressed;
 
         /// <summary>
+        /// If we cannot apply a direct mailed transaction due to unmet dependencies, should we immediately
+        /// respond by starting a gossip exchange? Default true.
+        /// </summary>
+        public bool DirectMailCausalityFailStartsGossip { get; set; } = true;
+
+        /// <summary>
         /// Every this many milliseconds, the backend will try to start a new gossip session with a
         /// randomly selected other server.
         /// </summary>

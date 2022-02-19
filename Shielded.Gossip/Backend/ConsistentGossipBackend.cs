@@ -437,7 +437,7 @@ namespace Shielded.Gossip.Backend
                                     InitiatorVotes = TransactionParticipants == null ||
                                         transParticipants.Contains(Transport.OwnId, StringComparer.InvariantCultureIgnoreCase),
                                     Reads = reads
-                                        .Select(key => (MessageItem)_wrapped.GetItem(key) ?? new MessageItem { Key = key })
+                                        .Select(key => ConsistentDependency.Create(key, _wrapped.GetActiveItem(key)))
                                         .ToArray(),
                                     Changes = ourChanges.Values.ToArray(),
                                     State = new TransactionVector(
@@ -471,11 +471,6 @@ namespace Shielded.Gossip.Backend
                                     _logger.LogDebug("Failed to prepare transaction locally.");
                                     return prepare;
                                 }
-                                Shield.InTransaction(() =>
-                                {
-                                    if (_transactions.ContainsKey(id))
-                                        _wrapped.Set(id, transaction);
-                                });
                                 _logger.LogDebug("Local prepare succeeded, awaiting other servers' votes.");
                                 return await ourState.PrepareCompleter.Task.ConfigureAwait(false);
                             }
@@ -629,10 +624,13 @@ namespace Shielded.Gossip.Backend
                     _fieldBlockers.Remove(key);
         });
 
-        private ComplexRelationship CheckOne<T>(string key, T value) where T : IMergeableEx<T>
+        private bool CheckOne<T>(string key, IVersion<T> comparable) where T : IMergeableEx<T>
         {
-            var curr = _wrapped.TryGetWithInfo<T>(key);
-            return curr == null ? ComplexRelationship.Greater : new FieldInfo<T>(value, null).VectorCompare(curr, Configuration.ExpiryComparePrecision);
+            if (!_wrapped.TryGet<T>(key, out var curr))
+                // if we do not have it, knowing that GossipBackend is causally dependent, we must conclude we
+                // have expired or deleted the value the initiator saw. thus, the comparable is in effect less than curr.
+                return false;
+            return (comparable.CompareWithValue(curr) | VectorRelationship.Greater) == VectorRelationship.Greater;
         }
 
         private bool Check(BackendState ourState, TransactionInfo transaction, bool initiatedLocally) => Shield.InTransaction(() =>
@@ -640,38 +638,39 @@ namespace Shielded.Gossip.Backend
             var id = ourState.TransactionId;
             if (!_transactions.TryGetValue(id, out var currState) || currState != ourState)
                 return false;
-            bool result = true;
             _logger.LogDebug("Checking transaction consistency.");
 
+            var result = true;
             if (transaction.Reads != null)
                 foreach (var read in transaction.Reads)
                 {
-                    var obj = read.Value;
+                    var obj = read.Comparable;
                     if (obj == null)
                     {
-                        if (_wrapped.GetItem(read.Key) == null)
+                        if (_wrapped.GetActiveItemWEnlist(read.Key) == null)
                             continue;
                         _logger.LogDebug("Read not up to date, key {ItemKey}", read.Key);
                         if (initiatedLocally)
                             return false;
-                        _wrapped.Touch(read.Key);
                         result = false;
                     }
                     else
                     {
-                        // what you read must be Greater or Equal to what we have.
-                        if ((((ComplexRelationship)CheckOne(read.Key, (dynamic)obj)).GetValueRelationship() | VectorRelationship.Greater) != VectorRelationship.Greater)
+                        if (!CheckOne(read.Key, (dynamic)obj))
                         {
                             _logger.LogDebug("Read not up to date, key {ItemKey}", read.Key);
                             if (initiatedLocally)
                                 return false;
-                            _wrapped.Touch(read.Key);
                             result = false;
                         }
                     }
                 }
 
-            if (!initiatedLocally)
+            if (initiatedLocally)
+            {
+                _wrapped.Set(id, transaction);
+            }
+            else
             {
                 if (result)
                     SetPrepared(id);
@@ -827,11 +826,8 @@ namespace Shielded.Gossip.Backend
         private void Apply(string id, TransactionInfo current)
         {
             _logger.LogDebug("Applying {TransactionId}", id);
-            // applying reads will at least pull in their causal dependencies. but we might also not have the
-            // exact versions the transaction initiator read, so we do need them.
-            _wrapped.ApplyItems(
-                (current.Reads ?? Enumerable.Empty<MessageItem>())
-                .Concat(current.Changes ?? Enumerable.Empty<MessageItem>()));
+            if (current.Changes != null)
+                _wrapped.ApplyItems(current.Changes);
         }
 
         private void Commit(BackendState ourState) => Shield.InTransaction(() =>
