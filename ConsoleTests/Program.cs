@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
-using Shielded.Gossip;
+using Shielded.Gossip.Backend;
+using Shielded.Gossip.Mergeables;
+using Shielded.Gossip.Transport;
 using System;
 using System.Collections.Generic;
 using System.Linq;

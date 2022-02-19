@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Shielded.Gossip.Backend;
+using Shielded.Gossip.Transport;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Text;

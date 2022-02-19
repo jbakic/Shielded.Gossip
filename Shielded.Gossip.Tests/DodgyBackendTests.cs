@@ -1,4 +1,7 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Shielded.Gossip.Backend;
+using Shielded.Gossip.Mergeables;
+using Shielded.Gossip.Transport;
 using System;
 using System.Collections.Generic;
 using System.Linq;

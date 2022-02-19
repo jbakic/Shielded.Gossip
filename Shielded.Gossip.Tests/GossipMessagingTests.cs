@@ -1,4 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Shielded.Gossip.Backend;
+using Shielded.Gossip.Mergeables;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -99,26 +101,21 @@ namespace Shielded.Gossip.Tests
                 Assert.IsNotNull(msgA1);
                 // we breach the initial size of 17 while going through the third transaction, and since initial size
                 // is not strict, he takes the third transaction too, resulting in 21 items (trigger + 2x10...)
-                Assert.AreEqual(21, msgA1.Items.Length);
-                for (int c = 0; c < 20; c++)
-                    Assert.IsTrue(msgA1.Items[c].Freshness >= msgA1.Items[c + 1].Freshness);
-                Assert.AreEqual("trigger", msgA1.Items[0].Key);
+                Assert.IsTrue(msgA1.Transactions.Select(t => t.Changes.Length).SequenceEqual(new [] { 10, 10, 1 }));
+                Assert.AreEqual("trigger", msgA1.Transactions[2].Changes[0].Key);
                 Assert.IsTrue(
-                    msgA1.Items.Skip(1)
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA1.Transactions.Take(2).SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(98, 2).SelectMany(i =>
                             Enumerable.Range(0, 10).Select(j =>
                                 $"key-{i:00}-{j:00}"))));
-                // basic check for the window fields.
-                Assert.AreEqual(msgA1.Items[19].Freshness - 1, msgA1.WindowStart);
-                Assert.AreEqual(msgA1.Items[0].Freshness, msgA1.WindowEnd);
- 
+                // basic check for the window fields. we know no other transactions were running, so we can demand exactly 3.
+                Assert.AreEqual(3, msgA1.WindowEnd - msgA1.WindowStart);
+
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
                 // this confirms that the B server recognizes there's no need to send the same items back to A
-                Assert.AreEqual(0, msgB1.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB1.Transactions?.Length ?? 0);
                 // B does specify a window as if he did send them! also, by checking that WindowEnd is 3, we confirm
                 // that B correctly recognized 3 packages in the incoming message.
                 Assert.AreEqual(3, msgB1.WindowEnd);
@@ -126,14 +123,10 @@ namespace Shielded.Gossip.Tests
 
                 var msgA2 = transportA.ReceiveAndGetReply(msgB1) as GossipReply;
                 Assert.IsNotNull(msgA2);
-                // in the second round, the target size is 2*17=34, so he takes 40.
-                Assert.AreEqual(40, msgA2.Items.Length);
-                for (int c = 0; c < 39; c++)
-                    Assert.IsTrue(msgA2.Items[c].Freshness >= msgA2.Items[c + 1].Freshness);
+                // in the second round, the target size is 2*17=34, so he takes 4*10
+                Assert.IsTrue(msgA2.Transactions.Select(t => t.Changes.Length).SequenceEqual(Enumerable.Repeat(10, 4)));
                 Assert.IsTrue(
-                    msgA2.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA2.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(94, 4).SelectMany(i =>
                             Enumerable.Range(0, 10).Select(j =>
@@ -143,19 +136,15 @@ namespace Shielded.Gossip.Tests
 
                 var msgB2 = transportB.ReceiveAndGetReply(msgA2) as GossipReply;
                 Assert.IsNotNull(msgB2);
-                Assert.AreEqual(0, msgB2.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB2.Transactions?.Length ?? 0);
 
                 var msgA3 = transportA.ReceiveAndGetReply(msgB2) as GossipReply;
                 Assert.IsNotNull(msgA3);
                 // in the third round, the target size is 2*34=68, which exceeds cut-off of 59. cut-off is strict, so
                 // the message will contain only 50 items - 5 whole transactions.
-                Assert.AreEqual(50, msgA3.Items.Length);
-                for (int c = 0; c < 49; c++)
-                    Assert.IsTrue(msgA3.Items[c].Freshness >= msgA3.Items[c + 1].Freshness);
+                Assert.IsTrue(msgA3.Transactions.Select(t => t.Changes.Length).SequenceEqual(Enumerable.Repeat(10, 5)));
                 Assert.IsTrue(
-                    msgA3.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA3.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(89, 5).SelectMany(i =>
                             Enumerable.Range(0, 10).Select(j =>
@@ -164,19 +153,15 @@ namespace Shielded.Gossip.Tests
 
                 var msgB3 = transportB.ReceiveAndGetReply(msgA3) as GossipReply;
                 Assert.IsNotNull(msgB3);
-                Assert.AreEqual(0, msgB3.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB3.Transactions?.Length ?? 0);
 
                 var msgA4 = transportA.ReceiveAndGetReply(msgB3) as GossipReply;
                 Assert.IsNotNull(msgA4);
                 // since we hit cut-off, he will again just send 50 items. we want to make sure that he did not
                 // skip the transaction he stopped at last time.
-                Assert.AreEqual(50, msgA4.Items.Length);
-                for (int c = 0; c < 49; c++)
-                    Assert.IsTrue(msgA4.Items[c].Freshness >= msgA4.Items[c + 1].Freshness);
+                Assert.IsTrue(msgA4.Transactions.Select(t => t.Changes.Length).SequenceEqual(Enumerable.Repeat(10, 5)));
                 Assert.IsTrue(
-                    msgA4.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA4.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(84, 5).SelectMany(i =>
                             Enumerable.Range(0, 10).Select(j =>
@@ -211,7 +196,7 @@ namespace Shielded.Gossip.Tests
                 var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // 2 of the keys, the third one cannot fit in the bytes cut-off.
-                Assert.AreEqual(2, msgA1.Items.Length);
+                Assert.AreEqual(2, msgA1.Transactions.Length);
             }
         }
 
@@ -241,7 +226,7 @@ namespace Shielded.Gossip.Tests
                 var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // one key will pass, since we must send something...
-                Assert.AreEqual(1, msgA1.Items.Length);
+                Assert.AreEqual(1, msgA1.Transactions.Length);
             }
         }
 
@@ -281,10 +266,10 @@ namespace Shielded.Gossip.Tests
                 var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // initial size is 7, he takes the trigger and one full transaction of 10 items.
-                Assert.AreEqual(11, msgA1.Items.Length);
+                Assert.IsTrue(msgA1.Transactions.Select(t => t.Changes.Length).SequenceEqual(new [] { 10, 1 }));
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
-                Assert.AreEqual(0, msgB1.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB1.Transactions?.Length ?? 0);
 
                 // perform new changes before A receives the reply from B. we'll reuse the lower keys.
                 for (int i = 0; i < 1; i++)
@@ -302,23 +287,19 @@ namespace Shielded.Gossip.Tests
                 var msgA2 = transportA.ReceiveAndGetReply(msgB1) as GossipReply;
                 Assert.IsNotNull(msgA2);
                 // in the second round, the target size is 2*7=14. he'll take 20 - 10 new items, and 10 older ones.
-                Assert.AreEqual(20, msgA2.Items.Length);
-                for (int c = 0; c < 19; c++)
-                    Assert.IsTrue(msgA2.Items[c].Freshness >= msgA2.Items[c + 1].Freshness);
+                Assert.IsTrue(msgA2.Transactions.Select(t => t.Changes.Length).SequenceEqual(Enumerable.Repeat(10, 2)));
                 Assert.IsTrue(
-                    msgA2.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA2.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(0, 10).Select(j => $"key-98-{j:00}")
                         .Concat(Enumerable.Range(0, 10).Select(j => $"key-00-{j:00}"))));
-                Assert.AreEqual((A, 2), ((Multiple<VecVersioned<bool>>)msgA2.Items[0].Value).Single().Version);
+                Assert.AreEqual((A, 2), ((Multiple<VecVersioned<bool>>)msgA2.Transactions[1].Changes[0].Value).Single().Version);
                 // the window grows. this time, the end expands as well, due to new changes.
                 Assert.IsTrue(msgA2.WindowStart < msgA1.WindowStart && msgA2.WindowEnd > msgA1.WindowEnd);
 
                 var msgB2 = transportB.ReceiveAndGetReply(msgA2) as GossipReply;
                 Assert.IsNotNull(msgB2);
-                Assert.AreEqual(0, msgB2.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB2.Transactions?.Length ?? 0);
 
                 // this set of new changes will be larger than the next package size (28), but will be transmitted anyway.
                 for (int i = 0; i < 4; i++)
@@ -336,13 +317,9 @@ namespace Shielded.Gossip.Tests
                 var msgA3 = transportA.ReceiveAndGetReply(msgB2) as GossipReply;
                 Assert.IsNotNull(msgA3);
                 // package size is 28, which would mean 30 items, but we get 40 - all the new changes between replies.
-                Assert.AreEqual(40, msgA3.Items.Length);
-                for (int c = 0; c < 39; c++)
-                    Assert.IsTrue(msgA3.Items[c].Freshness >= msgA3.Items[c + 1].Freshness);
+                Assert.IsTrue(msgA3.Transactions.Select(t => t.Changes.Length).SequenceEqual(Enumerable.Repeat(10, 4)));
                 Assert.IsTrue(
-                    msgA3.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA3.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(0, 4).SelectMany(i =>
                             Enumerable.Range(0, 10).Select(j =>
@@ -352,7 +329,7 @@ namespace Shielded.Gossip.Tests
 
                 var msgB3 = transportB.ReceiveAndGetReply(msgA3) as GossipReply;
                 Assert.IsNotNull(msgB3);
-                Assert.AreEqual(0, msgB3.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB3.Transactions?.Length ?? 0);
 
                 // we again make new changes, but now so many that their number exceeds the cut-off. the gossip
                 // window will "slip" due to this. package size plays no role here.
@@ -370,13 +347,9 @@ namespace Shielded.Gossip.Tests
 
                 var msgA4 = transportA.ReceiveAndGetReply(msgB3) as GossipReply;
                 Assert.IsNotNull(msgA4);
-                Assert.AreEqual(40, msgA4.Items.Length);
-                for (int c = 0; c < 39; c++)
-                    Assert.IsTrue(msgA4.Items[c].Freshness >= msgA4.Items[c + 1].Freshness);
+                Assert.IsTrue(msgA4.Transactions.Select(t => t.Changes.Length).SequenceEqual(Enumerable.Repeat(10, 4)));
                 Assert.IsTrue(
-                    msgA4.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA4.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         // only the most recent changes that managed to fit in before hitting the cut-off...
                         Enumerable.Range(2, 4).SelectMany(i =>
@@ -387,20 +360,16 @@ namespace Shielded.Gossip.Tests
 
                 var msgB4 = transportB.ReceiveAndGetReply(msgA4) as GossipReply;
                 Assert.IsNotNull(msgB4);
-                Assert.AreEqual(0, msgB4.Items?.Length ?? 0);
+                Assert.AreEqual(0, msgB4.Transactions?.Length ?? 0);
 
                 // now, without any new changes, let's confirm it just continues. since the window slipped,
                 // it will now resend the items it sent once before already.
                 var msgA5 = transportA.ReceiveAndGetReply(msgB4) as GossipReply;
                 Assert.IsNotNull(msgA5);
                 // cut-off limits us again, but we have 41 now, because the "trigger" item is here again.
-                Assert.AreEqual(41, msgA5.Items.Length);
-                for (int c = 0; c < 40; c++)
-                    Assert.IsTrue(msgA5.Items[c].Freshness >= msgA5.Items[c + 1].Freshness);
+                Assert.IsTrue(msgA5.Transactions.Select(t => t.Changes.Length).SequenceEqual(new [] { 10, 10, 1, 10, 10 }));
                 Assert.IsTrue(
-                    msgA5.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgA5.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     .SequenceEqual(
                         Enumerable.Range(98, 2).SelectMany(i =>
                             Enumerable.Range(0, 10).Select(j =>
@@ -456,7 +425,7 @@ namespace Shielded.Gossip.Tests
                 var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
                 // the full package
-                Assert.AreEqual(21, msgA1.Items.Length);
+                Assert.IsTrue(msgA1.Transactions.Select(t => t.Changes.Length).SequenceEqual(new [] { 10, 10, 1 }));
 
                 // before B receives the message, we change some keys on it
                 backendB.SetHasVec("key-01-05", false.Version(B));
@@ -481,17 +450,15 @@ namespace Shielded.Gossip.Tests
 
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
-                Assert.AreEqual(4, msgB1.Items?.Length ?? 0);
+                // why 1,2,1? see below, the assertion checking the key order, should be clear then.
+                Assert.IsTrue(msgB1.Transactions.Select(t => t.Changes.Length).SequenceEqual(new [] { 1, 2, 1 }));
                 Assert.IsTrue(
-                    msgB1.Items
-                    .OrderBy(i => i.Freshness).ThenBy(i => i.Key)
-                    .Select(i => i.Key)
+                    msgB1.Transactions.SelectMany(t => t.Changes.Select(mi => mi.Key).OrderBy(x => x))
                     // key-01-07 comes first - the edit on B happened before the incoming msg, and the msg did not
                     // cause any change on it, so its freshness is less than the others.
                     .SequenceEqual(new[] { "key-01-07", "key-00-04", "key-00-06", "key-01-05" }));
                 Assert.IsTrue(
-                    msgB1.Items
-                    .Select(i => (i.Key, ((Multiple<VecVersioned<bool>>)i.Value).MergedClock))
+                    msgB1.Transactions.SelectMany(t => t.Changes.Select(mi => (mi.Key, ((Multiple<VecVersioned<bool>>)mi.Value).MergedClock)))
                     .All(kc =>
                          kc.Key != "key-01-07" && kc.MergedClock == ((VersionVector)(A, 1) | (B, 1)) ||
                          kc.Key == "key-01-07" && kc.MergedClock == (A, 2)));
@@ -968,7 +935,7 @@ namespace Shielded.Gossip.Tests
 
                 var msgB1 = transportB.ReceiveAndGetReply(msgA1) as GossipReply;
                 Assert.IsNotNull(msgB1);
-                Assert.IsTrue(msgB1.Items == null || msgB1.Items.Length == 0);
+                Assert.AreEqual(0, msgB1.Transactions?.Length ?? 0);
 
                 var msgA2 = transportA.ReceiveAndGetReply(msgB1) as GossipReply;
                 Assert.IsNotNull(msgA2);
@@ -1009,8 +976,9 @@ namespace Shielded.Gossip.Tests
                 }
                 var msgA1 = transportA.LastSentMessage.Msg as GossipStart;
                 Assert.IsNotNull(msgA1);
-                Assert.AreEqual(1, msgA1.Items.Length);
-                Assert.AreEqual("trigger", msgA1.Items[0].Key);
+                Assert.AreEqual(1, msgA1.Transactions.Length);
+                Assert.AreEqual(1, msgA1.Transactions[0].Changes.Length);
+                Assert.AreEqual("trigger", msgA1.Transactions[0].Changes[0].Key);
             }
         }
     }

@@ -1,4 +1,5 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Shielded.Gossip.Mergeables;
 using System;
 using System.Collections.Generic;
 using System.Text;
