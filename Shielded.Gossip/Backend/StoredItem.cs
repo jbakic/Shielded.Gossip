@@ -2,6 +2,7 @@
 using Shielded.Gossip.Utils;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace Shielded.Gossip.Backend
@@ -25,6 +26,14 @@ namespace Shielded.Gossip.Backend
 
         // this will actually contain the same Key. unusual maybe, but really helpful.
         public StoredDependency[] Dependencies;
+
+        // and this will fetch the dependency corresponding to our key.
+        internal StoredDependency GetOwnDependency()
+        {
+            return OpenTransaction != null
+                ? OpenTransaction.Dependencies.Values.First(d => d.Key == Key)
+                : Dependencies.First(d => d.Key == Key);
+        }
 
         public long Freshness;
 

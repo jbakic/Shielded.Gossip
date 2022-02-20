@@ -134,8 +134,6 @@ namespace Shielded.Gossip.Backend
         public string Key { get; set; }
         [DataMember]
         public byte[] VersionData { get; set; }
-        [DataMember]
-        public bool IsInFuture { get; set; }
 
         /// <summary>
         /// Will be an <see cref="IMergeableEx{T}"/>, but one obtained by calling <see cref="IMergeableEx{T}.GetVersionOnly()"/>.

@@ -143,13 +143,10 @@ namespace Shielded.Gossip.Backend
 
         internal static ConsistentDependency Create(string key, StoredItem item)
         {
-            var dep = item == null ? null :
-                item.OpenTransaction != null ? item.OpenTransaction.Dependencies.Values.FirstOrDefault(d => d.Key == key) :
-                item.Dependencies?.FirstOrDefault(d => d.Key == key);
             return new ConsistentDependency
             {
                 Key = key,
-                VersionData = dep?.VersionData,
+                VersionData = item?.GetOwnDependency().VersionData,
             };
         }
     }

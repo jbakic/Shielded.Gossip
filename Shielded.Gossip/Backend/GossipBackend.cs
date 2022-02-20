@@ -213,7 +213,7 @@ namespace Shielded.Gossip.Backend
         private class GossipState
         {
             public readonly int? LastReceivedMsgId;
-            public readonly WaitingTransaction[] WaitingStore;
+            public readonly CausalTransaction[] WaitingStore;
             public readonly int LastSentMsgId;
             public readonly ReverseTimeIndex.Enumerator LastWindowStart;
             public readonly int LastPackageSize;
@@ -223,7 +223,7 @@ namespace Shielded.Gossip.Backend
 
             public readonly int CreationTickCount = Environment.TickCount;
 
-            public GossipState(int? lastReceivedMsgId, WaitingTransaction[] waitingStore, int lastSentMsgId, ReverseTimeIndex.Enumerator lastWindowStart,
+            public GossipState(int? lastReceivedMsgId, CausalTransaction[] waitingStore, int lastSentMsgId, ReverseTimeIndex.Enumerator lastWindowStart,
                 int lastPackageSize, MessageType lastSentMsgType, int? previousSentEndMsgId = null)
             {
                 LastReceivedMsgId = lastReceivedMsgId;
@@ -342,7 +342,7 @@ namespace Shielded.Gossip.Backend
                         var pkg = gossip as NewGossip;
                         long? ignoreUpToFreshness = null;
                         HashSet<string> keysToIgnore = null;
-                        WaitingTransaction[] newWaitingStore = null;
+                        CausalTransaction[] newWaitingStore = null;
                         if (pkg?.Transactions != null && gossip.DatabaseHash != _freshIndex.DatabaseHash)
                         {
                             Shield.InTransaction(() =>
@@ -386,60 +386,40 @@ namespace Shielded.Gossip.Backend
             }
         }
 
-        internal class WaitingTransaction
-        {
-            public readonly CausalTransaction Transaction;
-            public readonly string[] UnmetKeys;
-
-            public WaitingTransaction(CausalTransaction transaction, string[] unmetKeys)
-            {
-                Transaction = transaction;
-                UnmetKeys = unmetKeys;
-            }
-        }
-
         /// <summary>
         /// Applies the given transactions internally, does not cause any direct mail. Applies them
         /// in order as received - we assume they are chronologically ordered. Result contains keys
         /// whose values are (now) equal in our DB to the received values, and the new waitingStore.
         /// </summary>
         /// <param name="waitingStore">Transactions from previous messages in same gossip exchange, which still have unmet dependencies.</param>
-        private (HashSet<string>, WaitingTransaction[]) ApplyTransactions(WaitingTransaction[] waitingStore, params CausalTransaction[] transactions) => Shield.InTransaction(() =>
+        private (HashSet<string>, CausalTransaction[]) ApplyTransactions(CausalTransaction[] waitingStore, params CausalTransaction[] transactions) => Shield.InTransaction(() =>
         {
             if (transactions == null || transactions.Length == 0)
                 return (null, waitingStore);
             _logger.LogDebug("Applying {TransactionCount} transactions", transactions.Length);
 
-            // algorithm outline:
-            // - apply transactions in order, i.e. as chronological on the sender server
-            // - if any has unmet dependencies, add it to a local wait list of unmet dep transactions
-            //   - "future" dependencies, where the key we depend on was changed after this transaction, are ignored,
-            //   because we either already processed the future version in a previous message, or it will come
-            //   in a later transaction in this message, and thus it must be met by the time this package ends.
-            //   - if the "future" itself has an unmet dependency, due to dependencies being transitively
-            //   closed we know that this trans must have the same unmet dependency.
-            //   - NB no unmet "past" dependency will be met by this package! due to chronological
-            //   application.
-            // - otherwise, apply it. all keys any application touches are kept in a local set.
-            //   - all changed events delayed till the end.
-            // - at the end, go through waitingStore once. for every trans there:
-            //   - new UnmetKeys is old UnmetKeys without keys touched by this application round.
-            //   - if new UnmetKeys is empty, apply the transaction, and add her touched keys to set!
-            //   - otherwise, append her to local wait list.
-            // - our local wait list becomes the new waiting store.
-            // - raise all delayed changed events. each in the correct freshness context, so that in case
-            // it makes any further changes, they are considered part of the original transaction.
-            //   - NB if we do not delay raising like this, "future" dependencies would be a problem. we do
-            //   not get the old versions of future-dep fields that this transaction really saw, so we
-            //   cannot present it a consistent view. we must wait at least until the future version of such
-            //   dependencies is fully applied.
-
             bool freshnessUtilized = _currTransaction.GetValueOrDefault()?.Changes != null;
             long freshnessOffset = 0;
             HashSet<string> equalKeys = null;
-            HashSet<string> touchedKeys = new();
-            List<WaitingTransaction> localWaits = null;
             List<(TransactionInfo, ChangedEventArgs)> waitingEvents = null;
+
+            var allTransactions = waitingStore == null ? transactions : transactions.Concat(waitingStore);
+            var skipTransactions = FindInapplicableTransactions(allTransactions);
+
+            List<CausalTransaction> newWaitingStore = null;
+            foreach (var trans in allTransactions)
+            {
+                if (skipTransactions.Contains(trans))
+                {
+                    if (newWaitingStore == null)
+                        newWaitingStore = new();
+                    newWaitingStore.Add(trans);
+                }
+                else
+                {
+                    applyTransaction(trans);
+                }
+            }
 
             void applyTransaction(CausalTransaction trans)
             {
@@ -452,8 +432,6 @@ namespace Shielded.Gossip.Backend
 
                 foreach (var item in trans.Changes)
                 {
-                    touchedKeys.Add(item.Key);
-
                     if (item.Data == null)
                         continue;
                     if (_local.TryGetValue(item.Key, out var curr) &&
@@ -493,38 +471,6 @@ namespace Shielded.Gossip.Backend
                     AddReceivedDependencies(context, trans.Dependencies);
             }
 
-            foreach (var trans in transactions)
-            {
-                if (trans.Dependencies?.Length > 0)
-                {
-                    var unmetKeys = trans.Dependencies.Where(d => !d.IsInFuture && !IsDependencyMet(d)).Select(d => d.Key).ToArray();
-                    if (unmetKeys.Length > 0)
-                    {
-                        if (localWaits == null)
-                            localWaits = new();
-                        localWaits.Add(new WaitingTransaction(trans, unmetKeys));
-                        continue;
-                    }
-                }
-                applyTransaction(trans);
-            }
-
-            if (waitingStore != null)
-            {
-                foreach (var waitingTrans in waitingStore)
-                {
-                    var newUnmetKeys = waitingTrans.UnmetKeys.Where(key => !touchedKeys.Contains(key)).ToArray();
-                    if (newUnmetKeys.Length == 0)
-                        applyTransaction(waitingTrans.Transaction);
-                    else
-                    {
-                        if (localWaits == null)
-                            localWaits = new();
-                        localWaits.Add(new WaitingTransaction(waitingTrans.Transaction, newUnmetKeys));
-                    }
-                }
-            }
-
             if (waitingEvents != null)
             {
                 var lastContext = _currTransaction.GetValueOrDefault();
@@ -551,8 +497,70 @@ namespace Shielded.Gossip.Backend
                 }
             }
 
-            return (equalKeys, localWaits?.ToArray());
+            return (equalKeys, newWaitingStore?.ToArray());
         });
+
+        /// <summary>
+        /// From a bunch of transactions, determine which will not be applicable due to unmet dependencies.
+        /// </summary>
+        private HashSet<CausalTransaction> FindInapplicableTransactions(IEnumerable<CausalTransaction> allTransactions)
+        {
+            // algorithm outline: we will build something like a directed graph of transactions. unmet dependencies are
+            // the egdes, going from the depending transaction to the transaction(s) which want(s) to change that key.
+            // if any edge ends up pointing outside of the graph, i.e. none of our transactions will change that key,
+            // we remove that transaction from the graph, and all others that are pointing to it, transitively.
+            // what remains are the transactions with satisfied dependencies, or which only depend on each other.
+
+            // IMPORTANT: this assumes that, for every key these transactions are changing, they will satisfy any
+            // dependencies on that key. i.e. there is no newer version of that key. this is true for gossip exchanges
+            // because servers always include their newest data in every next message.
+            // in case multiple transactions change the same key, only one has that newest data. we will assume if any of
+            // them fails (and it must be at least the newest that failed), none of the transactions that depend on that key
+            // will be satisfied. but, in fact, some could be, if they depend on an older version, not on the newest.
+            // checking that would require, in case a trans points to 2 or more, deserializing the values that each of those
+            // wishes to write, to determine which of them it "really" depends on. that would be too much trouble.
+
+            // all the keys we might be changing if we apply these transactions.
+            var changingKeys = new HashSet<string>();
+            // all the keys we unhappily depend on, with sets of transactions depending on them.
+            var depMap = new Dictionary<string, HashSet<CausalTransaction>>();
+            // final result - transactions that may not be applied.
+            var skipTrans = new HashSet<CausalTransaction>();
+
+            foreach (var trans in allTransactions)
+            {
+                foreach (var change in trans.Changes)
+                    changingKeys.Add(change.Key);
+                if (trans.Dependencies == null)
+                    continue;
+                foreach (var dep in trans.Dependencies)
+                {
+                    if (IsDependencyMet(dep))
+                        continue;
+                    if (!depMap.TryGetValue(dep.Key, out var list))
+                        depMap[dep.Key] = list = new();
+                    list.Add(trans);
+                }
+            }
+            var toProcess = new Queue<string>(depMap.Keys.Where(k => !changingKeys.Contains(k)));
+            while (toProcess.Count > 0)
+            {
+                var key = toProcess.Dequeue();
+                var depTransactions = depMap[key];
+                foreach (var trans in depTransactions)
+                {
+                    if (!skipTrans.Add(trans))
+                        continue;
+                    foreach (var change in trans.Changes)
+                    {
+                        if (!changingKeys.Remove(change.Key) || !depMap.ContainsKey(change.Key))
+                            continue;
+                        toProcess.Enqueue(change.Key);
+                    }
+                }
+            }
+            return skipTrans;
+        }
 
         /// <summary>
         /// Applies the given items as part of this transaction.
@@ -686,7 +694,7 @@ namespace Shielded.Gossip.Backend
         }
 
         private object GetReply(GossipMessage replyTo, long? ignoreUpToFreshness, HashSet<string> keysToIgnore,
-            WaitingTransaction[] waitingTransactions) => Shield.InTransaction<object>(() =>
+            CausalTransaction[] waitingTransactions) => Shield.InTransaction<object>(() =>
         {
             var server = replyTo.From;
             var hisNews = replyTo as NewGossip;
@@ -767,7 +775,7 @@ namespace Shielded.Gossip.Backend
             }, newStartEnumerator, packageSize, currentState != null, waitingTransactions);
         });
 
-        private GossipEnd PrepareEnd(NewGossip hisNews, int lastPackageSize, bool success, WaitingTransaction[] waitingTransactions)
+        private GossipEnd PrepareEnd(NewGossip hisNews, int lastPackageSize, bool success, CausalTransaction[] waitingTransactions)
         {
             var ourHash = _freshIndex.DatabaseHash;
             var maxFresh = _freshIndex.LastFreshness;
@@ -795,7 +803,7 @@ namespace Shielded.Gossip.Backend
         }
 
         private GossipReply PrepareReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator, int newPackageSize,
-            bool hasActiveState, WaitingTransaction[] waitingTransactions)
+            bool hasActiveState, CausalTransaction[] waitingTransactions)
         {
             // we try to keep the reply transaction read-only. but if we do not already have an active gossip state, then
             // we must set it consistently, to conflict with any possible concurrent reply or StartGossip process.
@@ -925,17 +933,19 @@ namespace Shielded.Gossip.Backend
             foreach (var dep in dependencies)
             {
                 var currItem = GetItem(dep.Key);
-                // CloseDependencies does not pull in dependencies that are deleted or expired. so, if we see a dep
-                // here to something deleted/expired, we know that the deletion happened later, so it's a future
-                // dependency. but also, since any future changes to keys of this transaction will not pull a dep on
-                // something deleted/expired, then we do not need this dependency at all.
+                // dependencies on something deleted/expired could prevent the receiver from ever applying this transaction.
+                // if the item is null, then obviously the dep would never be met. if the item is already Deleted/Expired,
+                // it might be pretty old, not in this package, and by the time we get to preparing that package it might be
+                // fully removed - thus, again it can never be met.
+                // if however, the item exists now, and is not Deleted/Expired, then if it were to become Deleted/Expired
+                // later, that will be a new change to it, and will cause it to be included as such in the immediately following
+                // message. so, as long as linger timeout is much larger than the gossip timeout, this is safe.
                 if (currItem == null || currItem.Deleted || currItem.Expired || currItem.Freshness == freshness)
                     continue;
                 yield return new Dependency
                 {
                     Key = dep.Key,
                     VersionData = dep.VersionData,
-                    IsInFuture = currItem.Freshness > freshness,
                 };
             }
         }
@@ -961,27 +971,51 @@ namespace Shielded.Gossip.Backend
         private void EnlistRead(string key, StoredItem readItem)
         {
             var trans = GetOrCreateTrans();
-            if (trans.Reads.Add(key) && readItem != null)
-                CloseDependencies(trans, readItem);
+            if (trans.Reads.Add(key) && readItem != null && !readItem.Deleted && !readItem.Expired)
+            {
+                trans.Dependencies[key] = readItem.GetOwnDependency();
+            }
         }
 
-        private void CloseDependencies(TransactionInfo trans, StoredItem readItem)
+        private void EnlistWrite<T>(StoredItem oldItem, StoredItem newItem, T value, VersionHash hashEffect) where T : IMergeableEx<T>
         {
-            var deps = readItem.Dependencies ?? (IEnumerable<StoredDependency>)readItem.OpenTransaction?.Dependencies?.Values;
+            var trans = GetOrCreateTrans();
+            newItem.OpenTransaction = trans;
+            if (trans.Changes == null)
+            {
+                trans.Changes = new Dictionary<string, StoredItem>();
+                _freshIndex.RegisterTransaction(trans);
+                if (!trans.DisableMailFx)
+                    Shield.SideEffect(() => DoDirectMail(trans));
+            }
+            trans.Reads.Add(newItem.Key);
+            trans.Changes[newItem.Key] = newItem;
+            if (newItem.Deleted || newItem.Expired)
+                trans.Dependencies.Remove(newItem.Key);
+            else
+                trans.Dependencies[newItem.Key] = new StoredDependency { Key = newItem.Key, Comparable = value.GetVersionOnly() };
+            if (oldItem != null && oldItem.OpenTransaction != trans)
+                CloseDependencies(trans, oldItem);
+            trans.HashEffect ^= hashEffect;
+            if (trans.ExtraTracking != null)
+                trans.ExtraTracking(newItem.Key);
+        }
+
+        // only used for fields we write into, since the old version gets lost - pull its dependencies into our transaction.
+        private void CloseDependencies(TransactionInfo trans, StoredItem oldItem)
+        {
+            var deps = (IEnumerable<StoredDependency>)oldItem.OpenTransaction?.Dependencies.Values ?? oldItem.Dependencies;
             if (deps == null)
                 return;
             foreach (var dep in deps)
             {
-                // don't create dependencies for things that no longer exist, or will not exist soon.
-                // and if in Changes, then Dependencies already contains the newest version for this key - the one we are writing.
-                if (!_local.TryGetValue(dep.Key, out var item) || item.Deleted || item.Expired || trans.Changes?.ContainsKey(dep.Key) == true)
+                // the "self" dependency was handled by EnlistWrite, and all Reads by it or EnlistRead.
+                if (dep.Key == oldItem.Key || trans.Reads.Contains(dep.Key))
                     continue;
-                if (dep.Key == readItem.Key)
-                {
-                    // if dep is referring to the readItem itself, then we know it is the most current it can be.
-                    trans.Dependencies[dep.Key] = dep;
-                }
-                else if (trans.Dependencies.TryGetValue(dep.Key, out var oldDep))
+                // don't create dependencies on things that no longer exist, or will not exist soon.
+                if (!_local.TryGetValue(dep.Key, out var item) || item.Deleted || item.Expired)
+                    continue;
+                if (trans.Dependencies.TryGetValue(dep.Key, out var oldDep))
                 {
                     // unpleasant, but important - if different keys are pulling in the same dependency, they can easily depend
                     // on different versions of it. we will depend on the merged version. typically, that will just be the greater one,
@@ -1019,7 +1053,9 @@ namespace Shielded.Gossip.Backend
                 return;
             foreach (var dep in receivedDeps)
             {
-                if (!_local.TryGetValue(dep.Key, out var item) || item.Deleted || item.Expired || trans.Changes?.ContainsKey(dep.Key) == true)
+                if (trans.Reads.Contains(dep.Key))
+                    continue;
+                if (!_local.TryGetValue(dep.Key, out var item) || item.Deleted || item.Expired)
                     continue;
                 if (trans.Dependencies.TryGetValue(dep.Key, out var oldDep))
                 {
@@ -1053,29 +1089,6 @@ namespace Shielded.Gossip.Backend
                 Key = depA.Key,
                 Comparable = a.MergeWith(b),
             };
-        }
-
-        private void EnlistWrite<T>(StoredItem oldItem, StoredItem newItem, T value, VersionHash hashEffect) where T : IMergeableEx<T>
-        {
-            var trans = GetOrCreateTrans();
-            newItem.OpenTransaction = trans;
-            if (trans.Changes == null)
-            {
-                trans.Changes = new Dictionary<string, StoredItem>();
-                _freshIndex.RegisterTransaction(trans);
-                if (!trans.DisableMailFx)
-                    Shield.SideEffect(() => DoDirectMail(trans));
-            }
-            trans.Changes[newItem.Key] = newItem;
-            if (newItem.Deleted || newItem.Expired)
-                trans.Dependencies.Remove(newItem.Key);
-            else
-                trans.Dependencies[newItem.Key] = new StoredDependency { Key = newItem.Key, Comparable = value.GetVersionOnly() };
-            // this pulls in the key's old dependencies.
-            EnlistRead(newItem.Key, oldItem);
-            trans.HashEffect ^= hashEffect;
-            if (trans.ExtraTracking != null)
-                trans.ExtraTracking(newItem.Key);
         }
 
         /// <summary>
