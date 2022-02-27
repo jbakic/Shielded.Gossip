@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,7 +18,7 @@ namespace Shielded.Gossip.Tests
     {
         protected override GossipBackend CreateBackend(ITransport transport, GossipConfiguration configuration)
         {
-            return new GossipBackend(transport, configuration);
+            return new GossipBackend(transport, new GossipConfiguration());
         }
 
         protected override TcpTransport CreateTransport(string ownId, IDictionary<string, IPEndPoint> servers)
@@ -39,13 +40,15 @@ namespace Shielded.Gossip.Tests
         {
             const int transactions = 10000;
             const int fieldCount = 500;
-            const int prime1 = 113;
-            const int prime2 = 149;
+            int lastTick;
 
             EventHandler<ChangedEventArgs> handler = (sender, args) =>
             {
                 var r = (Multiple<VecVersioned<Reference>>)args.NewValue;
-                CheckReferences((GossipBackend)sender, r);
+                var backend = (GossipBackend)sender;
+                CheckReferences(backend, r);
+
+                lastTick = Environment.TickCount;
             };
 
             foreach (var back in _backends.Values)
@@ -55,13 +58,19 @@ namespace Shielded.Gossip.Tests
                     back.Changed.Subscribe(handler));
             }
 
+            var rnd = new Random();
             ParallelEnumerable.Range(1, transactions).ForAll(i =>
             {
                 var backend = _backends.Values.Skip(i % 3).First();
-                var key1 = "key" + (i * prime1 % fieldCount);
-                var key2 = "key" + ((i + 1) * prime2 % fieldCount);
-                if (key1 == key2)
-                    key2 = "key" + (((i + 1) * prime2 + 1) % fieldCount);
+                int num1, num2;
+                lock (rnd)
+                {
+                    num1 = rnd.Next(fieldCount);
+                    num2 = rnd.Next(fieldCount);
+                    if (num2 == num1) num2 = (num2 + 1) % fieldCount;
+                }
+                var key1 = "key" + num1;
+                var key2 = "key" + num2;
                 Shield.InTransaction(() =>
                 {
                     var val1 = backend.TryGetVecVersioned<Reference>(key1);
@@ -72,8 +81,16 @@ namespace Shielded.Gossip.Tests
                     backend.SetHasVec(key2, new Reference { Key = key1, WitnessedVersion = val1.MergedClock }.Version(val2.MergedClock.Next(backend.Transport.OwnId)));
                 });
             });
+            lastTick = Environment.TickCount;
 
-            Thread.Sleep(1000);
+            // wait until some time passes since the last Changed event.
+            const int waitFor = 3000;
+            do
+            {
+                Thread.Sleep(Math.Max(0, waitFor - (Environment.TickCount - lastTick)));
+            } while (Environment.TickCount - lastTick < waitFor);
+
+            OnMessage(null, "Done waiting.");
             CheckProtocols();
 
             foreach (var backend in _backends.Values)

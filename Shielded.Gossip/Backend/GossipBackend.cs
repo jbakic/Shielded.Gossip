@@ -288,36 +288,50 @@ namespace Shielded.Gossip.Backend
             }
         }
 
-        private bool StartGossip(string server) => Shield.InTransaction(() =>
+        private bool StartGossip(string server)
         {
-            if (IsGossipActive(server))
+            var (msg, newState) = Shield.InTransaction(() =>
             {
-                _logger.LogDebug("Already gossiping with server {ServerId}.", server);
-                return false;
-            }
-            _logger.LogDebug("Starting gossip with server {ServerId}.", server);
-            var lastReceivedId = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedMsgId : null;
-            var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
-            var msg = new GossipStart
-            {
-                From = Transport.OwnId,
-                DatabaseHash = _freshIndex.DatabaseHash,
-                Transactions = toSend.Length == 0 ? null : toSend,
-                WindowStart = toSend.Length == 0 || newWindowStart.IsDone ? 0 : newWindowStart.Current.Freshness,
-                // GetPackage always returns the latest committed transaction, so WindowEnd is always:
-                WindowEnd = _freshIndex.LastFreshness,
-                ReplyToId = lastReceivedId,
-            };
-            _gossipStates[server] = new GossipState(null, null, msg.MessageId, newWindowStart, Configuration.AntiEntropyInitialSize,
-                MessageType.Start, oldState?.LastSentMsgType == MessageType.End ? (int?)oldState.LastSentMsgId : null);
-            Shield.SideEffect(() =>
-            {
-                _logger.LogDebug("Sending GossipStart {ServerId}/{MessageId} to {TargetServerId} with {TransactionCount} transactions, window: {WindowStart} - {WindowEnd}",
-                    msg.From, msg.MessageId, server, msg.Transactions?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
-                Transport.Send(server, msg, true);
+                if (IsGossipActive(server))
+                {
+                    _logger.LogDebug("Already gossiping with server {ServerId}.", server);
+                    return (null, null);
+                }
+                _logger.LogDebug("Starting gossip with server {ServerId}.", server);
+                var lastReceivedId = _gossipStates.TryGetValue(server, out var oldState) ? oldState.LastReceivedMsgId : null;
+                var toSend = GetPackage(Configuration.AntiEntropyInitialSize, default, null, null, null, out var newWindowStart);
+                var msg = new GossipStart
+                {
+                    From = Transport.OwnId,
+                    DatabaseHash = _freshIndex.DatabaseHash,
+                    Transactions = toSend.Length == 0 ? null : toSend,
+                    WindowStart = toSend.Length == 0 || newWindowStart.IsDone ? 0 : newWindowStart.Current.Freshness,
+                    // GetPackage always returns the latest committed transaction, so WindowEnd is always:
+                    WindowEnd = _freshIndex.LastFreshness,
+                    ReplyToId = lastReceivedId,
+                };
+                return (msg, new GossipState(null, null, msg.MessageId, newWindowStart, Configuration.AntiEntropyInitialSize,
+                    MessageType.Start, oldState?.LastSentMsgType == MessageType.End ? (int?)oldState.LastSentMsgId : null));
             });
-            return true;
-        });
+            if (msg == null)
+                return false;
+            return Shield.InTransaction(() =>
+            {
+                if (IsGossipActive(server))
+                {
+                    _logger.LogDebug("Already gossiping with server {ServerId}.", server);
+                    return false;
+                }
+                _gossipStates[server] = newState;
+                Shield.SideEffect(() =>
+                {
+                    _logger.LogDebug("Sending GossipStart {ServerId}/{MessageId} to {TargetServerId} with {TransactionCount} transactions, window: {WindowStart} - {WindowEnd}",
+                        msg.From, msg.MessageId, server, msg.Transactions?.Length ?? 0, msg.WindowStart, msg.WindowEnd);
+                    Transport.Send(server, msg, true);
+                });
+                return true;
+            });
+        }
 
         private object Transport_MessageHandler(object msg)
         {
@@ -347,11 +361,9 @@ namespace Shielded.Gossip.Backend
                         {
                             Shield.InTransaction(() =>
                             {
-                                // we must check LastSentMsgId of the gossip state, because we are only allowed to use the waitingStore if
-                                // this is the correct reply. ApplyTransaction optimization where it does not re-compare dependencies of
-                                // waitingStore transactions would otherwise be dangerous.
-                                var waitingStore = _gossipStates.TryGetValue(gossip.From, out var gossipState) &&
-                                    gossipState.LastSentMsgId == gossip.ReplyToId ? gossipState.WaitingStore : null;
+                                // ApplyTransactions assumes that the new message has the newest data. therefore, we must check the validity
+                                // of the new message if we are to use the old waitingStore.
+                                var waitingStore = ShouldReply(gossip, out var gossipState, out var _) ? gossipState?.WaitingStore : null;
                                 (keysToIgnore, newWaitingStore) = ApplyTransactions(waitingStore, pkg.Transactions);
                                 if (keysToIgnore != null)
                                 {
@@ -694,86 +706,132 @@ namespace Shielded.Gossip.Backend
         }
 
         private object GetReply(GossipMessage replyTo, long? ignoreUpToFreshness, HashSet<string> keysToIgnore,
-            CausalTransaction[] waitingTransactions) => Shield.InTransaction<object>(() =>
+            CausalTransaction[] waitingTransactions)
         {
-            var server = replyTo.From;
-            var hisNews = replyTo as NewGossip;
-            var hisReply = replyTo as GossipReply;
-            var hisEnd = replyTo as GossipEnd;
-
-            if (!ShouldReply(replyTo, out var currentState, out var sendKill))
+            // separated into two transactions. the first one tries to be read-only, and prepare a reply, if any. the second one
+            // will change the state. this is because enumerating the _freshIndex in a transaction that writes anything would
+            // cause conflicts very easily.
+            var (msg, changeState, newState, fx) = Shield.InTransaction<(object, bool, GossipState, Action)>(() =>
             {
-                if (sendKill)
+                var server = replyTo.From;
+                var hisNews = replyTo as NewGossip;
+                var hisReply = replyTo as GossipReply;
+                var hisEnd = replyTo as GossipEnd;
+
+                if (!ShouldReply(replyTo, out var currentState, out var sendKill))
                 {
-                    _logger.LogDebug("Preparing KillGossip reply to {ServerId}/{MessageId}", replyTo.From, replyTo.MessageId);
-                    return new KillGossip { From = Transport.OwnId, ReplyToId = replyTo.MessageId };
+                    if (sendKill)
+                    {
+                        Shield.SideEffect(() => _logger.LogDebug("Preparing KillGossip reply to {ServerId}/{MessageId}", replyTo.From, replyTo.MessageId));
+                        return (new KillGossip { From = Transport.OwnId, ReplyToId = replyTo.MessageId }, false, null, null);
+                    }
+                    else
+                    {
+                        return (null, false, null, null);
+                    }
                 }
-                return null;
-            }
 
-            var lastWindowStart = hisReply?.LastWindowStart ?? 0;
-            var lastWindowEnd = hisReply?.LastWindowEnd ?? hisEnd?.LastWindowEnd;
+                var lastWindowStart = hisReply?.LastWindowStart ?? 0;
+                var lastWindowEnd = hisReply?.LastWindowEnd ?? hisEnd?.LastWindowEnd;
 
-            var ownHash = _freshIndex.DatabaseHash;
-            if (ownHash == replyTo.DatabaseHash)
-            {
-                if (hisEnd != null)
+                var ownHash = _freshIndex.DatabaseHash;
+                if (ownHash == replyTo.DatabaseHash)
                 {
-                    _gossipStates.Remove(server);
-                    Shield.SideEffect(() => _logger.LogDebug("Hashes match, gossip completed successfully."));
-                    return null;
+                    // end messages are special - if we declare end, we want the state to reflect it immediately. if anything new happens, we should
+                    // be retried, because due to our currentState still being active, other threads will not know that we are planning to end the
+                    // exchange and they will not send anything about the new changes.
+                    if (hisEnd != null)
+                    {
+                        _gossipStates.Remove(server);
+                        Shield.SideEffect(() => _logger.LogDebug("Hashes match, gossip completed successfully."));
+                        return (null, false, null, null);
+                    }
+                    else
+                    {
+                        var msg = PrepareEnd(hisNews, currentState?.LastPackageSize ?? 0, true, waitingTransactions);
+                        return (msg, false, null, null);
+                    }
+                }
+
+                var packageSize = currentState == null
+                    ? Configuration.AntiEntropyInitialSize
+                    : Math.Max(Configuration.AntiEntropyInitialSize,
+                        Math.Min(Configuration.AntiEntropyItemsCutoff, currentState.LastPackageSize * 2));
+                var toSend = GetPackage(packageSize,
+                    lastWindowStart > 0 ? currentState.LastWindowStart : default, lastWindowEnd,
+                    ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
+
+                if (toSend.Length == 0)
+                {
+                    if (hisNews == null)
+                    {
+                        _gossipStates.Remove(server);
+                        Shield.SideEffect(() =>
+                            _logger.LogWarning("Hashes do not match, but nothing left to gossip about. Completed unsuccessfully."));
+                        return (null, false, null, null);
+                    }
+                    else if (hisNews.Transactions == null || hisNews.Transactions.Length == 0)
+                    {
+                        var msg = PrepareEnd(hisNews, currentState?.LastPackageSize ?? 0, false, waitingTransactions);
+                        return (msg, false, null, null);
+                    }
+                    else
+                    {
+                        var (msg, newState, fx) = PrepareReply(server, new GossipReply
+                        {
+                            From = Transport.OwnId,
+                            DatabaseHash = ownHash,
+                            Transactions = null,
+                            WindowStart = 0,
+                            WindowEnd = _freshIndex.LastFreshness,
+                            LastWindowStart = hisNews.WindowStart,
+                            LastWindowEnd = hisNews.WindowEnd,
+                            ReplyToId = replyTo.MessageId,
+                        }, newStartEnumerator, currentState?.LastPackageSize ?? 0, waitingTransactions);
+                        return (msg, true, newState, fx);
+                    }
                 }
                 else
-                    return PrepareEnd(hisNews, currentState?.LastPackageSize ?? 0, true, waitingTransactions);
-            }
-
-            var packageSize = currentState == null
-                ? Configuration.AntiEntropyInitialSize
-                : Math.Max(Configuration.AntiEntropyInitialSize,
-                    Math.Min(Configuration.AntiEntropyItemsCutoff, currentState.LastPackageSize * 2));
-            var toSend = GetPackage(packageSize,
-                lastWindowStart > 0 ? currentState.LastWindowStart : default, lastWindowEnd,
-                ignoreUpToFreshness, keysToIgnore, out var newStartEnumerator);
-
-            if (toSend.Length == 0)
-            {
-                if (hisNews == null)
                 {
-                    _gossipStates.Remove(server);
-                    Shield.SideEffect(() =>
-                        _logger.LogWarning("Hashes do not match, but nothing left to gossip about. Completed unsuccessfully."));
-                    return null;
-                }
-                else if (hisNews.Transactions == null || hisNews.Transactions.Length == 0)
-                    return PrepareEnd(hisNews, currentState?.LastPackageSize ?? 0, false, waitingTransactions);
-                else
-                    return PrepareReply(server, new GossipReply
+                    var windowStart = newStartEnumerator.IsDone ? 0 : newStartEnumerator.Current.Freshness;
+                    var windowEnd = _freshIndex.LastFreshness;
+                    var (msg, newState, fx) = PrepareReply(server, new GossipReply
                     {
                         From = Transport.OwnId,
                         DatabaseHash = ownHash,
-                        Transactions = null,
-                        WindowStart = 0,
-                        WindowEnd = _freshIndex.LastFreshness,
-                        LastWindowStart = hisNews.WindowStart,
-                        LastWindowEnd = hisNews.WindowEnd,
+                        Transactions = toSend,
+                        WindowStart = windowStart,
+                        WindowEnd = windowEnd,
+                        LastWindowStart = hisNews?.WindowStart ?? 0,
+                        LastWindowEnd = (hisNews?.WindowEnd ?? hisEnd?.WindowEnd).Value,
                         ReplyToId = replyTo.MessageId,
-                    }, newStartEnumerator, currentState?.LastPackageSize ?? 0, currentState != null, waitingTransactions);
-            }
+                    }, newStartEnumerator, packageSize, waitingTransactions);
+                    return (msg, true, newState, fx);
+                }
+            });
 
-            var windowStart = newStartEnumerator.IsDone ? 0 : newStartEnumerator.Current.Freshness;
-            var windowEnd = _freshIndex.LastFreshness;
-            return PrepareReply(server, new GossipReply
+            if (!changeState)
             {
-                From = Transport.OwnId,
-                DatabaseHash = ownHash,
-                Transactions = toSend,
-                WindowStart = windowStart,
-                WindowEnd = windowEnd,
-                LastWindowStart = hisNews?.WindowStart ?? 0,
-                LastWindowEnd = (hisNews?.WindowEnd ?? hisEnd?.WindowEnd).Value,
-                ReplyToId = replyTo.MessageId,
-            }, newStartEnumerator, packageSize, currentState != null, waitingTransactions);
-        });
+                if (fx != null)
+                    fx();
+                return msg;
+            }
+            var res = Shield.InTransaction(() =>
+            {
+                var server = replyTo.From;
+                // for safety and simplicity, just do the same check as the first transaction did.
+                if (!ShouldReply(replyTo, out var _, out bool _))
+                    return false;
+                if (newState != null)
+                    _gossipStates[server] = newState;
+                else
+                    _gossipStates.Remove(server);
+                if (fx != null)
+                    Shield.SideEffect(fx);
+                return true;
+            });
+            return res ? msg : null;
+        }
 
         private GossipEnd PrepareEnd(NewGossip hisNews, int lastPackageSize, bool success, CausalTransaction[] waitingTransactions)
         {
@@ -788,8 +846,6 @@ namespace Shielded.Gossip.Backend
                 LastWindowEnd = hisNews.WindowEnd,
                 ReplyToId = hisNews.MessageId,
             };
-            // if we're sending GossipEnd, we clear this in transaction, to make sure
-            // IsGossipActive is correct, and to guarantee that we actually are done.
             _gossipStates[hisNews.From] = new GossipState(hisNews.MessageId, waitingTransactions, endMsg.MessageId, default, lastPackageSize, MessageType.End);
             Shield.SideEffect(() =>
             {
@@ -802,28 +858,12 @@ namespace Shielded.Gossip.Backend
             return endMsg;
         }
 
-        private GossipReply PrepareReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator, int newPackageSize,
-            bool hasActiveState, CausalTransaction[] waitingTransactions)
+        private (GossipReply, GossipState, Action) PrepareReply(string server, GossipReply msg, ReverseTimeIndex.Enumerator startEnumerator, int newPackageSize,
+            CausalTransaction[] waitingTransactions)
         {
-            // we try to keep the reply transaction read-only. but if we do not already have an active gossip state, then
-            // we must set it consistently, to conflict with any possible concurrent reply or StartGossip process.
-            if (!hasActiveState)
-            {
-                _gossipStates[server] = new GossipState(
-                    msg.ReplyToId, waitingTransactions, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
-            }
-            else
-            {
-                Shield.SideEffect(() => Shield.InTransaction(() =>
-                {
-                    _gossipStates[server] = new GossipState(
-                        msg.ReplyToId, waitingTransactions, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply);
-                }));
-            }
-            Shield.SideEffect(() =>
-                _logger.LogDebug("Prepared GossipReply {ServerId}/{MessageId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
+            return (msg, new GossipState(msg.ReplyToId, waitingTransactions, msg.MessageId, startEnumerator, newPackageSize, MessageType.Reply),
+                () => _logger.LogDebug("Prepared GossipReply {ServerId}/{MessageId} with {ItemCount} items, window: {WindowStart} - {WindowEnd}",
                     msg.From, msg.MessageId, msg.Transactions?.Sum(t => t.Changes?.Length ?? 0) ?? 0, msg.WindowStart, msg.WindowEnd));
-            return msg;
         }
 
         private CausalTransaction[] GetPackage(int packageSize, ReverseTimeIndex.Enumerator lastWindowStart, long? lastWindowEnd,
@@ -1236,14 +1276,14 @@ namespace Shielded.Gossip.Backend
         /// this many milliseconds. If not null, must be > 0.</param>
         public VectorRelationship Set<T>(string key, T value, int? expireInMs = null) where T : IMergeableEx<T>
             => Shield.InTransaction(() =>
-        {
-            if (expireInMs <= 0)
-                throw new ArgumentOutOfRangeException(nameof(expireInMs));
-            var (res, ev) = SetInternal(key, new FieldInfo<T>(value, expireInMs));
-            if (ev != null)
-                Changed.Raise(this, ev);
-            return res.GetValueRelationship();
-        });
+            {
+                if (expireInMs <= 0)
+                    throw new ArgumentOutOfRangeException(nameof(expireInMs));
+                var (res, ev) = SetInternal(key, new FieldInfo<T>(value, expireInMs));
+                if (ev != null)
+                    Changed.Raise(this, ev);
+                return res.GetValueRelationship();
+            });
 
         private (ComplexRelationship, ChangedEventArgs) SetInternal<T>(string key, FieldInfo<T> value) where T : IMergeableEx<T>
         {
@@ -1356,8 +1396,8 @@ namespace Shielded.Gossip.Backend
         public IEnumerable<string> Reads => GetOrCreateTrans().Reads;
 
         /// <summary>
-        /// An enumerable of keys which are considered dependencies of this transaction - all the keys in <see cref="Reads"/>
-        /// plus any transitive dependencies of those keys.
+        /// An enumerable of keys which are considered dependencies of this transaction - all the read or changed keys
+        /// plus any old dependencies of the changed keys.
         /// </summary>
         public IEnumerable<string> Dependencies => GetOrCreateTrans().Dependencies.Keys;
 
